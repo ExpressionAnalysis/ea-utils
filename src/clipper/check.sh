@@ -2,8 +2,8 @@
 
 g++ fastq-clipper.c
 
-new=/opt/bin/fastq-clipper
-ok=./a.out
+ok=/opt/bin/fastq-clipper
+new=./a.out
 
 fastx_clipper -i test1.fq -a AGTCCCGTAC -o test1.fx.out
 
@@ -17,6 +17,7 @@ done
 	
 
 for n in test1 test2 test3 test4; do
+	echo $n
 	diff $n.new.out $n.ok.out
 	[[ -e $n.ok.err ]] && diff $n.new.err $n.ok.err
 done

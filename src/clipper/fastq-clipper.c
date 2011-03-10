@@ -24,7 +24,7 @@ int debug=0;
 int main (int argc, char **argv) {
 	char c;
 	bool eol;
-	int nmin = 1, nkeep = 15, xmax=-1, pctdiff = 20;
+	int nmin = 4, nkeep = 15, xmax=-1, pctdiff = 20;
 	char *outfile = NULL;
 	
 	int i;
