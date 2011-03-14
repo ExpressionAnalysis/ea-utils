@@ -8,11 +8,7 @@
 #include <math.h>
 
 /*
-
-Currently only works with adapter sequences that are at the END of read lines.
-
 See usage below.
-
 */
 
 #define MAX_ADAPTER_NUM 20
@@ -30,7 +26,7 @@ int main (int argc, char **argv) {
 	int i;
 	
 	char *a = NULL, *f = NULL;
-	while (	(c = getopt (argc, argv, "-hedbp:i:o:l:m:x::")) != -1) {
+	while (	(c = getopt (argc, argv, "hedbp:i:o:l:m:x::")) != -1) {
 		switch (c) {
 		case '\1': 
 			if (!f) 

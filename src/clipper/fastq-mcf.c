@@ -47,18 +47,20 @@ int debug=0;
 int main (int argc, char **argv) {
 	char c;
 	bool eol;
-	int nmin = 4, nkeep = 15;
+	int nmin = 1, nkeep = 15;
 	float minpct = 0.25;
 	int pctdiff = 20;
 	char *outfile = NULL;
 	int sampcnt = 20000;
 	int xmax = -1;
-	float scale = 2.5;
-	
+	float scale = 2.2;
+	int noclip=0;
+	char end = '\0';
+
 	int i;
 	
 	char *afil = NULL, *ifil = NULL;
-	while (	(c = getopt (argc, argv, "-hp:o:l:m::")) != -1) {
+	while (	(c = getopt (argc, argv, "-ndbehp:o:l:s:m:t:")) != -1) {
 		switch (c) {
 		case '\1': 
 			if (!afil) 
@@ -69,11 +71,18 @@ int main (int argc, char **argv) {
 				usage(stderr); return 1;
 			}
 			break;
+		case 't': minpct = atof(optarg); break;
 		case 'm': nmin = atoi(optarg); break;
 		case 'l': nkeep = atoi(optarg); break;
+		case 'p': pctdiff = atoi(optarg); break;
 		case 'h': usage(stdout); return 1; 
 		case 'o': outfile = optarg; break;
+		case 's': scale = atof(optarg); break;
 		case 'i': ifil = optarg; break;
+		case 'n': noclip = 1; break;
+		case 'd': debug = 1; break;
+		case 'b': end = 'b'; break;
+		case 'e': end = 'e'; break;
 		case '?': 
 		     if (strchr("lm", optopt))
 		       fprintf (stderr, "Option -%c requires an argument.\n", optopt);
@@ -115,6 +124,9 @@ int main (int argc, char **argv) {
 		}
 		fstat = stdout;
 	}
+	if (noclip) {
+		fstat = stdout;
+	}
 
 	struct ad ad[MAX_ADAPTER_NUM+1];
 	memset(ad, 0, sizeof(*ad)*(MAX_ADAPTER_NUM+1));
@@ -129,6 +141,8 @@ int main (int argc, char **argv) {
 		strncpy(ad[acnt].bscan, ad[acnt].seq+max(0,ad[acnt].nseq-SCANLEN), SCANLEN);
 		ad[acnt].escan[SCANLEN] = '\0';
 		ad[acnt].bscan[SCANLEN] = '\0';
+		//fprintf(stderr, "escan: %s, %s\n", ad[acnt].id, ad[acnt].escan);
+		//fprintf(stderr, "bscan: %s, %s\n", ad[acnt].id, ad[acnt].bscan);
 		++acnt;
 	}
 
@@ -150,7 +164,7 @@ int main (int argc, char **argv) {
 			for(a=0;a<acnt;++a) {
 				char *p;
 				if (p = strstr(s+10, ad[a].escan)) { 
-					printf("P: %d, SL: %d\n", p-s, ns);
+					if (debug) fprintf(stderr, "P: %d, SL: %d\n", p-s, ns);
 					++ad[a].ecnt;
 				}
 				if ((p = strstr(s, ad[a].bscan)) && ((p-s) < (ns/2))) { 
@@ -164,12 +178,12 @@ int main (int argc, char **argv) {
 
 	int a;
 	int athr = (int) ((float)nr * minpct) / 100;
-	fprintf(stderr, "Threshold used: %d out of %d\n", athr, nr);
+	fprintf(fstat, "Threshold used: %d out of %d\n", athr, nr);
 	int newc=0;
 	for(a=0;a<acnt;++a) {
 		if (ad[a].ecnt > athr || ad[a].bcnt > athr) {
 			int cnt;
-			printf("EC: %d, BC:%d\n", ad[a].ecnt, ad[a].bcnt);
+			if (debug) fprintf(stderr, "EC: %d, BC:%d\n", ad[a].ecnt, ad[a].bcnt);
 			if (ad[a].ecnt >= ad[a].bcnt) {
 				ad[a].end='e';
 				cnt = ad[a].ecnt;
@@ -178,18 +192,30 @@ int main (int argc, char **argv) {
 				cnt = ad[a].bcnt;
 			}
 			
-			ad[a].thr = max(1,(int) (-log(cnt / (float) nr)/log(scale)));
-			fprintf(stderr, "Adapter %s (%s): counted %d at the '%s' of sequences, clip set to %d", ad[a].id, ad[a].seq, cnt, ad[a].end == 'e' ? "end" : "start", ad[a].thr);
+			// user supplied end.... don't clip elsewhere
+			if (end && ad[a].end != end)
+				continue;
+
+			ad[a].thr = max(nmin,(int) (-log(cnt / (float) nr)/log(scale)));
+			fprintf(fstat, "Adapter %s (%s): counted %d at the '%s' of sequences, clip set to %d", ad[a].id, ad[a].seq, cnt, ad[a].end == 'e' ? "end" : "start", ad[a].thr);
 			if (abs((ad[a].bcnt-ad[a].ecnt)) < athr/4) {
-				fprintf(stderr, ", warning end was not reliable\n", ad[a].id, ad[a].seq);
+				fprintf(fstat, ", warning end was not reliable\n", ad[a].id, ad[a].seq);
 			} else {
-				fputc('\n', stderr);
+				fputc('\n', fstat);
 			}
 
 			ad[newc++]=ad[a];
 		}
 	}
 	acnt=newc;
+
+	if (acnt == 0) {
+		fprintf(fstat, "No adapters found, no clipping needed\n");
+		exit (1);
+	}
+
+	if (noclip)
+		exit(0);
 
 	struct fq fq;	
         memset(&fq, 0, sizeof(fq));
@@ -211,7 +237,8 @@ int main (int argc, char **argv) {
 		if (debug) fprintf(stderr, "seq: %s %d\n", fq.seq, fq.nseq);
 
 		bool skip = 0;
-		int bestscore = 999, bestoff = 0, bestlen = 0;
+		int bestscore_e = 999, bestoff_e = 0, bestlen_e = 0; 
+		int bestscore_b = 999, bestoff_b = 0, bestlen_b = 0; 
 
 		for (i =0; i < acnt; ++i) {
 			int nmatch = ad[i].thr;
@@ -228,29 +255,55 @@ int main (int argc, char **argv) {
 			if (debug)
 				fprintf(stderr, "adapter: %s, adlen: %d, nmatch: %d, mx: %d\n", ad[i].seq, ad[i].nseq, nmatch, mx);
 
+			if (ad[i].end == 'e') {
 			int off;
 			for (off = nmatch; off <= mx; ++off) {			// off is distance from tail of sequence
 				char *seqtail = fq.seq+fq.nseq-off; 		// search at tail
 				int ncmp = off<ad[i].nseq ? off : ad[i].nseq;
 				int mind = (pctdiff * ncmp) / 100;
 				int d = hd(ad[i].seq,seqtail,ncmp);		// # differences
-				if (debug)
-					fprintf(stderr, "tail: %s, bestoff: %d, off: %d, ncmp: %d, mind: %d, hd %d\n", seqtail, bestoff, off, ncmp, mind, d);
+				if (debug>1)
+					fprintf(stderr, "tail: %s, bestoff: %d, off: %d, ncmp: %d, mind: %d, hd %d\n", seqtail, bestoff_e, off, ncmp, mind, d);
 				if (d <= mind) {
 					int score = (d*d+1)/ncmp;
-					if (score <= bestscore) {			// better score?
-						bestscore = score;			// save max score
-						bestoff = off;				// offset at max
-						bestlen = ncmp;				// cmp length at max
+					if (score <= bestscore_e) {			// better score?
+						bestscore_e = score;			// save max score
+						bestoff_e = off;				// offset at max
+						bestlen_e = ncmp;				// cmp length at max
 					}
 					if (d == 0 && (ncmp == ad[i].nseq)) {
 						break;
 					}
 				}
 			}
+			} else {
+                        int off;
+                        for (off = nmatch; off <= mx; ++off) {                  // off is distance from start of sequence
+                                int ncmp = off<ad[i].nseq ? off : ad[i].nseq;	// number we are comparing
+                                char *matchtail = ad[i].seq+ad[i].nseq-ncmp;    // tail of adapter
+                                char *seqstart = fq.seq+off-ncmp;		// offset into sequence (if any)
+                                int mind = (pctdiff * ncmp) / 100;
+                                int d = hd(matchtail,seqstart,ncmp);             // # differences
+                                if (debug>1)
+                                        fprintf(stderr, "bestoff: %d, off: %d, ncmp: %d, mind: %d, hd %d\n", bestoff_e, off, ncmp, mind, d);
 
-			if (bestoff > 0) {
-				if ( (fq.nseq-bestoff) < nkeep) {
+                                if (d <= mind) {
+                                        int score = (d*d+1)/ncmp;
+                                        if (score <= bestscore_b) {                       // better score?
+                                                bestscore_b = score;                      // save max score
+                                                bestoff_b = off;                          // offset at max
+                                                bestlen_b = ncmp;                         // cmp length at max
+                                        }
+                                        if (d == 0 && (ncmp == ad[i].nseq)) {
+                                                break;
+                                        }
+                                }
+                        }
+			}
+
+			int totclip = bestoff_e + bestoff_b;
+			if (totclip > 0) {
+				if ( (fq.nseq-totclip) < nkeep) {
 					++ntooshort;
 					skip = 1;
 					break;
@@ -259,10 +312,20 @@ int main (int argc, char **argv) {
 		}	
 
 		if (!skip) {
-			if (bestoff > 0) {
+			if (bestoff_b > 0 || bestoff_e > 0) {
 				++ntrim;
-				fq.seq[fq.nseq-bestoff]='\0';
-				fq.qual[fq.nseq-bestoff]='\0';
+				if (bestoff_e > 0) {
+					if (debug) printf("trimming %d from end\n", bestoff_e);
+					fq.seq [fq.nseq -bestoff_e]='\0';
+					fq.qual[fq.nqual-bestoff_e]='\0';
+				}
+				if (bestoff_b > 0) {
+					if (debug) printf("trimming %d from begin\n", bestoff_b);
+					memmove(fq.seq ,fq.seq +bestoff_b,fq.nseq -=bestoff_b);
+					memmove(fq.qual,fq.qual+bestoff_b,fq.nqual-=bestoff_b);
+					fq.seq[fq.nseq]='\0';
+					fq.seq[fq.nqual]='\0';
+				}
 			}
 			fputs(fq.id,fout);
 			fputs(fq.seq,fout);
@@ -310,7 +373,7 @@ int read_fa(FILE *in, int rno, struct ad *fa) {
 	while (*p == ' ') {
 		++p;
 	}
-	strcpy(fa->id, p);
+	memmove(fa->id, p, strlen(p)+1);
 	fa->nid=strlen(fa->id);
 
 	// rna 2 dna
@@ -343,17 +406,20 @@ void usage(FILE *f) {
 	fprintf(f, 
 "usage: fastq-mcf [options] <adapters.fa> <reads.fq>\n"
 "\n"
-"Detects levels of adapter presence, computes likelihoods and \n"
-"locations of the adapters.   Removes the adapter sequences from\n"
-"the fastq file, and sends it to stdout.\n"
+"Detects levels of adapter presence, computes likelihoods and\n"
+"locations (start, end) of the adapters.   Removes the adapter\n"
+"sequences from the fastq file, and sends it to stdout.\n"
 "Stats go to stderr, unless -o is specified.\n"
 "\n"
 "Options:\n"
 "	-h	This help\n"
 "	-o FIL	Output file (stats to stdout)\n"
-"	-p N	Maximum difference percentage (20)\n"
-"	-m N	Minimum clip length (4)\n"
+"	-s N.N	Log scale for clip pct to threshold (2.5)\n"
+"	-t N	% threshold before clipping occurs (0.25)\n"
+"	-m N	Minimum clip length, overrides scaled auto (4)\n"
+"	-p N	Maximum adapter difference percentage (20)\n"
 "	-l N	Minimum remaining sequence length (15)\n"
+"	-n	Don't clip, just output what would be done\n"
 	);
 }
 
