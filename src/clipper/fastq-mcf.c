@@ -215,7 +215,7 @@ int main (int argc, char **argv) {
 	int a;
 	int athr = (int) ((float)nr * minpct) / 100;
 	fprintf(fstat, "Scale used: %g\n", scale);
-	fprintf(fstat, "Threshold used: %d out of %d\n", athr, nr);
+	fprintf(fstat, "Threshold used: %d out of %d\n", athr+1, nr);
 	int newc=0;
 	for(a=0;a<acnt;++a) {
 		if (ad[a].ecnt > athr || ad[a].bcnt > athr) {
