@@ -31,9 +31,10 @@ struct ad {
 	char *id;  int nid;  size_t naid; 
 	char *seq; int nseq; size_t naseq;
 	char escan[SCANLEN+1]; 			// scan sequence
-	char bscan[SCANLEN+1]; 			// scan sequence
 	int bcnt;			// number found at beginning
+	int bcntz;			// number found at beginning
 	int ecnt;			// number found at end
+	int ecntz;			// number found at end
 	char end;			// 'b' or 'e'
 	int thr;			// min-length for clip
 };
@@ -51,11 +52,16 @@ int main (int argc, char **argv) {
 	float minpct = 0.25;
 	int pctdiff = 20;
 	char *outfile = NULL;
-	int sampcnt = 20000;
+	int sampcnt = 40000;
 	int xmax = -1;
 	float scale = 2.2;
 	int noclip=0;
 	char end = '\0';
+
+	char *mate_in[5];
+	char *mate_out[5];
+	int mate_n=0;
+	int mate_oarg=0;
 
 	int i;
 	
@@ -67,6 +73,8 @@ int main (int argc, char **argv) {
 				afil = optarg; 
 			else if (!ifil) 
 				ifil = optarg; 
+			else if (mate_n<3) 
+				mate_in[mate_n++] = optarg; 
 			else {
 				usage(stderr); return 1;
 			}
@@ -76,7 +84,11 @@ int main (int argc, char **argv) {
 		case 'l': nkeep = atoi(optarg); break;
 		case 'p': pctdiff = atoi(optarg); break;
 		case 'h': usage(stdout); return 1; 
-		case 'o': outfile = optarg; break;
+		case 'o': if (!outfile) 
+				outfile = optarg; 
+			  else if (mate_oarg < 3) 
+				mate_out[mate_oarg++] = optarg;
+			  break;
 		case 's': scale = atof(optarg); break;
 		case 'i': ifil = optarg; break;
 		case 'n': noclip = 1; break;
@@ -95,6 +107,11 @@ int main (int argc, char **argv) {
 		     usage(stderr);
              	     return 1;
 		}
+	}
+
+	if (mate_n != mate_oarg) {
+		fprintf(stderr, "Error: number of input files must match number of '-o' output files.\n");
+		return 1;
 	}
 
 	if (argc < 3 || !afil || !ifil) {
@@ -128,6 +145,20 @@ int main (int argc, char **argv) {
 		fstat = stdout;
 	}
 
+	FILE *mate_fin[5];
+	FILE *mate_fout[5];
+
+	for (i=0;i<mate_n;++i) {
+		if (!(mate_fin[i]=fopen(mate_in[i], "r"))) {
+			fprintf(stderr, "Error opening file '%s': %s\n",mate_in[i], strerror(errno));
+			return 1;
+		}
+                if (!(mate_fout[i]=fopen(mate_out[i], "w"))) {
+                        fprintf(stderr, "Error opening output file '%s': %s\n",mate_out[i], strerror(errno));
+                        return 1;
+                }
+	}
+
 	struct ad ad[MAX_ADAPTER_NUM+1];
 	memset(ad, 0, sizeof(*ad)*(MAX_ADAPTER_NUM+1));
 
@@ -138,11 +169,8 @@ int main (int argc, char **argv) {
 			break;
 		// copy in truncated to max scan length
 		strncpy(ad[acnt].escan, ad[acnt].seq, SCANLEN);
-		strncpy(ad[acnt].bscan, ad[acnt].seq+max(0,ad[acnt].nseq-SCANLEN), SCANLEN);
 		ad[acnt].escan[SCANLEN] = '\0';
-		ad[acnt].bscan[SCANLEN] = '\0';
 		//fprintf(stderr, "escan: %s, %s\n", ad[acnt].id, ad[acnt].escan);
-		//fprintf(stderr, "bscan: %s, %s\n", ad[acnt].id, ad[acnt].bscan);
 		++acnt;
 	}
 
@@ -161,13 +189,21 @@ int main (int argc, char **argv) {
 			--ns;				// don't count newline for read len
 			++nr;
 			int a;
+			char buf[SCANLEN+1];
+			strncpy(buf, s, SCANLEN);
 			for(a=0;a<acnt;++a) {
 				char *p;
-				if (p = strstr(s+10, ad[a].escan)) { 
-					if (debug) fprintf(stderr, "P: %d, SL: %d\n", p-s, ns);
+				if (p = strstr(s, ad[a].escan)) { 
+			//		if (debug) fprintf(stderr, "END  : A: %s (%s), P: %d, SL: %d, Z:%d\n", ad[a].id, ad[a].escan, p-s, ns, (p-s) == ns-SCANLEN);
+					if ((p-s) == ns-SCANLEN) 
+						++ad[a].ecntz;
 					++ad[a].ecnt;
 				}
-				if ((p = strstr(s, ad[a].bscan)) && ((p-s) < (ns/2))) { 
+					
+				if ((p = strstr(ad[a].seq, buf))) { 
+			//		if (debug) fprintf(stderr, "BEGIN: A: %s (%s), P: %d, SL: %d, Z:%d\n", ad[a].id, ad[a].seq, p-ad[a].seq, ns, (p-ad[a].seq )  == ad[a].nseq-SCANLEN);
+					if (p-ad[a].seq == ad[a].nseq-SCANLEN) 
+						++ad[a].bcntz;
 					++ad[a].bcnt;
 				}
 			}
@@ -178,13 +214,15 @@ int main (int argc, char **argv) {
 
 	int a;
 	int athr = (int) ((float)nr * minpct) / 100;
+	fprintf(fstat, "Scale used: %g\n", scale);
 	fprintf(fstat, "Threshold used: %d out of %d\n", athr, nr);
 	int newc=0;
 	for(a=0;a<acnt;++a) {
 		if (ad[a].ecnt > athr || ad[a].bcnt > athr) {
 			int cnt;
-			if (debug) fprintf(stderr, "EC: %d, BC:%d\n", ad[a].ecnt, ad[a].bcnt);
-			if (ad[a].ecnt >= ad[a].bcnt) {
+			if (debug) fprintf(stderr, "EC: %d, BC:%d, ECZ: %d, BCZ: %d\n", ad[a].ecnt, ad[a].bcnt, ad[a].ecntz, ad[a].bcntz);
+			// heavily weighted toward start/end maches
+			if ((ad[a].ecnt + 10*ad[a].ecntz) >= (ad[a].bcnt + 10*ad[a].bcntz)) {
 				ad[a].end='e';
 				cnt = ad[a].ecnt;
 			} else {
@@ -219,6 +257,8 @@ int main (int argc, char **argv) {
 
 	struct fq fq;	
         memset(&fq, 0, sizeof(fq));
+	struct fq mate_fq[5];	
+        memset(&mate_fq, 0, 5*sizeof(fq));
 
 	int nrec=0;
 	int nerr=0;
@@ -229,6 +269,13 @@ int main (int argc, char **argv) {
 	int read_ok;
 	fseek(fin, 0, 0);
 	while (read_ok=read_fq(fin, nrec, &fq)) {
+		for (i=0;i<mate_n;++i) {
+			read_ok=read_fq(mate_fin[i], nrec, &mate_fq[i]);
+			if (!read_ok) {
+				fprintf(stderr, "# of rows in mate file '%s' doesn't match primary file, quitting!\n", mate_in[i]);
+				return 1;
+			}
+		}
 		++nrec;
 		if (read_ok < 0) continue;
 
@@ -324,7 +371,7 @@ int main (int argc, char **argv) {
 					memmove(fq.seq ,fq.seq +bestoff_b,fq.nseq -=bestoff_b);
 					memmove(fq.qual,fq.qual+bestoff_b,fq.nqual-=bestoff_b);
 					fq.seq[fq.nseq]='\0';
-					fq.seq[fq.nqual]='\0';
+					fq.qual[fq.nqual]='\0';
 				}
 			}
 			fputs(fq.id,fout);
@@ -333,6 +380,15 @@ int main (int argc, char **argv) {
 			fputs(fq.com,fout);
 			fputs(fq.qual,fout);
 			fputc('\n',fout);
+			for (i=0;i<mate_n;++i) {
+				fputs(mate_fq[i].id,mate_fout[i]);
+				fputs(mate_fq[i].seq,mate_fout[i]);
+				fputc('\n',mate_fout[i]);
+				fputs(mate_fq[i].com,mate_fout[i]);
+				fputs(mate_fq[i].qual,mate_fout[i]);
+				fputc('\n',mate_fout[i]);
+			}
+
 		}
 	}
 	fprintf(fstat, "Total reads: %d\n", nrec);
@@ -404,18 +460,20 @@ int read_fq(FILE *in, int rno, struct fq *fq) {
 
 void usage(FILE *f) {
 	fprintf(f, 
-"usage: fastq-mcf [options] <adapters.fa> <reads.fq>\n"
+"usage: fastq-mcf [options] <adapters.fa> <reads.fq> [mates1.fq ...] \n"
 "\n"
 "Detects levels of adapter presence, computes likelihoods and\n"
 "locations (start, end) of the adapters.   Removes the adapter\n"
-"sequences from the fastq file, and sends it to stdout.\n"
-"Stats go to stderr, unless -o is specified.\n"
+"sequences from the fastq file, and sends it to stdout.\n\n"
+"Stats go to stderr, unless -o is specified.\n\n"
+"If you specify multiple 'paired-end' inputs, then a -o option is\n" 
+"required for each.  IE: -o read1.clip.q -o read2.clip.fq\n"
 "\n"
 "Options:\n"
 "	-h	This help\n"
 "	-o FIL	Output file (stats to stdout)\n"
 "	-s N.N	Log scale for clip pct to threshold (2.5)\n"
-"	-t N	% threshold before clipping occurs (0.25)\n"
+"	-t N	%% occurance threshold before clipping (0.25)\n"
 "	-m N	Minimum clip length, overrides scaled auto (4)\n"
 "	-p N	Maximum adapter difference percentage (20)\n"
 "	-l N	Minimum remaining sequence length (15)\n"

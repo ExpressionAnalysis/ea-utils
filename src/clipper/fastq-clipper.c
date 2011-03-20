@@ -26,11 +26,11 @@ int main (int argc, char **argv) {
 	int i;
 	
 	char *a = NULL, *f = NULL;
-	while (	(c = getopt (argc, argv, "hedbp:i:o:l:m:x::")) != -1) {
+	while (	(c = getopt (argc, argv, "-hedbp:i:o:l:m:x::")) != -1) {
 		switch (c) {
 		case '\1': 
 			if (!f) 
-				f = optarg; 
+				f=optarg; 
 			else if (!a) 
 				a=optarg; 
 			else {
