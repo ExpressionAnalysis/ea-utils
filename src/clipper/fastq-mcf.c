@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <assert.h>
 #include <math.h>
+#include <limits.h>
 #include <sys/stat.h>
 
 /*
@@ -109,7 +110,7 @@ int main (int argc, char **argv) {
 		}
 	}
 
-	if (mate_n != mate_oarg) {
+	if (!(noclip && !outfile) && mate_n != mate_oarg) {
 		fprintf(stderr, "Error: number of input files must match number of '-o' output files.\n");
 		return 1;
 	}
@@ -133,12 +134,7 @@ int main (int argc, char **argv) {
 
 	FILE *fout = stdout;
 	FILE *fstat = stderr;
-	if (outfile) {
-		fout = fopen(outfile, "w"); 
-		if (!fout) {
-			fprintf(stderr, "Error opening output file '%s': %s",outfile, strerror(errno));
-			return 1;
-		}
+	if (outfile  && !noclip) {
 		fstat = stdout;
 	}
 	if (noclip) {
@@ -153,6 +149,7 @@ int main (int argc, char **argv) {
 			fprintf(stderr, "Error opening file '%s': %s\n",mate_in[i], strerror(errno));
 			return 1;
 		}
+		if (!noclip)
                 if (!(mate_fout[i]=fopen(mate_out[i], "w"))) {
                         fprintf(stderr, "Error opening output file '%s': %s\n",mate_out[i], strerror(errno));
                         return 1;
@@ -160,7 +157,7 @@ int main (int argc, char **argv) {
 	}
 
 	struct ad ad[MAX_ADAPTER_NUM+1];
-	memset(ad, 0, sizeof(*ad)*(MAX_ADAPTER_NUM+1));
+	memset(ad, 0, sizeof(ad));
 
 	int acnt=0, ok=0, rno=0;	// adapter count, ok flag, record number
 	while (acnt < MAX_ADAPTER_NUM && (ok = read_fa(ain, rno, &ad[acnt]))) {
@@ -249,11 +246,27 @@ int main (int argc, char **argv) {
 
 	if (acnt == 0) {
 		fprintf(fstat, "No adapters found, no clipping needed\n");
-		exit (1);
+		if (noclip) exit (1);			// for including in a test
+		exit(0);				// not really an error, check size of output files
 	}
 
 	if (noclip)
 		exit(0);
+
+        if (outfile) {
+                fout = fopen(outfile, "w");
+                if (!fout) {
+                        fprintf(stderr, "Error opening output file '%s': %s",outfile, strerror(errno));
+                        return 1;
+                }
+        }
+
+        for (i=0;i<mate_n;++i) {
+                if (!(mate_fout[i]=fopen(mate_out[i], "w"))) {
+                        fprintf(stderr, "Error opening output file '%s': %s\n",mate_out[i], strerror(errno));
+                        return 1;
+                }
+        }
 
 	struct fq fq;	
         memset(&fq, 0, sizeof(fq));
@@ -284,8 +297,8 @@ int main (int argc, char **argv) {
 		if (debug) fprintf(stderr, "seq: %s %d\n", fq.seq, fq.nseq);
 
 		bool skip = 0;
-		int bestscore_e = 999, bestoff_e = 0, bestlen_e = 0; 
-		int bestscore_b = 999, bestoff_b = 0, bestlen_b = 0; 
+		int bestscore_e = INT_MAX, bestoff_e = 0, bestlen_e = 0; 
+		int bestscore_b = INT_MAX, bestoff_b = 0, bestlen_b = 0; 
 
 		for (i =0; i < acnt; ++i) {
 			int nmatch = ad[i].thr;
@@ -312,7 +325,7 @@ int main (int argc, char **argv) {
 				if (debug>1)
 					fprintf(stderr, "tail: %s, bestoff: %d, off: %d, ncmp: %d, mind: %d, hd %d\n", seqtail, bestoff_e, off, ncmp, mind, d);
 				if (d <= mind) {
-					int score = (d*d+1)/ncmp;
+					int score = (1000*(d*d+1))/ncmp;
 					if (score <= bestscore_e) {			// better score?
 						bestscore_e = score;			// save max score
 						bestoff_e = off;				// offset at max
@@ -335,7 +348,7 @@ int main (int argc, char **argv) {
                                         fprintf(stderr, "bestoff: %d, off: %d, ncmp: %d, mind: %d, hd %d\n", bestoff_e, off, ncmp, mind, d);
 
                                 if (d <= mind) {
-                                        int score = (d*d+1)/ncmp;
+                                        int score = (1000*(d*d+1))/ncmp;
                                         if (score <= bestscore_b) {                       // better score?
                                                 bestscore_b = score;                      // save max score
                                                 bestoff_b = off;                          // offset at max

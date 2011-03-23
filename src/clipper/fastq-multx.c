@@ -464,6 +464,7 @@ int main (int argc, char **argv) {
 			ns=getline(&s, &na, fin[i]); --ns;
 			if (*s != '@')  {
 				fprintf(stderr, "%s doesn't appear to be a fastq file", in[i]);
+				return 1;
 			}
 			fseek(fin[i],0,0);
 		}
@@ -494,10 +495,12 @@ int main (int argc, char **argv) {
 					char *p=strchr(fq[i].id.s,verify);
 					if (!p) {
 						fprintf(stderr, "File %s is missing id verification char %c at line %d", in[i], verify, nrec*4+1);
+						return 1;
 					}
 					int l = p-fq[i].id.s;
 					if (strncmp(fq[0].id.s, fq[0].id.s, l)) {
 						fprintf(stderr, "File %s, id doesn't match file %s at line %d", in[0], in[i], nrec*4+1);
+						return 1;
 					}
 				}
 			}
@@ -527,6 +530,17 @@ int main (int argc, char **argv) {
 					bestmm=d;		// best match...ok
 					best=i;
 				}
+			}
+		}
+
+		if (trim) {
+			int len=bc[best].seq.n;
+			if (end =='b') {
+				fq[0].seq.s+=len;
+				fq[0].qual.s+=len;
+			} else {
+				fq[0].seq.s[fq[0].seq.n-len]='\0';
+				fq[0].qual.s[fq[0].qual.n-len]='\0';
 			}
 		}
 
