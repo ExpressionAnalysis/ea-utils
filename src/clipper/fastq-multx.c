@@ -18,7 +18,7 @@ See usage below.
 
 #define MAX_BARCODE_NUM 1000
 #define MAX_GROUP_NUM 50
-#define max(a,b) (a>b?a:b)
+#define max(a,b) ((a)>(b)?(a):(b))
 #define meminit(l) (memset(&l,0,sizeof(l)))
 #define fail(s) ((fprintf(stderr,"%s",s), exit(1)))
 #define endstr(e) (e=='e'?"end":e=='b'?"start":"n/a")
@@ -87,7 +87,7 @@ float pickmaxpct=0.10;
 int main (int argc, char **argv) {
 	char c;
 	bool trim = true;
-	int mismatch = 0;
+	int mismatch = 1;
 	char end = '\0';
 	char *in[6];
 	char *out[6];
@@ -96,11 +96,12 @@ int main (int argc, char **argv) {
 	const char* guide=NULL;		// use an indexed-read
 	const char* list=NULL;		// use a barcode master list
 	char verify='\0';
+	bool noexec = false;
 
 	int i;
 	bool omode = false;	
 	char *bfil = NULL;
-	while (	(c = getopt (argc, argv, "-dnbeov:m:g:l:")) != -1) {
+	while (	(c = getopt (argc, argv, "-dxnbeov:m:g:l:")) != -1) {
 		switch (c) {
 		case '\1': 
                        	if (omode) {
@@ -132,7 +133,8 @@ int main (int argc, char **argv) {
 			out[f_oarg++] = "n/a";
 			break;
 		case 'l': list = optarg; break;
-		case 'n': trim = false; break;
+		case 'x': trim = false; break;
+		case 'n': noexec = true; break;
 		case 'm': mismatch = atoi(optarg); break;
 		case 'd': debug = 1; break;
 		case '?': 
@@ -209,7 +211,7 @@ int main (int argc, char **argv) {
                 int sampcnt = 20000;
                 struct stat st;
 		int fmax[f_n]; int bestcnt=0, besti=-1;
-		meminit(fmax[f_n]);	
+		meminit(fmax);
 		for (i=0;i<f_n;++i) {
 			stat(in[i], &st);
 			fseek(fin[i], st.st_size/200 > sampcnt ? (st.st_size-sampcnt)/3 : 0, 0);
@@ -232,10 +234,9 @@ int main (int argc, char **argv) {
 					if (nr >= sampcnt) break;
 				}
 			}
-			
 			for (b=0;b<bgcnt;++b) {
 				// highest count
-				int hcnt = max(bcg[b].bcnt[i],bcg[b].ecnt[i]);
+				int hcnt = (int) (max(bcg[b].bcnt[i],bcg[b].ecnt[i]) * log(bcg[b].b.seq.n));
 				if (hcnt > fmax[i]) {
 					// highest count by file
 					fmax[i] = hcnt;
@@ -245,23 +246,26 @@ int main (int argc, char **argv) {
 					}
 				}
 			}
-			fseek(fin[i], 0, 0);
+//			printf("max %d %d\n", i, fmax[i]);
 		}
+//		printf("besti: %d\n", besti);
 		i=besti;
 
 		int gmax=0, gindex=-1, scnt = 0, ecnt=0;
 		int thresh = (int) (pickmaxpct*bestcnt); 
 		for (b=0;b<bgcnt;++b) {
-			int hcnt = max(bcg[b].bcnt[i],bcg[b].ecnt[i]);
-			if (hcnt > thresh) {
-				// increase group count
-				if (++bcg[b].gptr->tcnt > gmax) {
+			int hcnt = (int) (max(bcg[b].bcnt[i],bcg[b].ecnt[i]) * log(bcg[b].b.seq.n));
+//			printf("cnt: %s %s %d %d\n", bcg[b].b.id.s, bcg[b].b.seq.s, b, hcnt);
+			if (hcnt >= thresh) {
+				// increase group count	
+				bcg[b].gptr->tcnt += hcnt;
+				if (bcg[b].gptr->tcnt > gmax) {
 					gindex=bcg[b].gptr->i;
 					gmax=bcg[b].gptr->tcnt;
 				}
 			}
 		}
-		//printf("gmax: %d, gindex %d, %s\n", gmax, gindex, grs[gindex].id);
+//		printf("gmax: %d, gindex %d, %s, thresh: %d\n", gmax, gindex, grs[gindex].id, thresh);
 
                 for (b=0;b<bgcnt;++b) {
 			if (bcg[b].gptr->i == gindex) {
@@ -274,12 +278,27 @@ int main (int argc, char **argv) {
 		};
 		end = scnt >= ecnt ? 'b' : 'e';
 
-		
                 fprintf(stderr, "Using Barcode Group: %s on File: %s (%s)\n", grs[gindex].id, in[i], endstr(end));
                 for (b=0;b<bgcnt;++b) {
 			if (bcg[b].gptr->i == gindex) {
-				bc[bcnt++]=bcg[b].b;
+				int cnt = end == 'e' ? bcg[b].ecnt[i] : bcg[b].bcnt[i];
+				if (cnt > thresh / 2) {
+					bc[bcnt++]=bcg[b].b;
+				}
 			}
+		}
+
+		if (i != 0) {
+			// in[0] needs to be the guide file
+			FILE *f = fin[0];
+			char *n = in[0];
+			char *o = out[0];
+			fin[0]=fin[i];
+			in[0]=in[i];
+			out[0]=out[i];
+			fin[i]=f;
+			in[i]=n;
+			out[i]=o;
 		}
 	} else if (guide) {
 		// use the first file as a "guide file" ... and select a set of codes from that
@@ -363,7 +382,7 @@ int main (int argc, char **argv) {
 			if (nr > sampcnt)
 				break;
 		}
-		pickmax=(int)(pickmaxpct*pickmax);
+		pickmax=max(1,(int)(pickmaxpct*pickmax));
 		fprintf(stderr, "Threshold used: %d\n", pickmax);
 		twalk(picktab, pickbest);
 		fseek(fin[0],0,0);
@@ -400,12 +419,22 @@ int main (int argc, char **argv) {
 		exit(1);
 	}
 
+	if (noexec) {
+		int b;
+        	for (b=0;b<bcnt;++b) {
+			fprintf(stdout, "%s %s\n", bc[b].id.s, bc[b].seq.s);
+		}
+		exit(0);
+	}
+
 	bc[bcnt].id.s="unmatched";
 
 	int b;
         for (b=0;b<=bcnt;++b) {
 		for (i=0;i<f_n;++i) {
 			if (!strcasecmp(out[i],"n/a")) {
+				bc[b].out[i] = NULL;
+				bc[b].fout[i] = NULL;
 				continue;
 			}
 			char *p=strchr(out[i],'%');
@@ -461,11 +490,14 @@ int main (int argc, char **argv) {
 		// some basic validation of the file formats
 		for (i=0;i<f_n;++i) {
 			char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
+			fseek(fin[i], 0, 0);
 			ns=getline(&s, &na, fin[i]); --ns;
 			if (*s != '@')  {
 				fprintf(stderr, "%s doesn't appear to be a fastq file", in[i]);
 				return 1;
 			}
+			//fclose(fin[i]);
+			//fin[i] = fopen(in[i], "r"); 
 			fseek(fin[i],0,0);
 		}
 	}
@@ -536,8 +568,8 @@ int main (int argc, char **argv) {
 		if (trim) {
 			int len=bc[best].seq.n;
 			if (end =='b') {
-				fq[0].seq.s+=len;
-				fq[0].qual.s+=len;
+				memmove(fq[0].seq.s, fq[0].seq.s+len, fq[0].seq.n-len);
+				memmove(fq[0].qual.s, fq[0].qual.s+len, fq[0].seq.n-len);
 			} else {
 				fq[0].seq.s[fq[0].seq.n-len]='\0';
 				fq[0].qual.s[fq[0].qual.n-len]='\0';
@@ -565,13 +597,17 @@ int main (int argc, char **argv) {
 
 	int j;
 	printf("Id\tCount\tFile(s)\n");
+	int tot=0;
 	for (i=0;i<=bcnt;++i) {
 		printf("%s\t%d", bc[i].id.s, bc[i].cnt);
+		tot+=bc[i].cnt;
 		for (j=0;j<f_n;++j) {
-			printf("\t%s", bc[i].out[j]);
+			if (bc[i].out[j])
+				printf("\t%s", bc[i].out[j]);
 		}
 		printf("\n");
 	}
+	printf("total\t%d\n", tot);
 	return 0;
 }
 
@@ -592,7 +628,7 @@ void pickbest(const void *nodep, const VISIT which, const int depth)
 {
 	if (which==endorder || which==leaf) {
 		bnode *ent = *(bnode **) nodep;
-		// printf("here %s, %d, %d\n", ent->seq, ent->cnt, pickmax);
+		// printf("HERE!! %s, %d, %d\n", ent->seq, ent->cnt, pickmax);
 		// allow one sample to be as much as 1/10 another, possibly too conservative
 		if (ent->cnt > pickmax && bcnt < MAX_BARCODE_NUM) {
 			bc[bcnt].seq.s=ent->seq;
@@ -631,6 +667,7 @@ int read_fq(FILE *in, int rno, struct fq *fq) {
         read_line(in, fq->seq);
         read_line(in, fq->com);
         read_line(in, fq->qual);
+
         if (fq->qual.n <= 0)
                 return 0;
         if (fq->id.s[0] != '@' || fq->com.s[0] != '+' || fq->seq.n != fq->qual.n) {
@@ -639,7 +676,13 @@ int read_fq(FILE *in, int rno, struct fq *fq) {
         }
 	// chomp
 	fq->seq.s[--fq->seq.n] = '\0';
+	if (fq->seq.s[fq->seq.n-1] == '\r') {
+		fq->seq.s[--fq->seq.n] = '\0';
+	}
 	fq->qual.s[--fq->qual.n] = '\0';
+	if (fq->qual.s[fq->qual.n-1] == '\r') {
+		fq->qual.s[--fq->qual.n] = '\0';
+	}
         return 1;
 }
 
@@ -676,7 +719,8 @@ void usage(FILE *f) {
 "-l FIL		Determine barcodes from any read, using FIL as a master list\n"
 "-b		Force beginning of line\n"
 "-e		Force end of line\n"
-"-n		Don't trim barcodes before writing\n"
+"-x		Don't trim barcodes before writing\n"
+"-n		Don't execute, just print likely barcode list\n"
 "-v C		Verify that mated id's match up to character C ('/' for illumina)\n"
 "-m N		Allow up to N mismatches, as long as they are unique\n"
 	,f);
