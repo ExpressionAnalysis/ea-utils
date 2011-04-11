@@ -253,11 +253,15 @@ int main (int argc, char **argv) {
 				int li = fq[0].seq.n-besto+i;
 				int ri = besto-i-1;
 				if (fq[0].seq.s[li] == rc.seq.s[ri]) {
-					fq[0].qual.s[li] = max(fq[0].qual.s[li], rc.seq.s[ri]);
-					rc.qual.s[ri] = max(fq[0].qual.s[li], rc.seq.s[ri]);
+					fq[0].qual.s[li] = max(fq[0].qual.s[li], rc.qual.s[ri]);
+					rc.qual.s[ri] = max(fq[0].qual.s[li], rc.qual.s[ri]);
 				} else {
-					// on a mismatch, how to merge qualities... certainly it's not the best of both
-					// i would suspect that it's the *worst* of both
+					// use the better-quality read, although the qual should be downgraded due to the difference!
+					if (fq[0].qual.s[li] > rc.qual.s[ri]) {
+						rc.seq.s[ri] = fq[0].seq.s[li];
+					} else {
+						fq[0].seq.s[li] = rc.seq.s[ri];
+					}
 				}
 			}
 			fwrite(fq[0].seq.s,1,fq[0].seq.n-l,f);
