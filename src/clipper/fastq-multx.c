@@ -279,11 +279,11 @@ int main (int argc, char **argv) {
 		end = scnt >= ecnt ? 'b' : 'e';
 
 		// since this is a known good set, use a very low threshold, just to catch them all
-                fprintf(stderr, "Using Barcode Group: %s on File: %s (%s), Threshold %2.2f%%\n", grs[gindex].id, in[i], endstr(end), 100.0 * (float) ((float)thresh/8)/sampcnt);
+                fprintf(stderr, "Using Barcode Group: %s on File: %s (%s), Threshold %2.2f%%\n", grs[gindex].id, in[i], endstr(end), 100.0 * (float) ((float)thresh/6)/sampcnt);
                 for (b=0;b<bgcnt;++b) {
 			if (bcg[b].gptr->i == gindex) {
 				int cnt = end == 'e' ? bcg[b].ecnt[i] : bcg[b].bcnt[i];
-				if (cnt > thresh / 8) {
+				if (cnt > thresh / 6) {
 					bc[bcnt++]=bcg[b].b;
 				}
 			}

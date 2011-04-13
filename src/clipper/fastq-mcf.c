@@ -279,7 +279,7 @@ int main (int argc, char **argv) {
 	}
 
 	// look for severe base skew, and auto-trim ends based on it
-	int sktrim[2] = {0,0};
+	int sktrim[i_n][2]; meminit(sktrim);
 	for (i=0;i<i_n;++i) {
 		if (avgns[i] < 11) 			// reads of avg length < 11 ? barcode lane, skip it
 			continue;
@@ -311,8 +311,8 @@ int main (int argc, char **argv) {
 					tr=1;
 
 				if (tr) {
-					if (p == sktrim[e]) {				// adjacent, so increase trim
-						++sktrim[e];
+					if (p == sktrim[i][e]) {				// adjacent, so increase trim
+						++sktrim[i][e];
 					} else {
 						fprintf(fstat, "Within-read Skew: Position %d from the %s of reads is skewed!\n", p, e==0?"start":"end");
 					}
@@ -322,15 +322,27 @@ int main (int argc, char **argv) {
 	}
 
 	int e;
-	for (e=0;e<2;++e) {
-		if (sktrim[e] > 0) {
-			fprintf(fstat, "Trim '%s': %d\n",  e==0?"start":"end", sktrim[e]);
+	bool someskew = false;
+	for (i=0;i<i_n;++i) {
+		int totskew = sktrim[i][0] + sktrim[i][1];
+		if (maxns - totskew < nkeep) {
+			fprintf(fstat, "Warning: Too much skewing found, disabling skew clipping\n");
+			meminit(sktrim);
+			break;
+		}
+	}
+
+	for (i=0;i<i_n;++i) {
+		for (e=0;e<2;++e) {
+			if (sktrim[i][e] > 0) {
+				fprintf(fstat, "Trim '%s': %d from %s\n",  e==0?"start":"end", sktrim[i][e], ifil[i]);
+				someskew=true;
+			}
 		}
 	}
 
 	int athr = (int) ((float)sampcnt * minpct) / 100;
 	fprintf(fstat, "Threshold used: %d out of %d\n", athr+1, sampcnt);
-
 
 	int a;
 	int newc=0;
@@ -373,7 +385,7 @@ int main (int argc, char **argv) {
 	}
 	acnt=newc;
 
-	if (acnt == 0 && sktrim[0] == 0 && sktrim[1] == 0) {
+	if (acnt == 0 && !someskew) {
 		fprintf(fstat, "No adapters found and no skewing detected\n");
 		if (noclip) exit (1);			// for including in a test
 		exit(0);				// not really an error, check size of output files
@@ -435,8 +447,8 @@ int main (int argc, char **argv) {
 		bool skip = 0;							// skip whole record?
 		int f;	
 		for (f=0;f<i_n;++f) {
-		    dotrim[f][0] = sktrim[0];					// default, trim to detected skew levels
-		    dotrim[f][1] = sktrim[1];
+		    dotrim[f][0] = sktrim[f][0];					// default, trim to detected skew levels
+		    dotrim[f][1] = sktrim[f][1];
 
 		    int bestscore_e = INT_MAX, bestoff_e = 0, bestlen_e = 0; 
 		    int bestscore_b = INT_MAX, bestoff_b = 0, bestlen_b = 0; 
@@ -507,9 +519,18 @@ int main (int argc, char **argv) {
                             }
 			}
 		    }
-		    int totclip = bestoff_e + bestoff_b;
+		    // lengthen trim based on best level
+		    if (bestoff_b > dotrim[f][0])
+			dotrim[f][0]=bestoff_b;
+
+		    if (bestoff_e > dotrim[f][1])
+			dotrim[f][1]=bestoff_e;
+
+		    int totclip = dotrim[f][0] + dotrim[f][1];
+
 		    if (totclip > 0) {
 		    	if ( (fq[f].nseq-totclip) < nkeep) {
+					// skip all reads if one is truncated
 					skip = 1;
 					break;
 			}
@@ -529,12 +550,6 @@ int main (int argc, char **argv) {
 				ssqtrim[f][1]+=bestoff_e*bestoff_e;
 			}
 
-			// lengthen trim based on best level
-		    	if (bestoff_b > dotrim[f][0])
-				dotrim[f][0]=bestoff_b;
-
-		    	if (bestoff_e > dotrim[f][1])
-				dotrim[f][1]=bestoff_e;
 		    }
 		}
 
