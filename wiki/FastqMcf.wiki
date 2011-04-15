@@ -1,0 +1,55 @@
+#summary fastq-mcf sequence quality filter, clipping and processor.
+
+= Introduction =
+
+fastq-mcf attempts to:
+
+ * Detect & remove sequencing adapters and primers
+ * Detect limited skewing at the ends of reads and clip
+ * Detect poor quality at the ends of reads and clip
+ * Detect N's, and remove from ends
+ * Discard sequences that are too short after all of the above
+ * Keep multiple mate-reads in sync while doing all of the above
+
+= Usage =
+
+{{{
+
+usage: fastq-mcf [options] <adapters.fa> <reads.fq> [mates1.fq ...]
+
+Detects levels of adapter presence, computes likelihoods and
+locations (start, end) of the adapters.   Removes the adapter
+sequences from the fastq file, and sends it to stdout.
+
+Stats go to stderr, unless -o is specified.
+
+If you specify multiple 'paired-end' inputs, then a -o option is
+required for each.  IE: -o read1.clip.q -o read2.clip.fq
+
+Options:
+ -h This help
+ -o FIL Output file (stats to stdout)
+ -s N.N Log scale for clip pct to threshold (2.5)
+ -t N % occurance threshold before clipping (0.25)
+ -m N Minimum clip length, overrides scaled auto (1)
+ -p N Maximum adapter difference percentage (20)
+ -l N Minimum remaining sequence length (15)
+ -k N sKew percentage causing trimming (2)
+ -q N quality threshold causing trimming (10)
+ -f force output, even if not much will be done
+ -P N phred-scale (64)
+ -x N 'N' (Bad read) percentage causing trimming (10)
+ -R      Don't remove N's from the fronts/ends of reads
+ -n Don't clip, just output what would be done
+i
+Increasing the scale makes recognition-lengths longer, a scale
+of 100 will force full-length recognition.
+
+Set the skew (-k) or N-pct (-x) to 100 or 0 to turn it off
+}}}
+
+== Todo ==
+
+  * When discarding one read for being "too short", it has to discard both pairs.  It should only discard one.  For a sequencing run of normal quality this is not an issue.   It should, though, write "un-mated" reads (whose mate was skipped) to a separate file.  Typically, since these read mates were poor quality, it's not really useful... but it can be for diagnostics.
+
+ * Like any tool that does many things, fastq-mcf can be limited in it's ability to be flexible.   The biggest missing feature is for it to be able to read files that are formatted like it's stderr output, and use them to guide the process.   Given that feature, fastq-mcf would be complete.   
