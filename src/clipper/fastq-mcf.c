@@ -72,6 +72,10 @@ int main (int argc, char **argv) {
 	char end[MAX_FILES]; meminit(end);
 	float skewpct = 2; 			// any base at any position is less than skewpct of reads
 	float pctns = 5;				// any base that is more than 10% n's
+	bool rmns = 1;				// any base that is more than 10% n's
+	int qthr = 10;				// remove end of-read with quality < qthr
+	char phred = 64;
+	bool force = 0;
 
 	int i;
 	
@@ -82,7 +86,7 @@ int main (int argc, char **argv) {
 	int o_n = 0;
 	int e_n = 0;
 
-	while (	(c = getopt (argc, argv, "-ndbehp:o:l:s:m:t:k:x:")) != -1) {
+	while (	(c = getopt (argc, argv, "-nfRdbehp:o:l:s:m:t:k:x:P:q:")) != -1) {
 		switch (c) {
 		case '\1': 
 			if (!afil) 
@@ -96,9 +100,13 @@ int main (int argc, char **argv) {
 		case 't': minpct = atof(optarg); break;
 		case 'm': nmin = atoi(optarg); break;
 		case 'l': nkeep = atoi(optarg); break;
+		case 'f': force = true; break;
 		case 'k': skewpct = atof(optarg); break;
+		case 'q': qthr = atoi(optarg); break;
 		case 'x': pctns = atof(optarg); break;
+		case 'R': rmns = false; break;
 		case 'p': pctdiff = atoi(optarg); break;
+		case 'P': phred = (char) atoi(optarg); break;
 		case 'h': usage(stdout); return 1; 
 		case 'o': if (!o_n < MAX_FILES) 
 				ofil[o_n++] = optarg;
@@ -385,7 +393,7 @@ int main (int argc, char **argv) {
 	}
 	acnt=newc;
 
-	if (acnt == 0 && !someskew) {
+	if (acnt == 0 && !someskew && !force) {
 		fprintf(fstat, "No adapters found and no skewing detected\n");
 		if (noclip) exit (1);			// for including in a test
 		exit(0);				// not really an error, check size of output files
@@ -417,6 +425,8 @@ int main (int argc, char **argv) {
 	int cnttrim[MAX_FILES][2]; meminit(cnttrim);
 	double tottrim[MAX_FILES][2]; meminit(tottrim);
 	double ssqtrim[MAX_FILES][2]; meminit(ssqtrim);
+	int trimql[MAX_FILES]; meminit(trimql);
+	int trimqb[MAX_FILES]; meminit(trimqb);
 
 	int nbtrim=0;
 	int read_ok;
@@ -449,6 +459,32 @@ int main (int argc, char **argv) {
 		for (f=0;f<i_n;++f) {
 		    dotrim[f][0] = sktrim[f][0];					// default, trim to detected skew levels
 		    dotrim[f][1] = sktrim[f][1];
+
+		    if (rmns) {
+			    for (i=dotrim[f][0];i<fq[f].nseq/3;++i) {
+			    		// trim N's from the front
+					if (fq[f].seq[i] == 'N') 
+						dotrim[f][0] = i + 1;
+			    }
+			    for (i=dotrim[f][1];i<fq[f].nseq/3;++i) {
+			    		// trim N's from the end
+					if (fq[f].seq[fq[f].nseq-i-1] == 'N')
+						dotrim[f][1] = i + 1;
+			    }
+		    }
+
+                    if (qthr > 0) {
+			    bool istrimq = false;
+                            for (i=dotrim[f][1];i<fq[f].nseq/2;++i) {
+                                        // trim N's from the end
+                                        if ((fq[f].qual[fq[f].nseq-i-1]-phred) < qthr) {
+						++trimqb[f];
+						istrimq = true;
+                                                dotrim[f][1] = i + 1;
+					}
+                            }
+			    if (istrimq) ++trimql[f];
+                    }
 
 		    int bestscore_e = INT_MAX, bestoff_e = 0, bestlen_e = 0; 
 		    int bestscore_b = INT_MAX, bestoff_b = 0, bestlen_b = 0; 
@@ -530,11 +566,13 @@ int main (int argc, char **argv) {
 
 		    if (totclip > 0) {
 		    	if ( (fq[f].nseq-totclip) < nkeep) {
-					// skip all reads if one is truncated
+					// skip all reads if one is severely truncated ??
+					// maybe not... ?
 					skip = 1;
 					break;
 			}
 
+			// count number of adapters clipped, not the number of rows trimmed
 			if (bestoff_b > 0 || bestoff_e > 0) 
 				++ntrim[f];
 
@@ -589,12 +627,18 @@ int main (int argc, char **argv) {
 				fprintf(fstat, "Clipped '%s' reads: Count: %d, Mean: %.2f, Sd: %.2f\n", e==0?"start":"end", cnttrim[f][e], (double) tottrim[f][e] / cnttrim[f][e], stdev(cnttrim[f][e], tottrim[f][e], ssqtrim[f][e]));
 			}
 		}
+		if (trimql[f] > 0) {
+				fprintf(fstat, "Trimmed %d reads by an average of %.2f bases on quality < %d\n", trimql[f], (float) trimqb[f]/trimql[f], qthr);
+		}
 	} else
 	for (f=0;f<i_n;++f) {
 		for (e=0;e<2;++e) {
 			if (cnttrim[f][e]>0) {
 				fprintf(fstat, "Clipped '%s' reads (%s): Count %d, Mean: %.2f, Sd: %.2f\n", e==0?"start":"end", ifil[f], cnttrim[f][e], (double) tottrim[f][e] / cnttrim[f][e], stdev(cnttrim[f][e], tottrim[f][e], ssqtrim[f][e]));
 			}
+		}
+		if (trimql[f] > 0) {
+				fprintf(fstat, "Trimmed %d reads (%s) by an average of %.2f bases on quality < %d\n", trimql[f], ifil[f], (float) trimqb[f]/trimql[f], qthr);
 		}
 	}
 	if (nerr > 0) {
@@ -688,7 +732,11 @@ void usage(FILE *f, char *msg) {
 "	-p N	Maximum adapter difference percentage (20)\n"
 "	-l N	Minimum remaining sequence length (15)\n"
 "	-k N	sKew percentage causing trimming (2)\n"
+"	-q N	quality threshold causing trimming (10)\n"
+"	-f	force output, even if not much will be done\n"
+"	-P N	phred-scale (64)\n"
 "	-x N	'N' (Bad read) percentage causing trimming (10)\n"
+"	-R      Don't remove N's from the fronts/ends of reads\n"
 "	-n	Don't clip, just output what would be done\ni"
 "\n"
 "Increasing the scale makes recognition-lengths longer, a scale\n"
