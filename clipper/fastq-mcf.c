@@ -540,6 +540,7 @@ int main (int argc, char **argv) {
 				if (debug>1)
 					fprintf(stderr, "tail: %s, bestoff: %d, off: %d, ncmp: %d, mind: %d, hd %d\n", seqtail, bestoff_e, off, ncmp, mind, d);
 				if (d <= mind) {
+					// squared-distance over length
 					int score = (1000*(d*d+1))/ncmp;
 					if (score <= bestscore_e) {			// better score?
 						bestscore_e = score;			// save max score
