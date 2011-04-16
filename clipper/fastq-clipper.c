@@ -187,6 +187,7 @@ int main (int argc, char **argv) {
 				int d = hd(adapters[i],seqtail,ncmp);		// # differences
 				if (debug)
 					fprintf(stderr, "tail: %s, bestoff: %d, off: %d, ncmp: %d, mind: %d, hd %d\n", seqtail, bestoff, off, ncmp, mind, d);
+				// calc squared distance over length score
 				if (d <= mind) {
 					int score = (d*d+1)/ncmp;
 					if (score <= bestscore) {			// better score?
