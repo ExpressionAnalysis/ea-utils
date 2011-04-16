@@ -71,12 +71,12 @@ int main (int argc, char **argv) {
 	char *orep=NULL;
 	int out_n = 0;
 	int in_n = 0;
-	int threads = 1;
+	int threads = 1;				// not really necessary
 	char verify='\0';
 
 	int i;
 	int mino = 6;
-	int pctdiff = 20;			// maximum differences should be about the error rate at tail end
+	int pctdiff = 20;				// this number tested well on exome data... tweak for best results
 	bool omode = false;	
 	char *bfil = NULL;
 
@@ -241,7 +241,9 @@ int main (int argc, char **argv) {
                         int d;
                         d=hd(fq[0].seq.s+fq[0].seq.n-i, rc.seq.s, i);
 			if (d <= mind) {
-				int score = (1000*(d*d+1))/i;
+				// squared-distance over length, probably can be proven better (like pearson's)
+				// by someone who needs to write a paper
+				int score = (1000*(d*d+1))/i;	
 				if (score < bestscore) {
 					bestscore=score;
 					besto=i;
