@@ -179,24 +179,24 @@ int main (int argc, char **argv) {
                 }
 	}
 
-	if (debug) fprintf(stderr, "here 3 %d\n", fin[2]);
 /*
+THIS BREAKS THINGS FOR SOME REASON .. steps on fin[i]?
+	if (debug) fprintf(stderr, "here 3 %d\n", fin[2]);
+
 	// some basic validation of the file formats
 	{
 	char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
 	for (i=0;i<in_n;++i) {
-	if (debug) fprintf(stderr, "here 3b %d - %d\n", i, fin[i]);
-		ns=getline(&s, &na, fin[i]); --ns;
-	if (debug) fprintf(stderr, "here 3x %d\n", fin[2]);
+		ns=getline(&s, &na, fin[i]); 
 		if (*s != '@')  {
 			fprintf(stderr, "%s doesn't appear to be a fastq file", in[i]);
 			return 1;
 		}
 		fseek(fin[i],0,0);
-	if (debug) fprintf(stderr, "here 3z %d\n", fin[2]);
 	}
 	}
 */
+
 	struct fq fq[3];	
         meminit(fq);
 
