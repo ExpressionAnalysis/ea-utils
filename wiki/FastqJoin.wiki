@@ -1,0 +1,33 @@
+#summary fastq-join : merge overlapping paired-end reads
+
+= Introduction =
+
+fas
+
+This uses our sqr(distance)/len for anchored alignment quality algorithm.  It's a good measure of anchored alignment quality, akin (in my mind) to squared-deviation for means.  
+
+= Details =
+
+{{{
+Usage: fastq-join [options] <read1.fq> <read2.fq> [mate.fq] -o <read.%.fq>
+
+Joins two paired-end reads on the overlapping ends.
+
+Options:
+
+-o FIL          See 'Output' below
+-v C            Verifies that the 2 files probe id's match up to char C
+                  use '/' for Illumina reads
+-p N            N-percent maximum difference (.20)
+-m N            N-minimum overlap (6)
+-r FIL          Verbose stitch length report
+
+Output:
+
+  You can supply 3 -o arguments, for un1, un2, join files, or one
+argument as a file name template.  The suffix 'un1, un2, or join' is
+appended to the file, or they replace a %-character if present.
+
+  If a 'mate' input file is present (barcode read), then the files
+'un3' and 'join2' are also created.
+}}}
