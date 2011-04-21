@@ -177,6 +177,7 @@ int main (int argc, char **argv) {
 
 	if (debug) fprintf(stderr, "here 3 %d\n", fin[2]);
 
+/*
 	// some basic validation of the file formats
 	{
 		char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
@@ -190,6 +191,7 @@ int main (int argc, char **argv) {
 		}
 		free(s);
 	}
+*/
 
 	struct fq fq[3];	
         meminit(fq);
