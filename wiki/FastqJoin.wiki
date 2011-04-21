@@ -26,7 +26,6 @@ appended to the file, or they replace a %-character if present.
 'un3' and 'join2' are also created.
 }}}
 
-= Etc
- =
+== Etc ==
 
 This uses our sqr(distance)/len for anchored alignment quality algorithm.  It's a good measure of anchored alignment quality, akin (in my mind) to squared-deviation for means.  
