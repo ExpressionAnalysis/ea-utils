@@ -1,0 +1,5 @@
+#!/bin/sh
+#g++ -g fastq-mcf.c -o fastq-mcf.ex && ./fastq-mcf.ex $*
+cmd=$1
+shift
+g++ -g fastq-$cmd.c -o fastq-$cmd.ex && gdb --eval-command=run --args ./fastq-$cmd.ex $*
