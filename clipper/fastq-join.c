@@ -177,21 +177,17 @@ int main (int argc, char **argv) {
 
 	if (debug) fprintf(stderr, "here 3 %d\n", fin[2]);
 
-/*
 	// some basic validation of the file formats
 	{
-		char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
 		for (i=0;i<in_n;++i) {
-			ns=getline(&s, &na, fin[i]); 
-			if (s && *s != '@')  {
+			char c=getc(fin[i]);
+			if (c != '@')  {
 				fprintf(stderr, "%s doesn't appear to be a fastq file", in[i]);
 				return 1;
 			}
-			fseek(fin[i],0,0);
+			ungetc(c, fin[i]);
 		}
-		free(s);
 	}
-*/
 
 	struct fq fq[3];	
         meminit(fq);
