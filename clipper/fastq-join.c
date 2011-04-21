@@ -129,19 +129,14 @@ int main (int argc, char **argv) {
 		return 1;
 	}
 
-	if (debug) fprintf(stderr, "here 1\n");
-
 	FILE *fin[2];
 	for (i = 0; i < in_n; ++i) {
 		fin[i] = fopen(in[i], "r"); 
-	if (debug) fprintf(stderr, "here 1b %d - %d\n", i, fin[i]);
 		if (!fin[i]) {
 			fprintf(stderr, "Error opening file '%s': %s\n",in[i], strerror(errno));
 			return 1;
 		}
 	}
-
-	if (debug) fprintf(stderr, "here 2 %d\n", fin[2]);
 
 	char *suffix[5]={"un1", "un2", "join", "un3", "join2"};
         FILE *fout[5]; meminit(fout);
@@ -179,23 +174,22 @@ int main (int argc, char **argv) {
                 }
 	}
 
-/*
-THIS BREAKS THINGS FOR SOME REASON .. steps on fin[i]?
+
 	if (debug) fprintf(stderr, "here 3 %d\n", fin[2]);
 
 	// some basic validation of the file formats
 	{
-	char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
-	for (i=0;i<in_n;++i) {
-		ns=getline(&s, &na, fin[i]); 
-		if (*s != '@')  {
-			fprintf(stderr, "%s doesn't appear to be a fastq file", in[i]);
-			return 1;
+		char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
+		for (i=0;i<in_n;++i) {
+			ns=getline(&s, &na, fin[i]); 
+			if (s && *s != '@')  {
+				fprintf(stderr, "%s doesn't appear to be a fastq file", in[i]);
+				return 1;
+			}
+			fseek(fin[i],0,0);
 		}
-		fseek(fin[i],0,0);
+		free(s);
 	}
-	}
-*/
 
 	struct fq fq[3];	
         meminit(fq);
@@ -210,8 +204,6 @@ THIS BREAKS THINGS FOR SOME REASON .. steps on fin[i]?
 
 	struct fq rc;
 	meminit(rc);
-
-	if (debug) fprintf(stderr, "here 4\n");
 
 	// read in 1 record from each file
 	while (read_ok=read_fq(fin[0], nrec, &fq[0])) {
@@ -238,7 +230,6 @@ THIS BREAKS THINGS FOR SOME REASON .. steps on fin[i]?
 		}
 		}
 
-	if (debug) fprintf(stderr, "here 5\n");
 		++nrec;
 		if (read_ok < 0) continue;
 
@@ -289,7 +280,7 @@ THIS BREAKS THINGS FOR SOME REASON .. steps on fin[i]?
 			fputs(fq[0].id.s,f);
 			for (i = 0; i < besto; ++i ) {
 				int li = fq[0].seq.n-besto+i;
-				int ri = besto-i-1;
+				int ri = i;
 				if (fq[0].seq.s[li] == rc.seq.s[ri]) {
 					fq[0].qual.s[li] = max(fq[0].qual.s[li], rc.qual.s[ri]);
 					rc.qual.s[ri] = max(fq[0].qual.s[li], rc.qual.s[ri]);
