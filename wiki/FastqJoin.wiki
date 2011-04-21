@@ -1,12 +1,6 @@
 #summary fastq-join : merge overlapping paired-end reads
 
-= Introduction =
-
-fas
-
-This uses our sqr(distance)/len for anchored alignment quality algorithm.  It's a good measure of anchored alignment quality, akin (in my mind) to squared-deviation for means.  
-
-= Details =
+= Usage =
 
 {{{
 Usage: fastq-join [options] <read1.fq> <read2.fq> [mate.fq] -o <read.%.fq>
@@ -31,3 +25,8 @@ appended to the file, or they replace a %-character if present.
   If a 'mate' input file is present (barcode read), then the files
 'un3' and 'join2' are also created.
 }}}
+
+= Etc
+ =
+
+This uses our sqr(distance)/len for anchored alignment quality algorithm.  It's a good measure of anchored alignment quality, akin (in my mind) to squared-deviation for means.  
