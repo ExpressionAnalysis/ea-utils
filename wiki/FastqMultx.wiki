@@ -7,29 +7,28 @@ The ides behind this is to reduce the amount of "piping" going on in a pipeline.
 = Usage =
 
 {{{
-Usage: fastq-multx [-g|-l] <barcode.fil> <read1.fq> -o r1.%.fq [read2.fq -o r2.%.fq] ...
+Usage: fastq-multx [-g|-l] <barcodes.fil> <read1.fq> -o r1.%.fq [mate.fq -o r2.%.fq] ...
 
 Output files must contain a '%' sign which is replaced with the barcode id in the barcodes file.
 
-If the first file output is 'n/a' or '/dev/null', it is not written.
-
-Basic barcode files look like this:
+Barcodes file looks like this:
 
 <id1> <sequence1>
 <id2> <sequence2> ...
 
-The default is to guess the -bol or -eol based on some quick stats.
+Default is to guess the -bol or -eol based on clear stats.
 
-If -g is used, and the supplied file has reads of average length < 10, then it is assumed to
-be an "index read", and frequently occuring sequences are calculated.
+If -g is used, then it's parameter is an index lane, and frequently occuring sequences are used.
 
-If -l is used then all barcodes in that file are tried, and the *group* with the most matches is chosen.
+If -l is used then all barcodes in the file are tried, and the *group* with the *most* matches is chosen.
 
-Grouped barcode files looks like this:
+Grouped barcodes file looks like this:
 
-<id1> <sequence1> <protocol1>
-<id2> <sequence2> <protocol1>
-<id2> <sequence2> <protocol2>...
+<id1> <sequence1> <group1>
+<id1> <sequence1> <group1>
+<id2> <sequence2> <group2>...
+
+Mated reads, if supplied, are kept in-sync
 
 Options:
 
