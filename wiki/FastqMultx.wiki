@@ -2,7 +2,7 @@
 
 = Introduction =
 
-The ides behind this is to reduce the amount of "piping" going on in a pipeline.   A lot of time, disk space and nail-chewing is spent keeping files in sync, figuring out what barcodes are on what samples, etc.  The goal of this program is to make it easier to demultiplex possibly paired-end sequences.
+The ides behind this is to reduce the amount of "piping" going on in a pipeline.   A lot of time, disk space and nail-chewing is spent keeping files in sync, figuring out what barcodes are on what samples, etc.  The goal of this program is to make it easier to demultiplex possibly paired-end sequences, and also to allow the "guessing" of barcode sets based on master lists of barcoding protocols (fluidigm, truseq, etc.)
 
 = Usage =
 
