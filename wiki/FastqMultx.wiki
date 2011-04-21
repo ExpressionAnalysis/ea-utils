@@ -1,0 +1,46 @@
+#summary One-sentence summary of this page.
+
+= Introduction =
+
+Add your content here.
+
+
+= Usage =
+
+{{{
+Usage: fastq-multx <barcodes.fil> <read1.fq> -o r1.%.fq [read2.fq -o r2.%.fq] ...
+
+Output files must contain a '%' sign which is replaced with the barcode id in the barcodes file.
+
+If the first file output is 'n/a' or '/dev/null', it is not written.
+
+Barcodes file looks like this:
+
+<id1> <sequence1>
+<id2> <sequence2> ...
+
+Default is to guess the -bol or -eol based on some quick stats (extremely accurate).
+
+If -g is used, and the first file has reads of average length < 10, then it is assumed to
+be an index lane, and frequently occuring sequences are calculated.
+
+If -g is supplied with a filename, then all barcodes in that file are tried, and
+The groups with the best matches are chosen.
+
+Grouped barcodes file looks like this:
+
+<id1> <sequence1> <group>
+<id2> <sequence2> <group>...
+
+Options:
+
+-o FIL1 [FIL2]  Output files (one per input, required)
+-g FIL          Determine barcodes from indexed read FIL
+-l FIL          Determine barcodes from any read, using FIL as a master list
+-b              Force beginning of line
+-e              Force end of line
+-x              Don't trim barcodes before writing
+-n              Don't execute, just print likely barcode list
+-v C            Verify that mated id's match up to character C ('/' for illumina)
+-m N            Allow up to N mismatches, as long as they are unique
+}}}
