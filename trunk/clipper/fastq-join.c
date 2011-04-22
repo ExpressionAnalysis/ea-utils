@@ -32,6 +32,8 @@ THE SOFTWARE.
 #include <search.h>
 #include <limits.h>
 
+ssize_t getline(char **lineptr, size_t *n, FILE *stream);
+
 /*
 
 See "void usage" below for usage.
