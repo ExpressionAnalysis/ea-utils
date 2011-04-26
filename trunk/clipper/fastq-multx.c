@@ -118,11 +118,12 @@ int main (int argc, char **argv) {
 	const char* list=NULL;		// use a barcode master list
 	char verify='\0';
 	bool noexec = false;
+	const char *group = NULL;
 
 	int i;
 	bool omode = false;	
 	char *bfil = NULL;
-	while (	(c = getopt (argc, argv, "-dxnbeov:m:g:l:")) != -1) {
+	while (	(c = getopt (argc, argv, "-dxnbeov:m:g:l:G:")) != -1) {
 		switch (c) {
 		case '\1': 
                        	if (omode) {
@@ -148,6 +149,7 @@ int main (int argc, char **argv) {
 			verify = *optarg; break;
 		case 'b': end = 'b'; break;
 		case 'e': end = 'e'; break;
+		case 'G': group = optarg; break;
 		case 'g': 
 			guide = optarg;
 			in[f_n++] = optarg;
@@ -170,6 +172,11 @@ int main (int argc, char **argv) {
 		     usage(stderr);
              	     return 1;
 		}
+	}
+
+	if (group && !list) {
+		fprintf(stderr, "Error: -G only works with -l\n");
+		return 1;
 	}
 
 	if (f_n != f_oarg) {
@@ -222,12 +229,22 @@ int main (int argc, char **argv) {
 					continue;
 				}
 			}
+			if (group) {
+				if (strcasecmp(group, g)) {
+					continue;
+				}
+			}
 			bcg[bgcnt].gptr = getgroup(g);
                         bcg[bgcnt].b.id.n=strlen(bcg[bgcnt].b.id.s);
                         bcg[bgcnt].b.seq.n=strlen(bcg[bgcnt].b.seq.s);
                         if (debug) fprintf(stderr, "BCG: %d bc:%s n:%d\n", bgcnt, bcg[bgcnt].b.seq.s, bcg[bgcnt].b.seq.n);
                         ++bgcnt;
                 }
+
+		if (!bgcnt) {
+			fprintf(stderr,"No barcodes %s from guide list %s.\n", group ? "matched" : "read", list);
+			return 1;
+		}
 
                 int sampcnt = 20000;
                 struct stat st;
@@ -740,6 +757,7 @@ void usage(FILE *f) {
 "-l FIL		Determine barcodes from any read, using FIL as a master list\n"
 "-b		Force beginning of line\n"
 "-e		Force end of line\n"
+"-G NAME	Group(s) matching NAME only\n"
 "-x		Don't trim barcodes before writing\n"
 "-n		Don't execute, just print likely barcode list\n"
 "-v C		Verify that mated id's match up to character C ('/' for illumina)\n"
