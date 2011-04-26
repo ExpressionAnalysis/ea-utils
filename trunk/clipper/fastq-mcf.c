@@ -83,7 +83,7 @@ int debug=0;
 int main (int argc, char **argv) {
 	char c;
 	bool eol;
-	int nmin = 1, nkeep = 15;
+	int nmin = 1, nkeep = 15, nmax=0;
 	float minpct = 0.25;
 	int pctdiff = 20;
 	int sampcnt = 40000;				// # of reads to sample to determine adapter profile, and base skewing
@@ -107,7 +107,7 @@ int main (int argc, char **argv) {
 	int o_n = 0;
 	int e_n = 0;
 
-	while (	(c = getopt (argc, argv, "-nfRdbehp:o:l:s:m:t:k:x:P:q:")) != -1) {
+	while (	(c = getopt (argc, argv, "-nfRdbehp:o:l:s:m:t:k:x:P:q:L:")) != -1) {
 		switch (c) {
 		case '\1': 
 			if (!afil) 
@@ -121,6 +121,7 @@ int main (int argc, char **argv) {
 		case 't': minpct = atof(optarg); break;
 		case 'm': nmin = atoi(optarg); break;
 		case 'l': nkeep = atoi(optarg); break;
+		case 'L': nmax = atoi(optarg); break;
 		case 'f': force = true; break;
 		case 'k': skewpct = atof(optarg); break;
 		case 'q': qthr = atoi(optarg); break;
@@ -628,6 +629,10 @@ int main (int argc, char **argv) {
 					fq[f].seq [fq[f].nseq -dotrim[f][1]]='\0';
 					fq[f].qual[fq[f].nqual-dotrim[f][1]]='\0';
 				}
+				if (nmax > 0) {
+					fq[f].seq[nmax]='\0';
+					fq[f].qual[nmax]='\0';
+				}
 				fputs(fq[f].id,fout[f]);
 				fputs(fq[f].seq,fout[f]);
 				fputc('\n',fout[f]);
@@ -753,6 +758,7 @@ void usage(FILE *f, char *msg) {
 "	-m N	Minimum clip length, overrides scaled auto (1)\n"
 "	-p N	Maximum adapter difference percentage (20)\n"
 "	-l N	Minimum remaining sequence length (15)\n"
+"	-L N	Maximum sequence length (none)\n"
 "	-k N	sKew percentage causing trimming (2)\n"
 "	-q N	quality threshold causing trimming (10)\n"
 "	-f	force output, even if not much will be done\n"

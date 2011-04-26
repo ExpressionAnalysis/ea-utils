@@ -123,7 +123,7 @@ int main (int argc, char **argv) {
 	int i;
 	bool omode = false;	
 	char *bfil = NULL;
-	while (	(c = getopt (argc, argv, "-dxnbeov:m:g:l:G:")) != -1) {
+	while (	(c = getopt (argc, argv, "-dxnbeov:m:B:g:l:G:")) != -1) {
 		switch (c) {
 		case '\1': 
                        	if (omode) {
@@ -156,6 +156,7 @@ int main (int argc, char **argv) {
 			out[f_oarg++] = "n/a";
 			break;
 		case 'l': list = optarg; break;
+		case 'B': bfil = optarg; list = NULL; break;
 		case 'x': trim = false; break;
 		case 'n': noexec = true; break;
 		case 'm': mismatch = atoi(optarg); break;
@@ -178,6 +179,11 @@ int main (int argc, char **argv) {
 		fprintf(stderr, "Error: -G only works with -l\n");
 		return 1;
 	}
+
+        if ((list && guide) || (list && bfil) || (guide && bfil)) {
+                fprintf(stderr, "Error: Only one of -B -g or -l\n");
+                return 1;
+        }
 
 	if (f_n != f_oarg) {
 		fprintf(stderr, "Error: number of input files (%d) must match number of output files following '-o'.\n", f_n);
@@ -727,7 +733,7 @@ int read_fq(FILE *in, int rno, struct fq *fq) {
 
 void usage(FILE *f) {
 	fputs( 
-"Usage: fastq-multx [-g|-l] <barcodes.fil> <read1.fq> -o r1.%.fq [mate.fq -o r2.%.fq] ...\n"
+"Usage: fastq-multx [-g|-l|-B] <barcodes.fil> <read1.fq> -o r1.%.fq [mate.fq -o r2.%.fq] ...\n"
 "\n"
 "Output files must contain a '%' sign which is replaced with the barcode id in the barcodes file.\n"
 "\n"
@@ -755,6 +761,7 @@ void usage(FILE *f) {
 "-o FIL1 [FIL2]	Output files (one per input, required)\n"
 "-g FIL		Determine barcodes from indexed read FIL\n"
 "-l FIL		Determine barcodes from any read, using FIL as a master list\n"
+"-B FIL		Use barcodes from the specified file only\n"
 "-b		Force beginning of line\n"
 "-e		Force end of line\n"
 "-G NAME	Group(s) matching NAME only\n"
