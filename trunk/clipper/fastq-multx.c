@@ -457,6 +457,7 @@ int main (int argc, char **argv) {
 			++bcnt; 
 		}
 
+                fprintf(stderr, "Using Barcode File: %s\n", bfil);
 	}
 
 	if (bcnt == 0) { 
