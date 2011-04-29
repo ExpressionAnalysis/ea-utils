@@ -7,9 +7,10 @@ CFLAGS?=-O3
 
 all: fastq-clipper fastq-mcf fastq-multx fastq-join
 
-
 install: $(PREFIX)/bin/fastq-clipper $(PREFIX)/bin/fastq-mcf $(PREFIX)/bin/fastq-multx $(PREFIX)/bin/fastq-join
-
 
 $(PREFIX)/bin/%: %
 	cp $< $@
+
+dist: all
+	tar -cvzf ea-utils.tar.gz Makefile *.c

@@ -481,12 +481,12 @@ int main (int argc, char **argv) {
 		bool skip = 0;							// skip whole record?
 		int f;	
 		for (f=0;f<i_n;++f) {
+		    dotrim[f][0] = sktrim[f][0];					// default, trim to detected skew levels
+		    dotrim[f][1] = sktrim[f][1];
+
 		    if (avgns[i] < 11)  
 	 			// reads of avg length < 11 ? barcode lane, skip it
 				continue;
-
-		    dotrim[f][0] = sktrim[f][0];					// default, trim to detected skew levels
-		    dotrim[f][1] = sktrim[f][1];
 
 		    if (rmns) {
 			    for (i=dotrim[f][0];i<fq[f].nseq/3;++i) {
@@ -494,23 +494,38 @@ int main (int argc, char **argv) {
 					if (fq[f].seq[i] == 'N') 
 						dotrim[f][0] = i + 1;
 			    }
-			    for (i=dotrim[f][1];i<fq[f].nseq/3;++i) {
-			    		// trim N's from the end
-					if (fq[f].seq[fq[f].nseq-i-1] == 'N')
-						dotrim[f][1] = i + 1;
+			    // don't trim inside pairs, since it invalidates the distances
+			    if (i_n == 1) {
+				    for (i=dotrim[f][1];i<fq[f].nseq/3;++i) {
+						// trim N's from the end
+						if (fq[f].seq[fq[f].nseq-i-1] == 'N')
+							dotrim[f][1] = i + 1;
+				    }
 			    }
 		    }
 
                     if (qthr > 0) {
 			    bool istrimq = false;
-                            for (i=dotrim[f][1];i<fq[f].nseq/2;++i) {
-                                        // trim N's from the end
-                                        if ((fq[f].qual[fq[f].nseq-i-1]-phred) < qthr) {
+
+                            // trim qual from the begin
+			    for (i=dotrim[f][0];i<fq[f].nseq/3;++i) {
+				if ((fq[f].qual[i]-phred) < qthr) {
+					++trimqb[f];
+					istrimq = true;
+					dotrim[f][0] = i + 1;
+				}
+			    }
+
+                            // trim qual from the end only if not mated
+			    if (i_n == 1) {
+                            	for (i=dotrim[f][1];i<fq[f].nseq/3;++i) {
+					if ((fq[f].qual[fq[f].nseq-i-1]-phred) < qthr) {
 						++trimqb[f];
 						istrimq = true;
-                                                dotrim[f][1] = i + 1;
+						dotrim[f][1] = i + 1;
 					}
-                            }
+                            	}
+			    }
 			    if (istrimq) ++trimql[f];
                     }
 
