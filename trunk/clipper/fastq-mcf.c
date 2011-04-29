@@ -51,7 +51,7 @@ See "void usage" below for usage.
 #define B_T     3
 #define B_N     4
 #define B_CNT   5
-#define SVNREV  '$LastChangedRevision$'
+#define SVNREV  "$LastChangedRevision$"
 
 struct fq {
 	char *id;   int nid;   size_t naid;
@@ -108,7 +108,7 @@ int main (int argc, char **argv) {
 	int o_n = 0;
 	int e_n = 0;
 
-	while (	(c = getopt (argc, argv, "-nfRdbehp:o:l:s:m:t:k:x:P:q:L:")) != -1) {
+	while (	(c = getopt (argc, argv, "-nfVRdbehp:o:l:s:m:t:k:x:P:q:L:")) != -1) {
 		switch (c) {
 		case '\1': 
 			if (!afil) 
@@ -128,6 +128,7 @@ int main (int argc, char **argv) {
 		case 'q': qthr = atoi(optarg); break;
 		case 'x': pctns = atof(optarg); break;
 		case 'R': rmns = false; break;
+		case 'V': printf("Revision: %d\n", atoi(strchr(SVNREV, ':')+1)); return 0; break;
 		case 'p': pctdiff = atoi(optarg); break;
 		case 'P': phred = (char) atoi(optarg); break;
 		case 'h': usage(stdout); return 1; 
