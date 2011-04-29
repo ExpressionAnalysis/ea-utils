@@ -1,6 +1,6 @@
-CC?=g++
+CC=g++
 PREFIX?=/opt
-CFLAGS?="-O3"
+CFLAGS?=-O3
 
 %: %.c config.h
 	$(CC) $(CFLAGS) -o $@ $< getline.c
