@@ -51,6 +51,7 @@ See "void usage" below for usage.
 #define B_T     3
 #define B_N     4
 #define B_CNT   5
+#define SVNREV  '$LastChangedRevision$'
 
 struct fq {
 	char *id;   int nid;   size_t naid;
@@ -479,6 +480,10 @@ int main (int argc, char **argv) {
 		bool skip = 0;							// skip whole record?
 		int f;	
 		for (f=0;f<i_n;++f) {
+		    if (avgns[i] < 11)  
+	 			// reads of avg length < 11 ? barcode lane, skip it
+				continue;
+
 		    dotrim[f][0] = sktrim[f][0];					// default, trim to detected skew levels
 		    dotrim[f][1] = sktrim[f][1];
 
