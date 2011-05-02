@@ -50,6 +50,12 @@ Set the skew (-k) or N-pct (-x) to 100 or 0 to turn it off
 
 == Todo ==
 
-  * When discarding one read for being "too short", it has to discard both pairs.  It should only discard one.  For a sequencing run of normal quality this is not an issue.   It should, though, write "un-mated" reads (whose mate was skipped) to a separate file.  Typically, since these read mates were poor quality, it's not really useful... but it can be for diagnostics.
+  * When discarding one read for being "too short", it has to discard both pairs.   For a sequencing run of normal quality this is not an issue.   It should, though, write "un-mated" reads (whose mate was skipped) to a separate file.  Typically, since these read mates were poor quality, it's not really useful... but it can be for diagnostics.   I've seen runs where these provide valuable data.
 
  * Like any tool that does many things, fastq-mcf can be limited in it's ability to be flexible.   The biggest missing feature is for it to be able to read files that are formatted like it's stderr output, and use them to guide the process.   Given that feature, fastq-mcf would be complete.   
+
+== Notes ==
+
+ * Default settings are probably too conservative when it comes to skewing and trimming. 
+
+ * By default, it won't trim the "insides" of a paired-end read.   It also will no longer attempt to quality filter a barcode read.   No override for these, but I can't think of a reason to.
