@@ -22,5 +22,5 @@ $(PREFIX)/bin/%: % $(PREFIX)/bin
 dist: $(PKG).tar.gz
 
 $(PKG).tar.gz: Makefile $(SRC) $(PKG).spec
-	perl -i -pe "s/%define rel [0-9]+/%define rel `svnversion | cut -f 2 -d :`/" ea-utils.spec
+	perl -i -pe '$$r=`svnversion | cut -f 2 -d :`; $$r=~ s/M$$//; s/%define rel \w+/%define rel $$r/' ea-utils.spec
 	tar -cvzf $(PKG).tar.gz $^
