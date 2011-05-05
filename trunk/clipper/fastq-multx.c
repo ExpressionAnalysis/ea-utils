@@ -160,7 +160,7 @@ int main (int argc, char **argv) {
 		case 'x': trim = false; break;
 		case 'n': noexec = true; break;
 		case 'm': mismatch = atoi(optarg); break;
-		case 'd': debug = 1; break;
+		case 'd': ++debug; break;
 		case '?': 
 		     if (strchr("om", optopt))
 		       fprintf (stderr, "Option -%c requires an argument.\n", optopt);
@@ -254,7 +254,8 @@ int main (int argc, char **argv) {
 
                 int sampcnt = 20000;
                 struct stat st;
-		int fmax[f_n]; int bestcnt=0, besti=-1;
+		int fsum[f_n], fmax[f_n]; int bestcnt=0, besti=-1;
+		meminit(fsum);
 		meminit(fmax);
 		for (i=0;i<f_n;++i) {
 			stat(in[i], &st);
@@ -281,25 +282,25 @@ int main (int argc, char **argv) {
 			for (b=0;b<bgcnt;++b) {
 				// highest count
 				int hcnt = (int) (max(bcg[b].bcnt[i],bcg[b].ecnt[i]) * log(bcg[b].b.seq.n));
-				if (hcnt > fmax[i]) {
-					// highest count by file
-					fmax[i] = hcnt;
-					if (fmax[i] > bestcnt)  {
-						bestcnt=fmax[i];
-						besti=i;
-					}
+				fsum[i]+=hcnt;
+				if (hcnt > fmax[i])
+					fmax[i]=hcnt;
+				if (fsum[i] > bestcnt)  {
+					if (debug > 2) printf("file-sum %d %d\n", i, fsum[i]);
+					bestcnt=fsum[i];
+					besti=i;
 				}
 			}
-//			printf("max %d %d\n", i, fmax[i]);
+			if (debug > 0) printf("file-best %d sum:%d, max:%d\n", besti, fsum[besti], fmax[besti]);
 		}
-//		printf("besti: %d\n", besti);
 		i=besti;
 
 		int gmax=0, gindex=-1, scnt = 0, ecnt=0;
-		int thresh = (int) (pickmaxpct*bestcnt); 
+		int thresh = (int) (pickmaxpct*fmax[i]); 
+		if (debug > 0) printf("besti: %d thresh: %d\n", besti, thresh);
 		for (b=0;b<bgcnt;++b) {
 			int hcnt = (int) (max(bcg[b].bcnt[i],bcg[b].ecnt[i]) * log(bcg[b].b.seq.n));
-//			printf("cnt: %s %s %d %d\n", bcg[b].b.id.s, bcg[b].b.seq.s, b, hcnt);
+			if (debug > 1) printf("cnt: %s %s hc:%d bc:%d ec: %d\n", bcg[b].b.id.s, bcg[b].b.seq.s, hcnt, bcg[b].bcnt[i], bcg[b].ecnt[i]);
 			if (hcnt >= thresh) {
 				// increase group count	
 				bcg[b].gptr->tcnt += hcnt;
@@ -313,14 +314,15 @@ int main (int argc, char **argv) {
 
                 for (b=0;b<bgcnt;++b) {
 			if (bcg[b].gptr->i == gindex) {
-			if (bcg[b].bcnt[i] >= bcg[b].ecnt[i]) {
+			if (bcg[b].bcnt[i] > bcg[b].ecnt[i]) {
 				++scnt;
-			} else {
+			} else if (bcg[b].bcnt[i] < bcg[b].ecnt[i]) {
 				++ecnt;
 			}
 			}
 		};
 		end = scnt >= ecnt ? 'b' : 'e';
+		printf("scnt: %d, ecnt, %d, end: %d\n", scnt, ecnt, end);
 
 		// since this is a known good set, use a very low threshold, just to catch them all
                 fprintf(stderr, "Using Barcode Group: %s on File: %s (%s), Threshold %2.2f%%\n", grs[gindex].id, in[i], endstr(end), 100.0 * (float) ((float)thresh/6)/sampcnt);

@@ -32,7 +32,9 @@ THE SOFTWARE.
 #include <search.h>
 #include <limits.h>
 
+#ifdef _WIN32
 ssize_t getline(char **lineptr, size_t *n, FILE *stream);
+#endif
 
 /*
 
@@ -432,6 +434,7 @@ void usage(FILE *f) {
 	,f);
 }
 
+#ifdef _WIN32
 /* getline.c -- Replacement for GNU C library function getline
 
 Copyright (C) 1993 Free Software Foundation, Inc.
@@ -535,3 +538,5 @@ ssize_t getline(char **lineptr, size_t *n, FILE *stream)
 {
   return getstr (lineptr, n, stream, '\n', 0);
 }
+
+#endif
