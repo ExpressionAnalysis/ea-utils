@@ -2,15 +2,24 @@ CC=g++
 PREFIX?=/opt
 CFLAGS?=-O3
 
-%: %.c config.h
-	$(CC) $(CFLAGS) -o $@ $< getline.c
+PKG=ea-utils
+SRC=fastq-clipper.c fastq-mcf.c fastq-multx.c fastq-join.c
+BIN=$(SRC:.c=)
 
-all: fastq-clipper fastq-mcf fastq-multx fastq-join
+%: %.c
+	$(CC) $(CFLAGS) -o $@ $<
 
-install: $(PREFIX)/bin/fastq-clipper $(PREFIX)/bin/fastq-mcf $(PREFIX)/bin/fastq-multx $(PREFIX)/bin/fastq-join
+all: $(BIN)
 
-$(PREFIX)/bin/%: %
+install: $(BIN) $(PREFIX)/bin/fastq-clipper $(PREFIX)/bin/fastq-mcf $(PREFIX)/bin/fastq-multx $(PREFIX)/bin/fastq-join
+
+$(PREFIX)/bin:
+	mkdir -p $(PREFIX)/bin
+
+$(PREFIX)/bin/%: % $(PREFIX)/bin
 	cp $< $@
 
-dist: all
-	tar -cvzf ea-utils.tar.gz Makefile *.c
+dist: $(PKG).tar.gz
+
+$(PKG).tar.gz: Makefile $(SRC) $(PKG).spec
+	tar -cvzf $(PKG).tar.gz $^
