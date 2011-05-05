@@ -3,6 +3,9 @@ PREFIX?=/opt
 CFLAGS?=-O3
 
 PKG=ea-utils
+REL := $(shell svnversion | perl -ne 'print $$1 if /:(\d+)/')
+VER := $(shell grep '%define ver' ${PKG}.spec | perl -ne 'print $$1 if / (\S+) *$$/')
+
 SRC=fastq-clipper.c fastq-mcf.c fastq-multx.c fastq-join.c
 BIN=$(SRC:.c=)
 
@@ -21,6 +24,8 @@ $(PREFIX)/bin/%: % $(PREFIX)/bin
 
 dist: $(PKG).tar.gz
 
+
 $(PKG).tar.gz: Makefile $(SRC) $(PKG).spec
-	perl -i -pe '$$r=`svnversion | cut -f 2 -d :`; $$r=~ s/M$$//; s/%define rel \w+/%define rel $$r/' ea-utils.spec
+	perl -i -pe 's/%define rel \w+/%define rel ${REL}/' ea-utils.spec
 	tar -cvzf $(PKG).tar.gz $^
+	cp $(PKG).tar.gz $(PKG).${VER}-${REL}.tar.gz
