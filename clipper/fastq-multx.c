@@ -377,12 +377,15 @@ int main (int argc, char **argv) {
 		double dev = sqrt(((double)nr*totsq-pow(tots,2)) / ((double)nr*(nr-1)) );
 
 		// short, and nonvarying (by much, depends on the tech used)
-		if (dev < .25 && roundl(tots/nr) < 10) {
+		if (dev < .25 && roundl(tots/nr) < 12) {
 			// most probably a barcode-only read
 			blen = (int) round(tots/nr);
 			end = 'b';
-		} else if (round(tots/nr) < 10) {
+		} else if (round(tots/nr) < 12) {
 			fprintf(stderr, "File %s looks to be barcode-only, but it's length deviation is too high (%.4g)\n", in[0], dev);
+			return 1;
+		} else {
+			fprintf(stderr, "File %s isn't a barcode-only file, try using -l instead\n", in[0]);
 			return 1;
 		}
 
