@@ -461,6 +461,7 @@ int main (int argc, char **argv) {
 	for (i=0;i<i_n;++i)
 		fseek(fin[i], 0, 0);
 
+
 	while (read_ok=read_fq(fin[0], nrec, &fq[0])) {
 		for (i=1;i<i_n;++i) {
 			int mok=read_fq(fin[i], nrec, &fq[i]);
@@ -484,7 +485,7 @@ int main (int argc, char **argv) {
 		    dotrim[f][0] = sktrim[f][0];					// default, trim to detected skew levels
 		    dotrim[f][1] = sktrim[f][1];
 
-		    if (avgns[i] < 11)  
+		    if (avgns[f] < 11)  
 	 			// reads of avg length < 11 ? barcode lane, skip it
 				continue;
 
