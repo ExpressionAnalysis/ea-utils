@@ -697,6 +697,9 @@ sub schedule {
 				}
 			}
 		} else {
+			if ($conf{backup_grid}) {
+				# TODO: fork exec to backup grid, and add to list of pids to track
+			}
 			xlog("debug", "Can't find node for $jfil " . Dumper(%nodes) . "\n") if $conf{trace};
 		}
 	}
@@ -1152,6 +1155,8 @@ sub usage {
 	<<EOF
 Usage: grun <options> command...
 
+Lightweight grid engine, maybe it should be called "lge".  
+
 Execution Options:
 	-t 		Trace mode (verbose logging)
 	-f FILE		Read FILE for job options
@@ -1182,6 +1187,13 @@ Other Options:
 	-C FILE		Read FILE instead of /etc/grun.conf
 	-t|trace	Trace mode (trace goes to log)
 	-v|version	Print version and exit
+
+Config File:
+	spool		Location for queue/io temp storage
+	log_file	Location of the log
+	backup_engine	Send commands here when grid is full
+	.....
+	TODO
 EOF
 }
 
