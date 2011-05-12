@@ -1,0 +1,1292 @@
+#!/usr/bin/perl
+
+use strict;
+
+use Carp;
+use Getopt::Long qw(GetOptions);
+use Data::Dumper;
+use IO::Socket;
+use IO::Select;
+use IO::File;
+use POSIX ":sys_wait_h";
+use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
+use Safe;
+use Cwd;
+
+Getopt::Long::Configure qw(require_order no_ignore_case passthrough);
+
+my $WIN32 = ($^O =~ /Win32/);
+my $EOT = pack("cc",0,4);
+my $SOCK_WAIT = -1;				# wait for resp
+my $SOCK_FILE = -2;				# send files over socket
+ 
+my ($daemon, $xcmd, $kill);
+my (%conf, %def);
+
+# defaults just run things locally, no master
+$def{config} = "/etc/grun.conf";		# config file
+$def{spool} = "/var/spool/grun";		# dir to place jobs
+$def{port} = 5184;				# listen/connect port
+$def{env} = ['PATH'];				# list of environment vars to copy from submit through to exec
+$def{ping_secs} = 30;				# how often to tell about load/mem/stats
+$def{idle_load} = .3;				# how often to tell about load/mem/stats
+$def{retry_secs} = 60;				# how often to retry notifications
+$def{io_keep} = 3600;				# keep io for this long after a job with i/o is finished in a detached session
+$def{sched_secs} = '$ping_secs';		# how often to try scheduling
+$def{master} = 'localhost:5184';		# central scheduler
+$def{services} = {queue=>1, exec=>1};		# all can run
+$def{queue_direct} = 'no';			# you can turn this on, for an nfs-mounted queue
+$def{pid_file} = "/var/run/grun.pid";		# pid fild
+$def{hostname} = $ENV{HOSTNAME} ? $ENV{HOSTNAME} : $ENV{COMPUTERNAME} ? $ENV{COMPUTERNAME} : `hostname`;
+chomp $def{hostname};
+
+my ($qinfo, $restart);
+
+GetOptions("daemon"=>\$daemon, "CONF=s"=>\$def{config}, "xcmd=s"=>\$xcmd, "kill"=>\$kill, "restart"=>\$restart, "trace"=>\$def{trace}, "qinfo=s"=>\$qinfo) ||
+	die usage();
+
+my $safe = new Safe;
+my $gjobid = slurp("$conf{spool}/nextid");
+
+init();
+
+if ($qinfo) {
+	my ($arg) = $qinfo =~ s/=(.*)//;
+	my @arg;
+	if ($arg) {
+		$arg =~ s/^[=,\s-]+//;
+		@arg = split /[=,\s-]+/, $arg;
+	}
+	if (!$ENV{_GRUN} && (!$conf{services}->{queue} || $qinfo =~ /^conf|status$/)) {
+		my ($res) = waitmsg($conf{master}, $conf{master_port}, "xcmd", $qinfo, @arg);
+		print $res;
+	} else {
+		if ($qinfo eq 'status') {
+			print shownodes(@arg);
+		}	
+		if ($qinfo eq 'jobs') {
+			print showjobs(@arg);
+		}	
+		if ($qinfo eq 'hist') {
+			print showhist(@arg);
+		}	
+	}
+	exit 0;
+}
+
+if ($xcmd) {
+	my ($res) = waitmsg($conf{master}, $conf{master_port}, "xcmd", $xcmd);
+	if (! defined $res) {
+		exit 1;
+	} else {
+		print "$res\n";
+	}
+	exit 0;
+}
+
+my $pid;						# daemon pid
+if (open(IN, $conf{pid_file})) {
+	$pid = <IN>;
+	close IN;
+}
+
+if ($restart) {
+	$daemon = 1;
+	$kill = $pid;
+}
+
+if ($kill) {
+	die "Can't find pid $conf{pid_file} for daemon\n" if !$pid;
+	if (!kill(2, $pid)) {
+		die "Can't kill -INT $pid: $!\n";
+	}
+	exit 0 if !$restart;
+	$pid = 0;
+	sleep 1;
+}
+
+my ($listener, $read_set, $write_set, $quit, %io_wait, %run_wait);	# daemon globals
+
+
+if ($daemon) {
+        # start daemon
+        if ($pid) {                                             # already running?
+                if (kill(0, $pid)) {
+                        die "Already running ($pid), not starting twice\n";
+                }
+        }
+	xlog("note", "Starting daemon as " . getpwuid($<));
+
+	if (!($pid=fork)) {
+		die "Can't fork child process\n" if (! defined $pid);
+
+                open (P, ">$conf{pid_file}") || die "Can't open pidfile '$conf{pid_file}' : $!\n";
+                print P $$;
+                close P;                                        # save pid
+
+		open STDIN,  '</dev/null';
+		if (! -t STDOUT || ( $conf{log_file} && ! ($conf{log_file} eq '-'))) {
+			open STDOUT, '>/dev/null';
+			open STDERR, '>&STDOUT';
+		}
+
+		chdir '/';
+
+		POSIX::setsid();
+
+		$SIG{INT}  = sub {close $listener; $quit = 1};
+		$SIG{TERM} = $SIG{INT};
+		$SIG{HUP}  = \&init;
+
+		$listener = IO::Socket::INET->new(Proto=>"tcp",LocalPort=>$conf{port}, LocalAddr=>'0.0.0.0', Reuse=>1, Timeout=>1, Listen=>100)
+			  or die "Can't make TCP server on port $conf{port}: $@";
+		$read_set = new IO::Select();
+		$write_set = new IO::Select();
+		$read_set->add($listener);
+		$quit = 0;
+		while (!$quit) {
+			eval {readsocks()};
+			xlog("error", "Daemon readsocks exception: $@") if $@;
+
+			if ( $conf{services}->{queue} ) {
+				eval {schedule()};
+				xlog("error", "Daemon schedule exception: $@") if $@;
+			}
+			if ( $conf{services}->{exec} ) {
+				eval {srvexec()};
+				xlog("error", "Daemon srvexec exception: $@") if $@;
+			};
+		}
+		xlog("note", "Shutdown");
+		unlink $conf{pid_file};
+	}
+	exit 0;
+}
+
+# client
+
+my %nodes;
+my %jobs;
+my %opt;
+
+$opt{wait} = 1;				# keep socket open until job is finished
+$opt{io} = 1;				# copy io back on the socket, implies wait
+
+Getopt::Long::Configure qw(require_order no_ignore_case no_passthrough);
+GetOptions(\%opt, "file=s", "memory", "nodes", "cpus", "io!", "wait!", "err=s", "out=s");
+
+my @cmd = @ARGV;
+
+if ($opt{file}) {
+	# read options from a file
+	funpack($opt{file}, \%opt);
+	if ($opt{cmd}) {
+		if (@ARGV) {
+			die "Can't supply cmd: in the file and '@cmd' on the command line\n";
+		}
+		if ($opt{cmd} !~ /^[\w0-9:\/\t -]+$/) {
+			# not simple: let bash handle it
+			@cmd = ('bash', '-c', $opt{cmd});
+		} else {
+			# simple: split, pass as is to exec
+			@cmd = split / /, $opt{cmd};
+		}
+	}
+}
+
+if (!@cmd) {
+	die usage();
+}
+
+# no socket io unless waiting
+if (!$opt{wait}) {
+	delete $opt{io};
+}
+
+# force exec in "same as current dir"
+$opt{cwd} = cwd;
+
+# copy env
+for (@{$conf{env}}) {
+	$opt{env}->{$_} = $ENV{$_};
+}
+
+$opt{user} = getpwuid($>);
+
+if ($conf{trace}) {
+	sendcmd($conf{master}, $conf{master_port}, 'trace', 1);
+}
+
+# run command
+my %info = waitmsg($conf{master}, $conf{master_port}, 'run', \%opt, @cmd);
+
+if ($info{error}) {
+	print STDERR $info{error}, "\n";
+	exit -1;
+}
+
+$SIG{INT} = sub {
+	print STDERR "Aborting command, sending xabort to $info{ip}\n";
+	sendcmd($info{ip}, $info{port}, 'xabort', $info{jid});
+	exit -1;
+};
+$SIG{TERM} = $SIG{INT};
+
+if ($opt{wait}) {
+	my ($stat, $err);
+	if ($opt{io}) {
+		# connect to executing node directly and ask for stderr, stdout, and status based on job id
+		($stat, $err) = waitio($info{ip}, $info{port}, 'xio', $info{jid});
+		if (defined $stat) {
+			# send into the ether...if exec doesn't get it, clean up after timeout
+			sendcmd($info{ip}, $info{port}, 'xclean', $info{jid});
+		}
+	} else {
+		# stat auto-cleans... seems silly to stew over a byte of status
+		($stat, $err) = waitmsg($info{ip}, $info{port}, 'xstat', $info{jid});
+	}
+	if ($err) {
+		print STDERR $err, "\n";
+	}
+	exit $stat<<8;
+} else {
+	print STDOUT "Job id $info{jid}\n";
+}
+
+END {
+	if (!$daemon && $conf{trace}) {
+		sendcmd($conf{master}, $conf{master_port}, 'trace', 0);
+	}
+}
+
+sub readsocks {
+    	my ($new_readable, $new_writable, $new_error) = IO::Select->select($read_set, $write_set, $read_set, 1);
+
+	foreach my $sock (@$new_readable) {
+		if ($sock == $listener) {
+			my $new_sock = $sock->accept();
+			if ($new_sock) {
+			    if ($WIN32) {
+				ioctl($new_sock, 0x8004667e, pack("I", 1));
+			    } else {
+				fcntl($new_sock, F_SETFL, O_NONBLOCK);
+			    }
+			    $read_set->add($new_sock);
+			    *$new_sock{HASH}->{time} = time();
+			}
+		} else {
+			my $buf;
+			my $bytes_read = sysread($sock, $buf, 4096);
+
+			if (substr($buf,-2,2) eq $EOT) {
+				substr($buf,-2,2) = '';
+				$buf = *$sock{HASH}->{buf}.$buf;
+				my @resp = process_message($buf, $sock);
+				delete *$sock{HASH}->{buf};
+				if (!@resp) {
+					xlog("debug", "Closing $sock sock after EOT\n") if $conf{trace};
+					close_sock($sock);
+				} elsif ($resp[0] eq $SOCK_WAIT) {
+					xlog("debug", "Setting $sock to wait mode\n") if $conf{trace};
+					# leave it open, and in the read-list
+				} elsif ($resp[0] eq $SOCK_FILE) {
+					# read from one or more files, and send them through the socket
+					*$sock{HASH}->{file} = [splice(@resp, 1)];
+					$write_set->add($sock);
+				} else {
+					xlog("debug", "Packing $sock after resp\n") if $conf{trace};
+					*$sock{HASH}->{resp} = packcmd(@resp);
+					$write_set->add($sock);
+				}
+			} else {
+				# append to growing message
+				if ($bytes_read == 0) {
+					xlog("debug", "Closing $sock after BR=0\n") if $conf{trace};
+					close_sock($sock);
+				} else {
+					*$sock{HASH}->{buf} .= $buf;
+				}
+			}
+		}
+	}
+
+    	foreach my $sock ($write_set->can_write(0)) {
+		if (!*$sock{HASH}->{resp} && *$sock{HASH}->{file}) {
+			if (*$sock{HASH}->{io}) {
+				*$sock{HASH}->{resp} = '';
+				*$sock{HASH}->{resp_offset} = 0;
+				if (!sysread(*$sock{HASH}->{io}, *$sock{HASH}->{resp}, 4096)) {
+					close *$sock{HASH}->{io};
+					delete *$sock{HASH}->{io};
+				}
+			}
+			if (!*$sock{HASH}->{io}) {
+				my $file = splice(@{*$sock{HASH}->{file}}, 0, 1);
+				if ($file) {
+					xlog("debug", "Sending $file over $sock\n") if $conf{trace};
+					my $head = "name:$file\nlen:" . (-s $file) . "\n";
+					my $io = new IO::File;
+					if (!open ($io, $file)) {
+						$head .= "error: '$file' : $!\n";
+					} else {
+						*$sock{HASH}->{io} = $io;
+					}
+					*$sock{HASH}->{resp} = $head . "\n";
+					*$sock{HASH}->{resp_offset} = 0; 
+					sysread(*$sock{HASH}->{io}, *$sock{HASH}->{resp}, 4096, length(*$sock{HASH}->{resp})); 
+				} else {
+					delete *$sock{HASH}->{file};
+				}
+			}
+		}
+
+    		if (*$sock{HASH}->{close}) {
+			xlog("debug", "Closing $sock after close flag\n") if $conf{trace};
+			close_sock($sock);
+		} elsif (length(*$sock{HASH}->{resp})) {
+			xlog("debug", "Writing $sock " . *$sock{HASH}->{resp}) if $conf{trace};
+
+			my $nb = syswrite($sock, *$sock{HASH}->{resp}, length(*$sock{HASH}->{resp}), *$sock{HASH}->{resp_offset});
+			if (!$nb) {
+				xlog("error", "Socket failed to write", $sock);
+				close_sock($sock);
+			} else {
+				*$sock{HASH}->{resp_offset}+= $nb;
+				if (*$sock{HASH}->{resp_offset} >= length(*$sock{HASH}->{resp})) {
+					delete *$sock{HASH}->{resp};
+					if (!*$sock{HASH}->{file}) {
+						*$sock{HASH}->{close} = 1;
+					}
+				}
+			}		
+		} elsif (*$sock{HASH}->{wait}) {
+			# wait for exec-node process to finish, then report response on this socket
+		} else {
+			xlog("debug", "Closing $sock after nothing to do\n") if $conf{trace};
+			close_sock($sock);
+		}
+	}
+}
+
+sub close_sock {
+	my ($sock) = @_;
+	$read_set->remove($sock);
+	$write_set->remove($sock);
+	close($sock);
+}
+
+sub process_message {
+	my ($data, $sock) = @_;
+	xlog("note", "Received command $data\n") if $conf{trace};
+	my $arr = $safe->reval($data);
+	return unless ref($arr) eq 'ARRAY';
+	my ($cmd, @args) = @$arr;
+
+	if ($cmd eq 'xcmd') {
+		if ($args[0] eq 'hup') {
+			# reread config... maybe rebind stuff too
+			init();
+			return 'ok';
+		} elsif ($args[0] eq 'term') {
+			$quit = 1;
+			return 'ok';
+		} elsif ($args[0] eq 'status') {
+			return shownodes();
+		} elsif ($args[0] eq 'hist') {
+			splice(@args, 1);
+			return showhist(@args);
+		} elsif ($args[0] eq 'conf') {
+			return showconf();
+		} elsif ($args[0] eq 'jobs') {
+			return showjobs();
+		} else {
+			return "Error: unknown xcmd '$args[0]'";	
+		}
+	} elsif ($cmd eq 'trace') {
+		$conf{trace} = 0+$args[0];
+	} elsif ($cmd eq 'node') {
+		if (ref($args[0]) eq 'HASH') {		# bit of validation
+			my $ip = $sock->peerhost();	# store info in a file, for fun
+			my $file = "$conf{spool}/nodes/$ip.reg";
+			open(F, ">$file") || return("Error: can't create $file : $!");
+			print F $data;
+			close F;
+			# also stick in memory
+			my $node = $args[0];
+			if (!$nodes{$ip}) {
+				xlog("note", "Registering node $ip:$node->{port} $node->{hostname}");
+			}
+			$nodes{$ip} = $args[0];
+			$nodes{$ip}->{ip} = $ip;
+		} else {
+			return "Error: invalid node registration info";	
+		}
+	} elsif ($cmd eq 'jstat') {
+		my %opts = @args;
+		if ($opts{id}) {
+			my $ip = $sock->peerhost();	# should match the ip from jmine
+			if (! -e "$conf{spool}/jobs/$opts{id}:$ip.run") {
+				xlog("error", "Got a report for a job $opts{id} from $ip");
+			}
+			if ($opts{jrun}) {
+				xlog("debug", "I'm still alive ...$opts{id} from $ip");
+				touch("$conf{spool}/jobs/$opts{id}:$ip.run");
+			} elsif (defined $opts{status}) {
+				open(ST, ">" . jhistpath($opts{id}));
+				my $jhist = slurp("$conf{spool}/jobs/$opts{id}:$ip.run");
+				substr($jhist,0,2) = "[{host=>'" . $ip  . "', status=>" . (0+$opts{status}) . ",";
+				print ST $jhist;
+				close ST;
+				unlink("$conf{spool}/jobs/$opts{id}:$ip.run");
+			} else {
+				xlog("error", "Got a report for a job $opts{id} with no status info");
+			}
+			# return ack even if not exists
+			return ('dack', %opts);	
+		}
+        } elsif ($cmd eq 'dack') {
+                my %opts = @args;
+                if ($opts{pid}) {
+			my $info = gunpack(slurp("$conf{spool}/pids/$opts{pid}"));
+			if (!$opts{jrun}) {
+				# stop tracking this pid
+				unlink("$conf{spool}/pids/$opts{pid}");
+				if (!$info->{wait}) {
+					# nobody asked for the status
+					unlink("$conf{spool}/jpids/$info{id}");
+					unlink("$conf{spool}/pids/$opts{pid}.stat");
+					unlink("$conf{spool}/stdio/$opts{pid}.err");
+					unlink("$conf{spool}/stdio/$opts{pid}.out");
+				}
+			}
+		}
+	} elsif ($cmd eq 'exec') {
+		my ($opts, @cmd) = @args;
+		# flag that child never executed
+
+		my ($uid, $gid, $err);
+		if ($opts->{user}) {
+			(undef, undef, $uid, $gid) = getpwnam($opts->{user});
+		}
+
+		if (defined($uid) && !$conf{run_asroot} && !$uid) {
+			$err="Won't run as root";
+		}
+
+		if (!defined($uid)) {
+			$err="User $opts->{user} is unknown on this machine, not executing";
+		}
+
+		# expecting someone to come pick up output
+		$io_wait{$opts->{id}}->{type} = 'stat' if $opts->{wait};
+		$io_wait{$opts->{id}}->{type} = 'io' if $opts->{io};
+
+		if (!$err && !($pid=fork)) {
+			if (! defined $pid) {
+				$err = "Can't fork";
+			} else {
+				# restore signal to default ... regular kill
+				$SIG{INT} = undef;
+				$SIG{TERM} = undef;
+
+				# kill me with a negative number, all kids die too
+				# kill my parent.... i stay alive, and my IO is recoverable
+				POSIX::setsid();
+
+				my $noexec = "$conf{spool}/pids/$$.noexec";
+
+				if ($opts->{io}) {
+					open STDERR, ">$conf{spool}/stdio/$$.err";
+					open STDOUT, ">$conf{spool}/stdio/$$.out";
+				} else {
+					open STDERR, ">/dev/null";
+					open STDOUT, ">/dev/null";
+				}
+				for (keys(%{$opts->{env}})) {
+					$ENV{$_}=$opts->{env}->{$_};
+				}
+				for (keys(%{$opts})) {
+					next if ref($opts->{$_});
+					$ENV{"_GRUN_OPT_$_"} = $opts->{$_};
+				}
+				$ENV{"_GRUN"} = 1;
+				my $err;
+
+				$> = $uid if $uid;
+				$) = $gid if $gid;
+
+				if ($opts->{cwd}) {
+					if (!chdir($opts->{cwd})) {
+						$err = "Can't cd to $opts->{cwd}";		
+					}
+				}
+
+				if (!$err) {
+					if ($conf{wrap}) {
+						exec($conf{wrap}, @cmd);
+					} else {
+						exec(@cmd);
+					}
+					$err=$!;
+				}
+
+				$> = 0;
+				$) = 0;
+				burp($noexec, $err);
+				exit -1;
+			}
+		}
+
+		if ($err) {
+			# fake it
+			$pid = $opts->{id};
+		}
+
+		my $file = "$conf{spool}/pids/$pid";
+
+		if (!open(F, ">>$file"))  {
+			xlog("error", "Can't create $file : $!");
+		}
+		print F "ip:" . $sock->peerhost() . "\n";
+		print F "id:" . $opts->{id} . "\n";
+		print F "port:" . $opts->{port} . "\n";
+		print F "wait:" . $opts->{wait} . "\n";
+		print F "io:" . $opts->{io} . "\n";
+		print F "error:" . $err . "\n" if $err;
+		close F;
+
+		$file = "$conf{spool}/jpids/$opts->{id}";
+		if (!open(F, ">>$file")) {
+			xlog("error", "Can't create $file : $!");
+		}
+		print F $pid;
+		close F;
+
+		if ($err) {
+			if (writestat($pid, -3, 0, $err)) {
+				notifystat($pid);
+			}
+		}
+	} elsif ($cmd eq 'xclean') {
+		# cleanup, i got everything
+		my ($jid) = @args;
+		my $pid = slurp("$conf{spool}/jpids/$jid");
+		unlink  "$conf{spool}/jpids/$jid", "$conf{spool}/stdio/$pid.out", "$conf{spool}/stdio/$pid.err", "$conf{spool}/pids/$pid.stat";
+        } elsif ($cmd eq 'xabort') {
+                # kill job
+                my ($jid, $sig) = @args;
+                my $pid = slurp("$conf{spool}/jpids/$jid");
+		xlog("note", "Abording jobs $jid on request");
+		$sig = 2 if !$sig;
+		kill $sig, -$pid;		# parent, and all kids
+		kill $sig, $pid;		# parent if, for some reason, that didn't work
+	} elsif ($cmd eq 'xio') {
+		my ($jid) = @args;
+		my $pid = slurp("$conf{spool}/jpids/$jid");
+		$io_wait{$jid}->{type} = 'io';
+		$io_wait{$jid}->{sock} = $sock;
+#		print "IOWAIT: " . Dumper \%io_wait;
+		return ($SOCK_WAIT);		# leave socket open for response
+        } elsif ($cmd eq 'xstat') {
+                my ($jid) = @args;
+		unlink  "$conf{spool}/stdio/$pid.out", "$conf{spool}/stdio/$pid.err";
+		$io_wait{$jid}->{type} = 'stat';
+		$io_wait{$jid}->{sock} = $sock;
+		return ($SOCK_WAIT);		# leave socket open for response
+	} elsif ($cmd eq 'run') {
+		# returns jobid [, error string]
+		if (!$conf{services}->{queue}) {
+			return (error=>"No queue service running on this host");	
+		} else {
+			return(error=>"Network data format error") 
+				unless $data =~ s/^\['run',/[/;
+
+			my ($opts) = @args;
+			my $time = time();
+			++$gjobid;
+
+			burp("$conf{spool}/nextid.tmp", $gjobid);
+			rename "$conf{spool}/nextid.tmp", "$conf{spool}/nextid";
+
+			my $jid = $gjobid;
+			my $file = "$conf{spool}/jobs/$jid";
+
+			my $ip = $sock->peerhost();
+			substr($data,0,2) = "[{time=>" . $time . "," . "from=>'" . $ip . "',";
+
+			open(F, ">$file") || return('', "Can't create $file : $!");
+			print F $data;
+			close F;
+
+			if ($opts->{wait}) {
+				$run_wait{$jid}->{sock} = $sock;
+				$run_wait{$jid}->{type} = 'start';	# socket waits for execution start
+				return ($SOCK_WAIT);			# leave socket open for response
+			} else {
+				return (jid=>$jid);
+			}
+		}	
+	}
+	return ();
+}
+
+sub jhistpath {
+	my ($id) = @_;
+	my $left = int($id/10000);
+	my $right = $id;
+	my $dir = "$conf{spool}/jhist/$left";
+	mkdir($dir) if ! -d $dir;
+	return "$dir/$right";
+}
+
+sub schedule {
+	opendir(D,"$conf{spool}/jobs");
+
+	return unless %nodes;
+
+	if (time() > ($conf{lastschedtime} + $conf{sched_secs})) {
+		$conf{lastschedtime} = time();
+	}
+
+	while(my $jid=readdir(D)) {
+		my $jfil = "$conf{spool}/jobs/$jid";
+
+		next unless -f $jfil;
+		if ($jfil =~ /\.run$/) {
+			# check timing, ping stats, etc
+			next;
+		}
+
+		my $ref = $safe->reval(slurp($jfil));
+		if (!(ref($ref) eq 'ARRAY')) {
+			xlog("error", "Invalid job file format: $jfil\n");
+			unlink $jfil;
+		}
+		my @n;
+		my ($max_av, $max_n);
+		for my $n (values %nodes) {
+			if ($n->{ping} > (time()-$conf{ping_secs}*2)) {
+				if ( ($n->{mem} >= $ref->[0]->{memory}) &&
+				     ($n->{avail} >= $ref->[0]->{cpus}) && 
+				     ($n->{disk} >= $ref->[0]->{disk}) 
+				   ) {
+
+					if ($n->{load} < $conf{idle_load}) {
+						$max_n = $n;
+						last;
+					} else {
+						if ($n->{avail} > $max_av) {
+							$max_n = $n;
+							$max_av = $n->{avail};
+						}
+					}
+				}
+			}
+		}
+		if ($max_n) {
+			my $jmine = "$jfil:" . $max_n->{ip} . ".run";
+			rename($jfil, $jmine);
+			if ( -e $jmine ) {
+				if (!noderun($max_n, $jid, $ref)) {
+					# pretty sure it ran
+					rename($jmine, $jfil);
+					touch($jfil);
+				} else {
+					$max_n->{avail} -= $ref->[0]->{cpus} ? $ref->[0]->{cpus} : 1;
+					$max_n->{memory} -= $ref->[0]->{memory} ? $ref->[0]->{memory} : 10000;
+				}
+			}
+		} else {
+			xlog("debug", "Can't find node for $jfil " . Dumper(%nodes) . "\n") if $conf{trace};
+		}
+	}
+	return undef;
+}
+
+sub noderun {
+	my ($n, $jid, $job) = @_;
+	# send 'exec'
+	$job->[0]->{port} = $conf{port};		# reply to me on this port
+	$job->[0]->{id} = $jid;
+	if ($run_wait{$jid}) {
+		# info needed for status/stdio collection
+		if ($run_wait{$jid}->{type} eq 'start') {
+			my $pid = $run_wait{$jid}->{pid};
+			my $sock = $run_wait{$jid}->{sock};
+			sockresp($run_wait{$jid}->{sock}, jid=>$jid, ip=>$n->{ip}, port=>$n->{port});
+		}
+	}
+	return sendcmd($n->{ip}, $n->{port}, 'exec', @$job);
+}
+
+sub sockresp {
+	my $sock = shift @_;
+	*$sock{HASH}->{resp} = packcmd(@_);
+	$write_set->add($sock);
+}
+
+# called at start, and kill -HUP
+sub init {
+	readconf();
+	if ($daemon) {
+		mkdir $conf{spool};
+		mkdir "$conf{spool}/jobs";
+		mkdir "$conf{spool}/stdio";
+		mkdir "$conf{spool}/jhist";
+		mkdir "$conf{spool}/nodes";
+		mkdir "$conf{spool}/pids";
+		mkdir "$conf{spool}/jpids";
+		# reregister on reread
+		delete $conf{node};
+	}
+}
+
+sub getmem {
+	my ($cache, $free);
+	open F, "/proc/meminfo";
+	while (<F>) {
+		$free = $1 if /MemFree:\s*(\d+)/i;
+		$cache = $1 if /Cached:\s*(\d+)/i;
+		last if $cache & $free;
+	}
+	close F;
+	return $cache + $free;
+}
+
+sub getcpus {
+	my $cores;
+	open F, "/proc/cpuinfo";
+        while (<F>) {
+                $cores += 1 if /processor\s*:\s*\d+/i;
+        }
+	close F;
+	return $cores;
+}
+
+sub slurp
+{
+    my $dat;
+    my $in = new IO::File;
+    return undef unless open($in, $_[0]);
+    local $/ = undef;
+    $dat = $in->getline;
+    $in->close;
+    return $dat;
+}
+
+sub srvexec {
+	if ($conf{services}->{exec} && (!$conf{node} || (time() > ($conf{node}->{ping}+$conf{ping_secs}-1)))) {
+		# ping master with stats
+		$conf{node}->{arch} = `arch`; chomp $conf{node}->{arch};
+		$conf{node}->{mem} = getmem();					# free mem
+		$conf{node}->{load} = slurp("/proc/loadavg");			# load
+		$conf{node}->{cpus} = $conf{cpus} ? $conf{cpus} : getcpus();	# num cores
+		$conf{node}->{avail} = $conf{node}->{cpus} - $conf{node}->{load};	
+		$conf{node}->{ping} = time();
+		$conf{node}->{port} = $conf{port};
+		$conf{node}->{hostname} = $conf{hostname};
+		
+		$conf{registered} = 1;
+		if (!xsend("node", $conf{node})) {
+			$conf{registered} = 0;
+		}
+	}
+
+	while ((my $kid = waitpid(-1, WNOHANG)) > 0) {
+		my $status = $?;
+#		print "waitpid worked status is $?\n";
+		if (writestat($kid, $status)) {
+			notifystat($kid);
+		} else {
+			xlog("error", "premature status sent on pid $kid");
+		}
+	};
+
+	# anyone who'se waiting, and has a pid and a socket... deal with it
+	for my $jid (keys(%io_wait)) {
+		my $pid = $io_wait{$jid}->{pid};
+		if ($pid) {
+			if ($io_wait{$jid}->{sock}) {
+				my $sock = $io_wait{$jid}->{sock};
+				# assert $pid = $io_wait{$jid}->{pid}
+				if ($io_wait{$jid}->{type} eq 'io') {
+					# need all IO
+#					print "SENDING FILES : " . Dumper $io_wait{$jid};
+					*$sock{HASH}->{file} = ["$conf{spool}/pids/$pid.stat", "$conf{spool}/stdio/$pid.out", "$conf{spool}/stdio/$pid.err"];
+					$write_set->add($sock);
+				} elsif ($io_wait{$jid}->{type} eq 'stat') {
+					# only want a status code
+					my $stat = funpack("$conf{spool}/pids/$pid.stat");
+					sockresp($io_wait{$jid}->{sock}, $stat->{status});
+					unlink "$conf{spool}/pids/$pid.stat";
+					unlink "$conf{spool}/jpids/$jid";
+				}
+				delete $io_wait{$jid};
+			} elsif (time() > ($io_wait{$jid}->{time}+$conf{io_keep})) {
+				xlog("error", "Orphaned I/O getting deleted for job $jid after $conf{io_keep} secs\n");
+				unlink "$conf{spool}/pids/$pid", "$conf{spool}/jpids/$jid", 
+					"$conf{spool}/pids/$pid.stat", "$conf{spool}/pids/$pid.out", "$conf{spool}/pids/$pid.err";
+				delete $io_wait{$jid};
+			}
+		}
+	}
+
+
+	if (time() > ($conf{lastpidtime}+$conf{ping_secs})) {
+		opendir(D,"$conf{spool}/pids");
+		while(my $kid = readdir(D)) {
+			# finished, notify submitter
+
+			if ($kid =~ /^(\d+)\.noexec$/) {
+				if (writestat($1, -2, 0, slurp($kid))) {
+					unlink "$conf{spool}/pids/$kid";
+				}
+				next;
+			}
+
+			if ($kid =~ /\.stat$/) {
+				if (fmodtime("$conf{spool}/pids/$kid") < (time()-$conf{ping_secs})) {
+					if (notifystat($kid)) {
+						touch("$conf{spool}/pids/$kid");
+					}
+				}
+				next;
+			}
+			# running, check status
+			if ($kid =~ /^\d+$/ ) {
+				my $ret = waitpid($kid, WNOHANG);
+				my $status = $?;
+				my $alive = kill(0, $kid);
+				#print "RET $ret STAT $status ALIVE $alive\n";
+				if (writestat($kid, $status, $alive)) {
+					notifystat($kid);
+				}
+			}
+		}
+		closedir D;
+
+		# remove associated
+		opendir(D,"$conf{spool}/stdio");
+		while(my $kid = readdir(D)) {
+			if (! -e "$conf{spool}/pids/$pid.stat") {
+				unlink "$conf{spool}/stdio/$kid";
+			}
+		}
+		closedir(D);
+
+		$conf{lastpidtime} = time();
+	}
+}
+
+sub touch {
+	open(T,">>$_[0]");
+	close T;
+}
+
+sub fmodtime {
+	return (stat($_[0]))[9];
+}
+
+sub notifystat {
+	my ($kid) = @_;
+	$kid =~ s/.stat$//;
+	my $info = funpack("$conf{spool}/pids/$kid");
+
+	if (!$info->{ip}) {
+		unlink "$conf{spool}/pids/$kid.stat";
+		xlog("error", "Orphaned job status file $kid");
+		return;
+	}
+	
+	my $jid = $info->{id};
+
+	# tell scheduler the status
+
+	funpack("$conf{spool}/pids/$kid.stat", $info);
+	my $sock = _sendcmd($info->{ip}, $info->{port}, 'jstat', id=>$info->{id}, status=>$info->{status}, pid=>$kid, jrun=>$info->{jrun}, error=>$info->{error});
+	$read_set->add($sock) if $sock;
+
+#	print STDERR "HERE I AM NOTIFYING: " . Dumper($info);
+	if (!$info->{jrun}) {
+		# ok, i'm not running
+		# release stdio/stat
+#		print STDERR "HERE I AM RELEASING STUFF $kid " . Dumper($info);
+		if ($io_wait{$jid}) {
+			$io_wait{$jid}->{pid} = $kid;
+			$io_wait{$jid}->{time} = time();		# how long you have to pickup i/o
+		}
+	}
+}
+
+sub writestat {
+	my ($kid, $stat, $jrun, $err) = @_;
+	if ( -e "$conf{spool}/pids/$kid" ) {
+		if (!$err) {
+			if ( -e "$conf{spool}/pids/$kid.noexec" ) {
+				$err=slurp("$conf{spool}/pids/$kid.noexec");
+				unlink("$conf{spool}/pids/$kid.noexec");
+			}
+		}
+		open(ST, ">$conf{spool}/pids/$kid.stat") || return 0;
+		print(ST "status:$stat\n");
+		print(ST "jrun:1\n") if $jrun;
+		print(ST "error:$err\n") if $err;
+		return close ST;
+	}
+	return 1;
+}
+
+sub gpack {
+	my $msg;
+	for (my $i=0;$i<@_;$i+=2) {
+		$_[$i+1] =~ s/\n/ /g;
+		$msg .= $_[$i] . ":" . $_[$i+1] . "\n";
+	}
+        return $msg;
+}
+
+sub funpack {
+        my ($fil, $dat) = @_;
+	return gunpack(slurp($fil), $dat);
+}
+
+sub gunpack {
+	my ($msg, $dat) = @_;
+	$dat = {} if !$dat;
+	for (split(/\n/, $msg)) {
+                my ($k, $v) = m/^\s*([^:]+)?\s*:\s*(.*?)\s*$/;
+                $k = lc($k);
+		$dat->{$k}=$v;
+	}
+	return $dat;
+}
+
+sub readconf {
+        %conf = %def;
+
+	_readconf("$conf{config}");
+
+        # defines happen at the end so defaults can get unpacked
+        for (values %conf) {
+		if ( !s/^\{(.*)\}$/eval($1)/gei ) {
+                	s/\$([\w-]+)/$conf{lc($1)}?$conf{lc($1)}:$1/gei;
+		}
+        }
+
+        #reorganize stuff
+
+	my $v;
+	$v = $conf{services};
+	$conf{services} = {};
+	for (split(/[\s,]+/,$v)) {
+		$conf{services}->{$_} = 1;
+	}
+
+	$conf{queue_direct} = $v =~ /^(yes|1)$/i;
+
+	$conf{env} = [split(/[\s,]+/,$conf{env})] unless ref($conf{env}) eq 'ARRAY';
+
+	$conf{master_port} = $1 if $conf{master} =~ s/:(\d+)$//;
+	$conf{master_port} = $conf{port} if !$conf{master_port};
+
+}
+
+sub _readconf {
+	my ($f) = @_;
+	%conf = %def;
+	if (!open(CONF, $f)) {
+		xlog("error", "Can't open '$f'");
+		return;
+	}
+	while(<CONF>) {
+		next if /^\s*#/;
+		my ($k, $v) = m/^\s*([^:]+)?\s*:\s*(.*?)\s*$/;
+		$k = lc($k);
+		if ($k eq 'include') {
+			_readconf($v);
+		} else {
+			$conf{$k} = $v;
+		}
+	}
+}
+
+sub fail {
+        xlog("error", @_);
+        croak @_;
+}
+
+sub xlog {
+        my $m = join("\t", @_);
+        $m =~ s/\n/ /g;
+        my $line = scalar(localtime) . "\t" . $m . "\n";
+        my $log = $conf{"log_file"};
+        if ($log && ! ($log eq '-')) {
+                open LOG, ">>" . $log;
+                print LOG $line;
+                close LOG;
+        } else {
+                print $line;
+        }
+        return $line;
+}
+
+sub waitio {
+        my $sock = _sendcmd(@_);
+        if (!$sock) {
+                xlog("error","Can't send command ", packcmd(@_));
+                return undef;
+        }
+        my ($dat, $stat, $got) = ('', '', 0);
+        while ($got<3) {
+		my $buf = '';
+		my %head;
+		my $break = 0;
+		do {
+			$buf .= $dat;
+			while ($buf =~ s/^(\w+):\s*(\S+)\n//) {
+				$head{$1}=$2;
+			}
+			if ($buf =~ s/^\n//) {
+				$dat = $buf;
+				$break = 1;
+			}
+		} while (!$break && $sock->sysread($dat, 4096));
+
+#		print Dumper(\%head);
+#		print "DAT IS: $dat\n";
+
+		last if (!$head{name});
+
+		my $fh = $head{name}=~/\.err$/ 
+			? *STDERR
+			: *STDOUT;
+
+		my $statstr;  $statstr = 1 if $head{name}=~/\.stat$/;
+		
+		my $left = $head{len};
+
+		++$got;
+		do {
+#			print STDERR "left: $left dat:" . length($dat) . "\n"; 
+			if ($left>0) {
+				if ($statstr) {
+					$stat .= substr($dat,0,$left);
+				} else {
+					print $fh substr($dat,0,$left);
+				}
+				$left -= length($dat);
+				substr($dat,0,$left) = '';
+			}
+#			print STDERR "left: $left dat:" . length($dat) . "\n"; 
+		} while ($left>0 && $sock->sysread($dat, 4096));
+	}
+	$stat = gunpack($stat);
+        return ($stat->{status}, $stat->{error});
+}
+
+sub waitmsg {
+	my $sock = _sendcmd(@_);
+	if (!$sock) {
+                xlog("error","Can't send command ", packcmd(@_));
+		return undef;
+	}
+	my ($buf, $dat);
+	while ($sock->read($dat, 4096)) {
+		$buf .= $dat;
+	}
+	if (substr($buf,-2,2) eq $EOT) {
+		substr($buf,-2,2) = '';
+		return unpackcmd($buf);
+	}
+	return undef;
+}
+
+sub xsend {
+	my $sock = _sendcmd($conf{master}, $conf{master_port}, @_);
+	if ($sock) {
+		close $sock;
+		return 1;
+	}
+	return 0;
+}
+
+sub sendcmd {
+	my $sock = _sendcmd(@_);
+	return $sock ? close($sock) : undef;  
+}
+
+sub packcmd {
+	return Data::Dumper->new([\@_])->Indent(0)->Terse(1)->Dump().$EOT;
+}
+
+sub unpackcmd {
+	my $ref = $safe->reval($_[0]);
+	if (ref($ref) eq 'ARRAY') {
+		return @$ref;
+	}
+}
+
+sub _sendcmd {
+	my ($host, $port, @cmd) = @_;
+	my $xcmd = packcmd(@cmd);
+        my $sock = IO::Socket::INET->new(Proto=>"tcp",PeerPort=>$port,PeerAddr=>$host, Timeout=>5);
+        if (!$sock) {
+                xlog("error","Can't connect to $host:$port", Carp::longmess());
+		return undef;
+        }
+        if ($sock->send($xcmd)) {
+		return $sock;
+	}
+}
+
+sub burp
+{
+        my ($f, $dat) = @_;
+        my $h = new IO::File;
+        open ($h, ">$f");
+        print $h $dat;
+        close $h;
+}
+
+sub usage {
+	<<EOF
+Usage: grun <options> command...
+
+Execution Options:
+	-t 		Trace mode (verbose logging)
+	-f FILE		Read FILE for job options
+	-q COMMAND	queue info command
+
+	-m|em INT	memory minimum in MB
+	-c|pu CPUS	minimum number of cpus 
+	-n|ode N1,N2	specify certain nodes
+
+	-noio		disable io-processing, but wait for completion
+	-nowait		no io and don't wait, just start the command
+	-e|rr FILE	write stderr directly to FILE, no spool
+	-o|ut FILE	write stdout directly to FILE, no spool
+
+If the command contains shell metacharacters, it is passed to "bash -c".
+
+Queue commands:
+	status		List nodes
+	jobs		List jobs
+	conf		Dump config from memory
+
+Daemon Options:
+	-d|aemon	Daemonize
+	-k|ill		Kill running server
+	-r|estart	Restart running server
+
+Other Options:
+	-C FILE		Read FILE instead of /etc/grun.conf
+	-t|trace	Trace mode (trace goes to log)
+	-v|version	Print version and exit
+EOF
+}
+
+sub showconf {
+	return Data::Dumper->new([\%conf])->Indent(1)->Terse(1)->Dump().$EOT;
+}
+
+sub showhist {
+	my %opt=@_;
+
+        my $r;
+
+	my $mx = -1;
+        opendir(D,"$conf{spool}/jhist");
+	while($_=readdir(D)) {
+		if ($_ > $mx) {
+			$mx = $_;
+		}
+	}
+	closedir(D);
+
+        opendir(D,"$conf{spool}/jhist/$mx");
+	my @D = sort {$b-$a} readdir(D);
+	closedir(D);
+
+	my $count = $opt{count};
+	$count = 100 if !$count;
+        for my $jid (@D) {
+                my $f = "$conf{spool}/jhist/$mx/$jid";
+                next unless -f $f;
+                my @job=unpackcmd(slurp($f));
+                my ($job, @cmd) = @job;
+                if (ref($job)) {
+                        my %job=%{$job};
+			$job{status} = 'OK' if $job{status} eq '0';
+			my $cmd = join(' ', @cmd);
+			$cmd =~ s/\n\s+/\n/g;
+			$cmd =~ s/^\s+//;
+			$cmd =~ s/\s+$//;
+			$cmd =~ s/\n/;/g;
+                        $r .= sprintf "%s\t%s\t%s\t%s\t%s\n", $jid,$job{user},$job{status},$job{cwd},$cmd;
+                }
+		last if --$count <= 0;
+        }
+        return $r;
+}
+
+sub shownodes {
+        my $r;
+        $r .= sprintf "%-15s %9s %5s\n", 'Hostname','Memory', 'Cpu';
+        for my $node (sort {$a->{hostname} cmp $b->{hostname}} values %nodes) {
+                if ($node->{ping} > time() - ($conf{ping_secs} * 2) ) {
+                        $node->{hostname} = substr($node->{hostname},0,15);
+                        chomp($node->{hostname});
+                        $r .= sprintf "%-15s %8dm %5.1f\n", $node->{hostname}, $node->{mem}/1000, $node->{avail};
+                }
+        }
+        return $r;
+}
+
+# this reads the registered nodes from disk, and is naive about the internal state of the %nodes hash
+# there's some advantage, efficiency wise to doing this
+sub shownodes_disk {
+	my $r;
+	$r .= sprintf "%-15s %9s %5s\n", 'Hostname','Memory', 'Cpu';
+	opendir(D,"$conf{spool}/nodes");
+	while($_=readdir(D)) {
+		$_ = "$conf{spool}/nodes/$_";
+		next unless -f $_;
+		my @node=unpackcmd(slurp($_));
+		my %node=%{$node[1]};
+		if ($node{ping} > time() - ($conf{ping_secs} * 2) ) {
+			my $avail = $node{cpus}-$node{load};
+			$node{hostname} = substr($node{hostname},0,15);
+			chomp($node{hostname});
+			$r .= sprintf "%-15s %8dm %5.1f\n", $node{hostname}, $node{mem}/1000, $avail;
+		}		
+	}
+	closedir(D);
+	return $r;
+}
+
+sub showjobs {
+        my $r;
+#        $r .= sprintf "%s\t%s\t%s\t%s\t%s\n", 'JobID','User','Host','Cwd','Command';
+        opendir(D,"$conf{spool}/jobs");
+        while(my $jid=readdir(D)) {
+                my $f = "$conf{spool}/jobs/$jid";
+                next unless -f $f;
+                my @job=unpackcmd(slurp($f));
+                my ($job, @cmd) = @job;
+		if (ref($job)) {
+			my %job=%{$job};
+			my $stat = '(I)';
+			if ($jid =~ s/:([.\d]+?)\.run$//) {
+				my $ip = $1;
+				my @node = unpackcmd(slurp("$conf{spool}/nodes/$ip.reg"));
+				if (ref($node[1])) {
+					$stat = $node[1]->{hostname}; chomp $stat;
+				}
+			}
+			$r .= sprintf "%s\t%s\t%s\t%s\t%s\n", $jid,$job{user},$stat,$job{cwd},join(' ', @cmd);
+		}
+        }
+        closedir(D);
+        return $r;
+}
+
