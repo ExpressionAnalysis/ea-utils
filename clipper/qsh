@@ -1,0 +1,252 @@
+#!/usr/bin/perl
+
+use strict;
+use Getopt::Long;
+Getopt::Long::Configure(qw(passthrough require_order no_ignore_case));
+
+# TODO: put these  in a config file, it can still be perl...for now it's simple enough to edit here
+
+# don't ever try to do make semantics on these commands
+my %nologic 	= map {($_, 1)} qw(if [ calc echo . mv  alc for);
+
+# always send to grind engine, no matter how big
+my %wrap 		= map {($_, 1)} qw(bowtie-build tophat juncsdb bwa cufflinks countannot calc-numaligned fastx_quality_stats);
+
+# never send to grid engine, no matter how big
+my %nowrap 	= map {($_, 1)} qw(condor_run run-analysis);
+
+# always run these, regardless of dependencies - still send to grid if needed
+my %nodep 		= map {($_, 1)} qw();
+
+# this can be condor_run, qsub... whatever you want
+my $grid_engine	= 'grun';
+
+# alter default 'big' size and parameter parsing
+my %info = (
+		cp => {big=>'20g'},
+		bowtie => {big=>'20m'},
+		bwa => {big=>'20m'},
+		tophat => {big=>'10m'},
+		cufflinks => {big=>'10m'},
+		fastx_quality_stats => {in=>{i=>1}, out=>{o=>1}},
+		# change to asterisk for dependency globbing
+		'fastq-multx' => {out=>{o=>sub {s/%/\*/}}, in=>{l=>1, g=>1, B=>1}},
+		'fastq-mcf' => {out=>{o=>1}},
+);
+
+our $VERSION = '0.9.45';
+
+my ($debug, $check, $inline, $verbose, $help, $rules_file);
+
+$| = 1;
+
+GetOptions("debug"=>\$debug, "K"=>\$check, "cmd=s"=>\$inline, "v"=>\$verbose, "help"=>\$help, "rules=s"=>\$rules_file) || die usage();
+
+if ($help || $ARGV[0] =~ /^-\?/) {
+	print usage();
+	exit 0
+}
+
+
+if ($check) {
+	# base executable name	
+	my $cmd = $ARGV[0];
+	$cmd =~ s/.*\///;
+
+	# don't try to alter non executable lines
+	exit 0 if $cmd !~ /^[\w-]+$/;
+
+	# don't ever check dependencies, or wrap these commands
+	if ($nologic{$cmd}) {
+		exit 0;
+	}
+
+	# walk through arguments, determining inputs, outputs and total sizes 	
+	my ($opt, %opt, $first, $last, @in, @out, $sz);
+	for (@ARGV) {
+		if (s/^--?//) {
+			$opt = $_;
+			next;
+		}
+		if ($opt) {
+			if ($opt eq '<' || $info{$cmd}->{in}->{$opt}) {
+				push @in, $_;
+			}
+			if ($opt eq '>' || $info{$cmd}->{out}->{$opt}) {
+				push @out, $_;
+			}
+			$opt = '';
+		}
+		$opt = '>' if ($_ eq '>');
+		$opt = '<' if ($_ eq '<');
+		$_ =~ s/^~/$ENV{HOME}/;
+		if (!$first) {
+			if ( -e $_ ) {
+				$first = $_ 
+			}
+		} else {
+			$last = $_;
+		}
+		$sz += -s $_;
+	}
+
+	push @in, $first if $first && (!@in);		# no input ? assume first file that exists
+	push @out, $last if $last && (!@out);		# no output ? assume last argument
+
+	print STDERR "QSH check: $cmd : sz: $sz, in: @in, out: @out\n" if $verbose;
+
+	my $mx;
+	for (@in) {
+		my $m = fmodtime($_);
+		$mx = $m if ($m > $mx);
+	}
+	my ($nox, $need);
+	for (@out) {
+		if ($_ =~ /\*/) {
+			# TODO: fileglob all outputs, pick oldest, use that.
+		}
+		if ($mx < fmodtime($_)) {
+			$nox=1;
+		} else {
+			$need=1;
+		}
+	}
+	if (!$need && $nox) {
+		print STDERR "QSH suppress: $cmd, already done\n"  if $verbose;
+		print "false";
+	} else {
+		my $wrap = $wrap{$cmd};
+
+		my $big = $info{$cmd}->{big};
+		if (!$big) {
+			$big = '50m';
+		}
+
+		if (!$wrap) {
+			my $t = $big;
+			$t *= 1000000 if ($t =~ /m$/i);
+			$t *= 1000000000 if ($t =~ /g$/i);
+			$wrap = $sz >= $t;
+		}
+
+		# never submit a job to the condor, if we're already in condor
+		$wrap = 0 if $ENV{"_CONDOR_SLOT"};
+		# || $ENV{"_GRUN"};		# grun's more friendly about sub-submits... not sure whether to allow?
+
+		if ($wrap) {
+			print STDERR "QSH wrap $cmd, input size:$sz big:$big\n" if $verbose;
+			print "$grid_engine @ARGV";
+		} else {
+			print STDERR "QSH no wrap $cmd, input size $sz big: $big\n" if $verbose;
+		}
+	}
+
+	exit 0;
+}
+
+sub bash_prefix;
+
+#TODO ... would be nice if this could be interactive... 
+# but there's a whole TTY attach/reattach thing I can't figure out
+
+no strict 'refs';
+if (pipe_to_fork('FOO')) {
+	use strict;
+	# parent
+	print FOO bash_prefix();
+	if ($inline) {
+		print FOO "\n$inline\n";
+	} else {
+		while ( <> ) {
+			print FOO $_
+		}
+	}
+	close FOO;
+	wait
+} else {
+	exec("bash -s");
+}
+
+sub fmodtime {
+	return (stat($_[0]))[9];
+}
+
+
+sub bash_prefix {
+	my $r;
+	$r = "DEBUG=-d\n" if $debug;
+	$r .= <<EOF;
+function on_debug {
+	if [ -n "\$BASH_COMMAND" ]; then
+		cmd=`$0 -K \$DEBUG \$BASH_COMMAND`
+		if [ -n "\$cmd" ]; then
+			\$cmd
+			false
+		elif [ -n "\$DEBUG" ]; then
+			echo \$BASH_COMMAND
+			false
+		fi
+	elif [ -n "\$DEBUG" ]; then
+		echo \$BASH_COMMAND
+		false
+	fi
+}
+
+shopt -s extdebug
+set -o functrace
+
+trap on_debug DEBUG
+EOF
+return $r;
+die $r;
+}
+
+sub pipe_to_fork ($) {
+	my $parent = shift;
+	pipe my $child, $parent or die;
+	my $pid = fork();
+	die "fork() failed: $!" unless defined $pid;
+	if ($pid) {
+	    close $child;
+	}
+	else {
+	    close $parent;
+	    open(STDIN, "<&=" . fileno($child)) or die;
+	}
+	$pid;
+}
+
+sub usage {
+<<EOF
+qsh version $VERSION
+
+Usage: qsh [options] <bash-script>
+   or: qsh [options] -c "commands to be run"
+
+Options:
+   -d|ebug	    debug
+   -v|erbose	    verbose output to STDERR
+   -h|elp 	    show this help
+   -r|ules FILE	    use FILE instead of /etc/qsh.conf
+
+Description:
+
+This is a wrapper around 'bash' that passes each command executed 
+to an evaluator that determines whether the command should run 
+based on it's parsed inputs and outputs.
+
+In addition, the wrapper determines if the command should be
+sent to a "grid engine" based on the size of the inputs and
+the type of command.
+
+The purpose is to enable "fluid" development of simple pipeline
+scripts without having to recode them into Makefiles or other
+even more cumbersome DAG scripts, etc.
+
+Problems:
+	- It's inevitable that qsh might get some things wrong, 
+	  and prevent maximum efficiency.
+	- It's often better to carefully plan workflows
+EOF
+}
+
