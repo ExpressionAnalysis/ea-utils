@@ -15,12 +15,14 @@ use Cwd;
 
 Getopt::Long::Configure qw(require_order no_ignore_case passthrough);
 
+our $VERSION = 0.8.95;				# 0.9 will be feature lock.   1.0 will be config backward lock
+
 my $WIN32 = ($^O =~ /Win32/);
 my $EOT = pack("cc",0,4);
 my $SOCK_WAIT = -1;				# wait for resp
 my $SOCK_FILE = -2;				# send files over socket
  
-my ($daemon, $xcmd, $kill);
+my ($daemon, $xcmd, $dkill, $killjob);
 my (%conf, %def);
 
 # defaults just run things locally, no master
@@ -35,15 +37,22 @@ $def{io_keep} = 3600;				# keep io for this long after a job with i/o is finishe
 $def{sched_secs} = '$ping_secs';		# how often to try scheduling
 $def{master} = 'localhost:5184';		# central scheduler
 $def{services} = {queue=>1, exec=>1};		# all can run
-$def{queue_direct} = 'no';			# you can turn this on, for an nfs-mounted queue
 $def{pid_file} = "/var/run/grun.pid";		# pid fild
 $def{hostname} = $ENV{HOSTNAME} ? $ENV{HOSTNAME} : $ENV{COMPUTERNAME} ? $ENV{COMPUTERNAME} : `hostname`;
 chomp $def{hostname};
 
 my ($qinfo, $restart);
 
-GetOptions("daemon"=>\$daemon, "CONF=s"=>\$def{config}, "xcmd=s"=>\$xcmd, "kill"=>\$kill, "restart"=>\$restart, "trace"=>\$def{trace}, "qinfo=s"=>\$qinfo) ||
+GetOptions("daemon"=>\$daemon, "CONF=s"=>\$def{config}, "xcmd=s"=>\$xcmd, "trace"=>\$def{trace}, "qinfo=s"=>\$qinfo) ||
 	die usage();
+
+if ($daemon) {
+	GetOptions("kill"=>\$dkill, "restart"=>\$restart) ||
+		die usage();
+} else {
+	GetOptions("kill=i"=>\$killjob) ||
+		die usage();
+}
 
 my $safe = new Safe;
 
@@ -100,10 +109,10 @@ if (open(IN, $conf{pid_file})) {
 
 if ($restart) {
 	$daemon = 1;
-	$kill = $pid;
+	$dkill = $pid;
 }
 
-if ($kill) {
+if ($dkill) {
 	die "Can't find pid $conf{pid_file} for daemon\n" if !$pid;
 	if (!kill(2, $pid)) {
 		die "Can't kill -INT $pid: $!\n";
@@ -111,6 +120,12 @@ if ($kill) {
 	exit 0 if !$restart;
 	$pid = 0;
 	sleep 1;
+}
+
+if ($killjob) {
+	my $err = waitmsg($conf{master}, $conf{master_port}, 'jkill', $killjob);
+	die "$err\n" if ($err);
+	exit 0;
 }
 
 my ($listener, $read_set, $write_set, $quit, %io_wait, %run_wait);	# daemon globals
@@ -171,6 +186,7 @@ if ($daemon) {
 	exit 0;
 }
 
+
 # client
 
 my %nodes;
@@ -226,10 +242,9 @@ if ($conf{trace}) {
 	sendcmd($conf{master}, $conf{master_port}, 'trace', 1);
 }
 
-# run command
 my %info = waitmsg($conf{master}, $conf{master_port}, 'run', \%opt, @cmd);
 
-if (! %info) {
+if (!%info) {
 	die "$@\n";
 }
 
@@ -237,12 +252,13 @@ if ($info{error}) {
 	print STDERR $info{error}, "\n";
 	exit -1;
 }
-
-$SIG{INT} = sub {
-	print STDERR "Aborting command, sending xabort to $info{ip}\n";
-	sendcmd($info{ip}, $info{port}, 'xabort', $info{jid});
-	exit -1;
-};
+if ($info{ip}) {
+	$SIG{INT} = sub {
+		print STDERR "Aborting command, sending xabort to $info{ip}\n";
+		sendcmd($info{ip}, $info{port}, 'xabort', $info{jid});
+		exit -1;
+	};
+}
 $SIG{TERM} = $SIG{INT};
 
 if ($opt{wait}) {
@@ -436,6 +452,15 @@ sub process_message {
 			$nodes{$ip}->{ip} = $ip;
 		} else {
 			return "Error: invalid node registration info";	
+		}
+        } elsif ($cmd eq 'jkill') {
+		my ($jid) = @args;
+		if (! -e "$conf{spool}/jobs/$jid") {
+			xlog("error", "Need to forward onward...");
+			return "TODO";
+		} else {
+			unlink "$conf{spool}/jobs/$jid";
+			return "TODO";
 		}
 	} elsif ($cmd eq 'jstat') {
 		my %opts = @args;
@@ -676,16 +701,25 @@ sub schedule {
 		my $jfil = "$conf{spool}/jobs/$jid";
 
 		next unless -f $jfil;
-		if ($jfil =~ /\.run$/) {
-			# check timing, ping stats, etc
-			next;
-		}
-
 		my $ref = $safe->reval(slurp($jfil));
 		if (!(ref($ref) eq 'ARRAY')) {
 			xlog("error", "Invalid job file format: $jfil\n");
 			unlink $jfil;
 		}
+
+		if ($jfil =~ /\.run$/) {
+			# check to see whether job has expired
+			if (fmodtime($jfil) > $conf{expire_secs}) {
+				xlog("error", "TODO: Deal with job expiration of $jfil\n");
+				# rename back to active job?
+				# leave in queue as held (since it may have executed)
+				# config policy?
+				# coniig default?
+			} 
+			next;
+		}
+
+		my @dereg;
 		my @n;
 		my ($max_av, $max_n);
 		for my $n (values %nodes) {
@@ -694,8 +728,27 @@ sub schedule {
 				     ($n->{avail} >= $ref->[0]->{cpus}) && 
 				     ($n->{disk} >= $ref->[0]->{disk}) 
 				   ) {
+					my $match = 1;
+					if ($conf{match}) {				# eval perl expression
+						my $msafe = new Safe;			# more for closure than safety
+						$msafe->permit(qw(:subprocess));	# allow backticks
+						# node keys become local vars
+						for (keys(%$n)) {
+							${$msafe->varglob($_)}=$n->{$_};
+						}
+						# whole config is accessible (and changeable...weird)
+						$msafe->share(qw(%conf));
+						$match = $msafe->reval($conf{match});
+						if ($@) {
+							xlog("error", "Error evaluating {$conf{match}} : $@\n");
+							$match = 1;			# permit all on error?
+						}
+					}
+
+					next unless $match;
 
 					if ($n->{load} < $conf{idle_load}) {
+						# don't bother checking further, this node is bored
 						$max_n = $n;
 						last;
 					} else {
@@ -705,23 +758,30 @@ sub schedule {
 						}
 					}
 				}
+			} else {
+				push @dereg, $n->{ip};
 			}
+		}
+		for my $ip (@dereg) {
+			xlog("note", "Deregister node $ip, last ping was " . (time()-$nodes{$ip}->{ping}) . " seconds ago");
+			delete $nodes{$ip};
 		}
 		if ($max_n) {
 			my $jmine = "$jfil:" . $max_n->{ip} . ".run";
+			touch($jfil);
 			rename($jfil, $jmine);
 			if ( -e $jmine ) {
 				if (!noderun($max_n, $jid, $ref)) {
-					# pretty sure it ran
+					# failed to execute job
 					rename($jmine, $jfil);
-					touch($jfil);
+					$max_n->{avail} = 0;
 				} else {
 					$max_n->{avail} -= $ref->[0]->{cpus} ? $ref->[0]->{cpus} : 1;
 					$max_n->{memory} -= $ref->[0]->{memory} ? $ref->[0]->{memory} : 10000;
 				}
 			}
 		} else {
-			if ($conf{backup_grid}) {
+			if ($conf{full_cmd}) {
 				# TODO: fork exec to backup grid, and add to list of pids to track
 			}
 			xlog("debug", "Can't find node for $jfil " . Dumper(%nodes) . "\n") if $conf{trace};
@@ -783,10 +843,13 @@ sub getmem {
 sub getcpus {
 	my $cores;
 	open F, "/proc/cpuinfo";
+	my %cores;
         while (<F>) {
-                $cores += 1 if /processor\s*:\s*\d+/i;
+                $cores{$1} = 1 if /core id\s*:\s*(\d+)/i;
+                $cores += 1 if /processor\s*:\s*(\d+)/i;
         }
 	close F;
+	$cores = scalar keys %cores if %cores;
 	return $cores;
 }
 
@@ -994,9 +1057,16 @@ sub readconf {
 	_readconf("$conf{config}");
 
         # defines happen at the end so defaults can get unpacked
-        for (values %conf) {
-		if ( !s/^\{(.*)\}$/eval($1)/gei ) {
-                	s/\$([\w-]+)/$conf{lc($1)}?$conf{lc($1)}:$1/gei;
+        for (keys %conf) {
+		next if ref $conf{$_};
+		if ($_ eq 'match') {
+			# match rules are evaluated during matching, but reval now to test
+			$safe->reval($conf{$_});
+			if ($@) {
+				xlog("Error testing match rule $conf{$_}");
+			}
+		} elsif ( ! ($conf{$_} =~ s/^\{(.*)\}$/eval($1)/gei) ) {
+                	$conf{$_} =~ s/\$([\w-]+)/$conf{lc($1)}?$conf{lc($1)}:$1/gei;
 		}
         }
 
@@ -1008,8 +1078,6 @@ sub readconf {
 	for (split(/[\s,]+/,$v)) {
 		$conf{services}->{$_} = 1;
 	}
-
-	$conf{queue_direct} = $v =~ /^(yes|1)$/i;
 
 	$conf{env} = [split(/[\s,]+/,$conf{env})] unless ref($conf{env}) eq 'ARRAY';
 
@@ -1178,48 +1246,87 @@ sub burp
 }
 
 sub usage {
-	<<EOF
-Usage: grun <options> command...
+	<<'EOF'
+Usage: grun <exec-options> command...
+   or: grun -d [<local-daemon-options>]
+   or: grun -q [<query-options>] <query-command>
 
-Lightweight grid engine, maybe it should be called "lge".  
+Lightweight compute cluster engine, maybe it should be called "lce".  
 
 Execution Options:
-	-t 		Trace mode (verbose logging)
-	-f FILE		Read FILE for job options
-	-q COMMAND	queue info command
+    -f|ile FILE     Read FILE for job options
+    -t|race         Trace mode (verbose logging)
 
-	-m|em INT	memory minimum in MB
-	-c|pu CPUS	minimum number of cpus 
-	-n|ode N1,N2	specify certain nodes
+    -m|em INT       memory minimum in MB
+    -c|pu CPUS	    minimum number of cpus 
+    -n|ode N1,N2    specify certain nodes
 
-	-noio		disable io-processing, but wait for completion
-	-nowait		no io and don't wait, just start the command
-	-e|rr FILE	write stderr directly to FILE, no spool
-	-o|ut FILE	write stdout directly to FILE, no spool
+    -noio		disable io-processing, but wait for completion
+    -nowait		no io and don't wait, just start the command
+    -e|rr FILE	write stderr directly to FILE, no spool
+    -o|ut FILE	write stdout directly to FILE, no spool
 
 If the command contains shell metacharacters, it is passed to "bash -c".
 
-Queue commands:
-	status		List nodes
-	jobs		List jobs
-	conf		Dump config from memory
+Query Options:
+    -a|ll           Query all nodes
+    -n|odes         List of nodes to query
 
-Daemon Options:
-	-d|aemon	Daemonize
-	-k|ill		Kill running server
-	-r|estart	Restart running server
+Query Commands:
+    [-]status       List nodes (queue only)
+    [-]jobs         List jobs (queue only)
+    [-]conf         Dump config from memory
 
-Other Options:
-	-C FILE		Read FILE instead of /etc/grun.conf
-	-t|trace	Trace mode (trace goes to log)
-	-v|version	Print version and exit
+Local Daemon Options:
+    -h|up           Reload config on server
+    -k|ill          Kill running server
+    -r|estart       Restart running server
 
-Config File:
-	spool		Location for queue/io temp storage
-	log_file	Location of the log
-	backup_engine	Send commands here when grid is full
-	.....
-	TODO
+Without an option, -d just starts the daemon on the local machine.
+
+Common Options:
+    -C FILE         (/etc/grun.conf) Config file location
+    -t|trace        Turn on debugging in the log file
+    -v|version      Print version and exit
+
+Configuration File:
+
+All config variables written as {value} are interpreted as perl code, and get evaluated at startup.
+
+The "include" varialbe actually just includes the file specified, as if it were part of the original file.
+
+All non-code configuration variables can include '$varname', which gets expanded to the value of another config var.
+
+Be careful with match code.  It it's slow, it will kill the performance of your main node.
+
+Common variables:
+
+    master          (localhost) Hostname[:port] of master node
+    spool           (/var/spool/grun) Location for queue & io temp storage
+    log_file	    Location of the log
+    services        Must be 'queue' and/or 'exec'
+    port            Port to listen on
+    trace           Turn tracing on for the whole server
+
+Queue config vars:
+
+    env             (PATH) List of environment varialbes to copy to the processes.  An asterisk (*) means 'ALL'
+    expire_secs     (0) If set, jobs that aren't pinged in time get retried
+    expire_action   (retry) Can be 'retry', 'fail'
+    idle_load	    (.3) If load is less than this amount, then considered idle
+    io_keep	    (3600) Time to keep unretrieved stdio files (0=forever)
+    log_file        Where to send "xlog" output
+    pid_file	    (/var/run/grun.pid)
+    ping_secs       (30) Nodes ping the master this often.
+    ping_expire     (2*$ping_secs) Drop a node if it doesn't ping in time
+
+Execution node config vars:
+
+    match           Perl code that must eval to TRUE for a node match
+    full_match      (1) If jobs queue is full, this is evaluated
+    full_exec       If full match returns true, then this command is run
+    wrap            Job command wrapper
+    
 EOF
 }
 
