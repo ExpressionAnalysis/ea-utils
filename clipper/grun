@@ -171,6 +171,7 @@ if ($daemon) {
 			eval {readsocks()};
 			xlog("error", "Daemon readsocks exception: $@") if $@;
 
+			# theoretically these could be in separate threads, or forked off
 			if ( $conf{services}->{queue} ) {
 				eval {schedule()};
 				xlog("error", "Daemon schedule exception: $@") if $@;
@@ -292,6 +293,8 @@ END {
 }
 
 sub readsocks {
+	# based on ppcgid, nonforking socket code
+
     	my ($new_readable, $new_writable, $new_error) = IO::Select->select($read_set, $write_set, $read_set, 1);
 
 	foreach my $sock (@$new_readable) {
@@ -376,7 +379,7 @@ sub readsocks {
 			xlog("debug", "Closing $sock after close flag\n") if $conf{trace};
 			close_sock($sock);
 		} elsif (length(*$sock{HASH}->{resp})) {
-			xlog("debug", "Writing $sock " . *$sock{HASH}->{resp}) if $conf{trace};
+			xlog("debug", "Writing $sock " . substr(*$sock{HASH}->{resp},0,1000)) if $conf{trace};
 
 			my $nb = syswrite($sock, *$sock{HASH}->{resp}, length(*$sock{HASH}->{resp}), *$sock{HASH}->{resp_offset});
 			if (!$nb) {
