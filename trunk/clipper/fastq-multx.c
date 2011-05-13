@@ -86,7 +86,7 @@ int read_fq(FILE *in, int rno, struct fq *fq);		// 0=done, 1=ok, -1=err+continue
 
 void usage(FILE *f);
 int hd(char *a, char *b, int n);
-int debug=0;
+static int debug=0;
 // it's times like this when i think a class might be handy, but nah, not worth it
 typedef struct bnode {
 	char *seq;
@@ -94,16 +94,16 @@ typedef struct bnode {
 } bnode;
 
 struct group grs[MAX_GROUP_NUM];
-int grcnt=0;
+static int grcnt=0;
 
 struct bc bc[MAX_BARCODE_NUM+1];
-int bcnt=0;
+static int bcnt=0;
 
-int pickmax=0;
-void *picktab=NULL;
+static int pickmax=0;
+static void *picktab=NULL;
 void pickbest(const void *nodep, const VISIT which, const int depth);
 int bnodecomp(const void *a, const void *b) {return strcmp(((bnode*)a)->seq,((bnode*)b)->seq);};
-float pickmaxpct=0.10;
+static float pickmaxpct=0.10;
 
 int main (int argc, char **argv) {
 	char c;
@@ -111,7 +111,7 @@ int main (int argc, char **argv) {
 	int mismatch = 1;
 	char end = '\0';
 	char *in[6];
-	char *out[6];
+	const char *out[6];
 	int f_n=0;
 	int f_oarg=0;
 	const char* guide=NULL;		// use an indexed-read
@@ -339,7 +339,7 @@ int main (int argc, char **argv) {
 			// in[0] needs to be the guide file
 			FILE *f = fin[0];
 			char *n = in[0];
-			char *o = out[0];
+			const char *o = out[0];
 			fin[0]=fin[i];
 			in[0]=in[i];
 			out[0]=out[i];
@@ -488,7 +488,7 @@ int main (int argc, char **argv) {
 				bc[b].fout[i] = NULL;
 				continue;
 			}
-			char *p=strchr(out[i],'%');
+			const char *p=strchr(out[i],'%');
 			if (!p) fail("Each output file name must contain a '%' sign, which is replaced by the barcode id\n");
 			bc[b].out[i]=(char *) malloc(strlen(out[i])+strlen(bc[b].id.s)+10);
 			strncpy(bc[b].out[i], out[i], p-out[i]);
