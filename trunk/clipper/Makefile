@@ -3,7 +3,7 @@ PREFIX?=/opt
 CFLAGS?=-O3
 
 PKG=ea-utils
-REL := $(shell svnversion | perl -ne 'print $$1 if /:(\d+)/')
+REL := $(shell svnversion 2>/dev/null | perl -ne 'print $$1 if /:(\d+)/' )
 VER := $(shell grep '%define ver' ${PKG}.spec | perl -ne 'print $$1 if / (\S+) *$$/')
 
 SRC=fastq-clipper.c fastq-mcf.c fastq-multx.c fastq-join.c
