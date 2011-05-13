@@ -46,9 +46,10 @@ GetOptions("daemon"=>\$daemon, "CONF=s"=>\$def{config}, "xcmd=s"=>\$xcmd, "kill"
 	die usage();
 
 my $safe = new Safe;
-my $gjobid = slurp("$conf{spool}/nextid");
 
 init();
+
+my $gjobid = slurp("$conf{spool}/nextid");
 
 if ($qinfo) {
 	my ($arg) = $qinfo =~ s/=(.*)//;
@@ -57,6 +58,13 @@ if ($qinfo) {
 		$arg =~ s/^[=,\s-]+//;
 		@arg = split /[=,\s-]+/, $arg;
 	}
+	my $tmp = bestunique($qinfo, qw(conf status jobs hist hup));
+	if (!$tmp) {
+		die "Command $qinfo is not available\n";
+	}
+
+	$qinfo = $tmp;
+
 	if (!$ENV{_GRUN} && (!$conf{services}->{queue} || $qinfo =~ /^conf|status$/)) {
 		my ($res) = waitmsg($conf{master}, $conf{master_port}, "xcmd", $qinfo, @arg);
 		print $res;
@@ -214,11 +222,16 @@ for (@{$conf{env}}) {
 $opt{user} = getpwuid($>);
 
 if ($conf{trace}) {
+	$opt{trace} = 1;
 	sendcmd($conf{master}, $conf{master_port}, 'trace', 1);
 }
 
 # run command
 my %info = waitmsg($conf{master}, $conf{master_port}, 'run', \%opt, @cmd);
+
+if (! %info) {
+	die "$@\n";
+}
 
 if ($info{error}) {
 	print STDERR $info{error}, "\n";
@@ -244,6 +257,9 @@ if ($opt{wait}) {
 	} else {
 		# stat auto-cleans... seems silly to stew over a byte of status
 		($stat, $err) = waitmsg($info{ip}, $info{port}, 'xstat', $info{jid});
+	}
+	if ($stat == 11) {
+		$err = 'Segmentation fault';
 	}
 	if ($err) {
 		print STDERR $err, "\n";
@@ -481,6 +497,7 @@ sub process_message {
 		$io_wait{$opts->{id}}->{type} = 'stat' if $opts->{wait};
 		$io_wait{$opts->{id}}->{type} = 'io' if $opts->{io};
 
+
 		if (!$err && !($pid=fork)) {
 			if (! defined $pid) {
 				$err = "Can't fork";
@@ -502,9 +519,11 @@ sub process_message {
 					open STDERR, ">/dev/null";
 					open STDOUT, ">/dev/null";
 				}
+				
 				for (keys(%{$opts->{env}})) {
 					$ENV{$_}=$opts->{env}->{$_};
 				}
+			
 				for (keys(%{$opts})) {
 					next if ref($opts->{$_});
 					$ENV{"_GRUN_OPT_$_"} = $opts->{$_};
@@ -512,14 +531,18 @@ sub process_message {
 				$ENV{"_GRUN"} = 1;
 				my $err;
 
-				$> = $uid if $uid;
-				$) = $gid if $gid;
+				xlog("debug", "Setting uid to $uid, gid to $gid.\n") if ($conf{trace} || $opts->{trace});
 
-				if ($opts->{cwd}) {
-					if (!chdir($opts->{cwd})) {
-						$err = "Can't cd to $opts->{cwd}";		
+				eval {	
+					$) = $gid if $gid;
+					$> = $uid if $uid;
+					if ($opts->{cwd}) {
+						if (!chdir($opts->{cwd})) {
+							$err = "Can't cd to $opts->{cwd}";		
+						}
 					}
-				}
+				};
+				$err = $@ if $@;
 
 				if (!$err) {
 					if ($conf{wrap}) {
@@ -533,6 +556,7 @@ sub process_message {
 				$> = 0;
 				$) = 0;
 				burp($noexec, $err);
+				xlog("debug", "Exec failed: $err.\n") if ($conf{trace} || $opts->{trace});
 				exit -1;
 			}
 		}
@@ -1089,9 +1113,10 @@ sub waitio {
 
 sub waitmsg {
 	my $sock = _sendcmd(@_);
+
 	if (!$sock) {
-                xlog("error","Can't send command ", packcmd(@_));
-		return undef;
+                xlog("error", "Can't send command ", packcmd(@_));
+		return ();
 	}
 	my ($buf, $dat);
 	while ($sock->read($dat, 4096)) {
@@ -1101,7 +1126,8 @@ sub waitmsg {
 		substr($buf,-2,2) = '';
 		return unpackcmd($buf);
 	}
-	return undef;
+	$@="Socket protocol error, no EOT";
+	return ();
 }
 
 sub xsend {
@@ -1134,7 +1160,7 @@ sub _sendcmd {
 	my $xcmd = packcmd(@cmd);
         my $sock = IO::Socket::INET->new(Proto=>"tcp",PeerPort=>$port,PeerAddr=>$host, Timeout=>5);
         if (!$sock) {
-                xlog("error","Can't connect to $host:$port", Carp::longmess());
+                xlog("error",$@="Can't connect to $host:$port", Carp::longmess());
 		return undef;
         }
         if ($sock->send($xcmd)) {
@@ -1216,7 +1242,7 @@ sub showhist {
 	closedir(D);
 
         opendir(D,"$conf{spool}/jhist/$mx");
-	my @D = sort {$b-$a} readdir(D);
+	my @D = sort {$a-$b} readdir(D);
 	closedir(D);
 
 	my $count = $opt{count};
@@ -1234,7 +1260,7 @@ sub showhist {
 			$cmd =~ s/^\s+//;
 			$cmd =~ s/\s+$//;
 			$cmd =~ s/\n/;/g;
-                        $r .= sprintf "%s\t%s\t%s\t%s\t%s\n", $jid,$job{user},$job{status},$job{cwd},$cmd;
+                        $r .= sprintf "%s\t%s\t%s\t%s\t%s\t%s\n",$jid,$job{user},$job{host},$job{status},$job{cwd},$cmd;
                 }
 		last if --$count <= 0;
         }
@@ -1300,5 +1326,17 @@ sub showjobs {
         }
         closedir(D);
         return $r;
+}
+
+sub bestunique {
+	my ($c, @c)  = @_;
+	my $b;
+	for (@c) {
+		if ($_ =~ /^$c/) {
+			return undef if ($b);
+			$b = $_;
+		}
+	}
+	return $b;
 }
 
