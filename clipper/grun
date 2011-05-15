@@ -66,27 +66,33 @@ init();
 my $gjobid = slurp("$conf{spool}/nextid");
 
 if ($qinfo) {
+	Getopt::Long::Configure qw(no_require_order no_ignore_case passthrough);
+	my %opt;
+	GetOptions(\%opt, "count=i") || die usage();
 	my $cmd = shift @ARGV;
+	die usage() if @ARGV > 1;
+	
 	my @arg = @ARGV;
-	my $tmp = bestunique($cmd, qw(conf status jobs hist hup));
+	$cmd =~ s/^-//;
+	my $tmp = substr bestunique($cmd, qw(config status jobs history)), 0, 4;
 	if (!$tmp) {
-		die "Command $cmd is not available\n";
+		die "Command $cmd is not available, for help type grun -q -h\n";
 	}
-
 	$cmd = $tmp;
 
-	if (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|status$/)) {
+	if (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|stat$/)) {
+		# for now, status goes to the main node, and forks ... this could get ugly, if called a lot
 		my ($res) = waitmsg($conf{master}, $conf{master_port}, "xcmd", $cmd, @arg);
 		print $res;
 	} else {
-		if ($cmd eq 'status') {
+		if ($cmd eq 'stat') {
 			print shownodes(@arg);
 		}	
 		if ($cmd eq 'jobs') {
 			print showjobs(@arg);
 		}	
 		if ($cmd eq 'hist') {
-			print showhist(@arg);
+			print showhist(%opt);
 		}	
 	}
 	exit 0;
@@ -99,8 +105,8 @@ if (open(IN, $conf{pid_file})) {
 }
 
 if ($killjob) {
-	my $err = waitmsg($conf{master}, $conf{master_port}, 'jkill', $killjob);
-	die "$err\n" if ($err);
+	my ($err) = waitmsg($conf{master}, $conf{master_port}, 'jkill', $killjob);
+	die "E: $err\n" if ($err);
 	exit 0;
 }
 
@@ -186,17 +192,23 @@ if ($info{ip}) {
 $SIG{TERM} = $SIG{INT};
 
 if ($opt{wait}) {
+	# look at all the work you can avoid if you don't wait
 	my ($stat, $err);
-	if ($opt{io}) {
-		# connect to executing node directly and ask for stderr, stdout, and status based on job id
-		($stat, $err) = waitio($info{ip}, $info{port}, 'xio', $info{jid});
-		if (defined $stat) {
-			# send into the ether...if exec doesn't get it, clean up after timeout
+	# connect to executing node directly and ask for stderr, stdout, and status based on job id
+	while (!defined $stat && !defined $err) {
+		# shadow watcher....
+		if ($opt{io}) {
+			($stat, $err) = waitio($info{ip}, $info{port}, 'xio', $info{jid});
+		} else {
+			($stat, $err) = waitmsg($info{ip}, $info{port}, 'xstat', $info{jid});
+		}
+		sleep 5 if (!defined $stat && !defined $err);
+	}
+	if (defined $stat) {
+		# send this command into the ether...if exec doesn't get it, clean up after timeout
+		if ($opt{io}) {
 			sendcmd($info{ip}, $info{port}, 'xclean', $info{jid});
 		}
-	} else {
-		# stat auto-cleans... seems silly to stew over a byte of status
-		($stat, $err) = waitmsg($info{ip}, $info{port}, 'xstat', $info{jid});
 	}
 	if ($stat == 11) {
 		$err = 'Segmentation fault';
@@ -206,6 +218,7 @@ if ($opt{wait}) {
 	}
 	exit $stat<<8;
 } else {
+	# aah... nicer
 	print STDOUT "Job id $info{jid}\n";
 }
 
@@ -220,6 +233,7 @@ sub readsocks {
 
     	my ($new_readable, $new_writable, $new_error) = IO::Select->select($read_set, $write_set, $read_set, 1);
 
+	# if the thing you're doing is slowing that forking... fork
 	foreach my $sock (@$new_readable) {
 		if ($sock == $listener) {
 			my $new_sock = $sock->accept();
@@ -333,13 +347,15 @@ sub close_sock {
 
 sub process_message {
 	my ($data, $sock) = @_;
-	xlog("note", "Received command $data\n") if $conf{trace};
+	xlog("note", "Received command $data from " . $sock->peerhost() . "\n") if $conf{trace};
 	my $arr = $safe->reval($data);
 	return unless ref($arr) eq 'ARRAY';
 	my ($cmd, @args) = @$arr;
 
 	if ($cmd eq 'xcmd') {
-		if ($args[0] eq 'reload') {
+		# these commands 'query or interfere' with normal running of the server 
+		# they are initiated by a user	
+		if ($args[0] eq 'relo') {
 			# reread config... maybe rebind stuff too
 			xlog("note", "Reload from remote command");
 			init();
@@ -348,16 +364,15 @@ sub process_message {
 			xlog("note", "Shutdown from remote command");
 			$quit = 1;
 			return 'ok';
-		} elsif ($args[0] eq 'restart') {
+		} elsif ($args[0] eq 'rest') {
 			xlog("note", "Restarting from remote command");
 			close_sock($listener);
 			if (!fork) {
-				sleep 1;
 				exec($0, '-d');
 			}
 			$quit = 1;
 			return "ok";
-		} elsif ($args[0] eq 'status') {
+		} elsif ($args[0] eq 'stat') {
 			return shownodes();
 		} elsif ($args[0] eq 'hist') {
 			splice(@args, 1);
@@ -370,8 +385,10 @@ sub process_message {
 			return "Error: unknown xcmd '$args[0]'";	
 		}
 	} elsif ($cmd eq 'trace') {
+		# turn tracing on... should be 'session' oriented but too lazy for now
 		$conf{trace} = 0+$args[0];
 	} elsif ($cmd eq 'node') {
+		# this is the 'node ping'
 		if (ref($args[0]) eq 'HASH') {		# bit of validation
 			my $ip = $sock->peerhost();	# store info in a file, for fun
 			my $file = "$conf{spool}/nodes/$ip.reg";
@@ -389,25 +406,30 @@ sub process_message {
 			return "Error: invalid node registration info";	
 		}
         } elsif ($cmd eq 'jkill') {
+		# this is the 'job kill command'
 		my ($jid) = @args;
 		if (! -e "$conf{spool}/jobs/$jid") {
+			# send to the actual job server... TODO... jmine was dumb, IP/node chosen needs to be in a separate file
 			xlog("error", "Need to forward onward...");
-			return "TODO";
+			return "TODO: Check to see if there's a jmine";
 		} else {
 			unlink "$conf{spool}/jobs/$jid";
-			return "TODO";
+			return "Job $jid aborted\n";
 		}
 	} elsif ($cmd eq 'jstat') {
+		# sent by the execution node to say what the status of a job is
 		my %opts = @args;
 		if ($opts{id}) {
-			my $ip = $sock->peerhost();	# should match the ip from jmine
+			my $ip = $sock->peerhost();	# should match the ip from jmine (see above how dumb this is)
 			if (! -e "$conf{spool}/jobs/$opts{id}:$ip.run") {
 				xlog("error", "Got a report for a job $opts{id} from $ip");
 			}
 			if ($opts{jrun}) {
+				# just a ping
 				xlog("debug", "I'm still alive ...$opts{id} from $ip");
 				touch("$conf{spool}/jobs/$opts{id}:$ip.run");
 			} elsif (defined $opts{status}) {
+				# job is done
 				open(ST, ">" . jhistpath($opts{id}));
 				my $jhist = slurp("$conf{spool}/jobs/$opts{id}:$ip.run");
 				substr($jhist,0,2) = "[{host=>'" . $ip  . "', status=>" . (0+$opts{status}) . ",";
@@ -421,14 +443,15 @@ sub process_message {
 			return ('dack', %opts);	
 		}
         } elsif ($cmd eq 'dack') {
+		# ackknowledge receipt of status signal, so you don't have to do it again
                 my %opts = @args;
                 if ($opts{pid}) {
-			my $info = gunpack(slurp("$conf{spool}/pids/$opts{pid}"));
 			if (!$opts{jrun}) {
 				# stop tracking this pid
+				my $info = gunpack(slurp("$conf{spool}/pids/$opts{pid}"));
 				unlink("$conf{spool}/pids/$opts{pid}");
 				if (!$info->{wait}) {
-					# nobody asked for the status
+					# nobody asked for the output, so don't keep it
 					unlink("$conf{spool}/jpids/$info{id}");
 					unlink("$conf{spool}/pids/$opts{pid}.stat");
 					unlink("$conf{spool}/stdio/$opts{pid}.err");
@@ -438,25 +461,21 @@ sub process_message {
 		}
 	} elsif ($cmd eq 'exec') {
 		my ($opts, @cmd) = @args;
-		# flag that child never executed
 
 		my ($uid, $gid, $err);
 		if ($opts->{user}) {
 			(undef, undef, $uid, $gid) = getpwnam($opts->{user});
 		}
-
 		if (defined($uid) && !$conf{run_asroot} && !$uid) {
 			$err="Won't run as root";
 		}
-
 		if (!defined($uid)) {
 			$err="User $opts->{user} is unknown on this machine, not executing";
 		}
 
-		# expecting someone to come pick up output
-		$io_wait{$opts->{id}}->{type} = 'stat' if $opts->{wait};
-		$io_wait{$opts->{id}}->{type} = 'io' if $opts->{io};
-
+		# expecting someone to come pick up output?
+		$io_wait{$opts->{id}}->{type} = 'stat' if $opts->{wait};	# status wait
+		$io_wait{$opts->{id}}->{type} = 'io' if $opts->{io};		# io wait
 
 		my $pid;
 
@@ -469,15 +488,16 @@ sub process_message {
 				$SIG{TERM} = undef;
 
 				# kill me with a negative number, all kids die too
-				# kill my parent.... i stay alive, and my IO is recoverable
+				# kill my parent.... i stay alive, and my IO is still ready to go
 				POSIX::setsid();
-
+	
 				my $noexec = "$conf{spool}/pids/$$.noexec";
 
 				if ($opts->{io}) {
 					open STDERR, ">$conf{spool}/stdio/$$.err";
 					open STDOUT, ">$conf{spool}/stdio/$$.out";
 				} else {
+					# save disk and time, i never want i/o
 					open STDERR, ">/dev/null";
 					open STDOUT, ">/dev/null";
 				}
@@ -526,7 +546,10 @@ sub process_message {
 		if ($err) {
 			# fake it
 			$pid = $opts->{id};
+			xlog("note", "Error $err with job $opts->{id}");
 		}
+
+		xlog("note", "Starting job $opts->{id}, pid $pid") if !$err;
 
 		my $file = "$conf{spool}/pids/$pid";
 
@@ -557,34 +580,48 @@ sub process_message {
 		# cleanup, i got everything
 		my ($jid) = @args;
 		my $pid = slurp("$conf{spool}/jpids/$jid");
-		unlink  "$conf{spool}/jpids/$jid", "$conf{spool}/stdio/$pid.out", "$conf{spool}/stdio/$pid.err", "$conf{spool}/pids/$pid.stat";
+		if ($pid > 1) {
+			unlink  "$conf{spool}/jpids/$jid", "$conf{spool}/stdio/$pid.out", "$conf{spool}/stdio/$pid.err", "$conf{spool}/pids/$pid.stat";
+		} else {
+			xlog("error", "Got a cleanup for $jid which doesn't exist");
+		}
         } elsif ($cmd eq 'xabort') {
                 # kill job
                 my ($jid, $sig) = @args;
                 my $pid = slurp("$conf{spool}/jpids/$jid");
-		xlog("note", "Abording jobs $jid on request");
-		$sig = 2 if !$sig;
-		kill $sig, -$pid;		# parent, and all kids
-		kill $sig, $pid;		# parent if, for some reason, that didn't work
+		if ($pid > 1) {
+			xlog("note", "Abording jobs $jid ($pid) on request");
+			$sig = 2 if !$sig;
+			my $ok = kill $sig, -$pid;		# parent, and all kids
+			$ok |= kill $sig, $pid;		# parent if, for some reason, that didn't work
+			if ($ok) {
+				return "Job $jid aborted"; 
+			}
+		} else {
+			return "Job $jid not found"; 
+		}
 	} elsif ($cmd eq 'xio') {
 		my ($jid) = @args;
-		my $pid = slurp("$conf{spool}/jpids/$jid");
 		$io_wait{$jid}->{type} = 'io';
 		$io_wait{$jid}->{sock} = $sock;
+		$io_wait{$jid}->{time} = time();		# toss this entry if it gets old
 #		print "IOWAIT: " . Dumper \%io_wait;
-		return ($SOCK_WAIT);		# leave socket open for response
+		return ($SOCK_WAIT);				# leave socket open for response
         } elsif ($cmd eq 'xstat') {
                 my ($jid) = @args;
 		my $pid = slurp("$conf{spool}/jpids/$jid");
+		# xstat means you don't want i/o, just status... these shouldn't even exist
 		unlink  "$conf{spool}/stdio/$pid.out", "$conf{spool}/stdio/$pid.err";
 		$io_wait{$jid}->{type} = 'stat';
 		$io_wait{$jid}->{sock} = $sock;
-		return ($SOCK_WAIT);		# leave socket open for response
+		$io_wait{$jid}->{time} = time();		# toss this entry if it gets old
+		return ($SOCK_WAIT);				# leave socket open for response
 	} elsif ($cmd eq 'run') {
-		# returns jobid [, error string]
+		# user command, returns jid=>jobid [, error=>string]
 		if (!$conf{services}->{queue}) {
 			return (error=>"No queue service running on this host");	
 		} else {
+			# get rid of the 'run' at the front of the array
 			return(error=>"Network data format error") 
 				unless $data =~ s/^\['run',/[/;
 
@@ -592,12 +629,15 @@ sub process_message {
 			my $time = time();
 			++$gjobid;
 
+			# no half-written id's
 			burp("$conf{spool}/nextid.tmp", $gjobid);
 			rename "$conf{spool}/nextid.tmp", "$conf{spool}/nextid";
 
+			# the job file
 			my $jid = $gjobid;
 			my $file = "$conf{spool}/jobs/$jid";
 
+			# stick the host the job came from and the start time in there.
 			my $ip = $sock->peerhost();
 			substr($data,0,2) = "[{time=>" . $time . "," . "from=>'" . $ip . "',";
 
@@ -605,12 +645,13 @@ sub process_message {
 			print F $data;
 			close F;
 
+			# want i/o or status?
 			if ($opts->{wait}) {
 				$run_wait{$jid}->{sock} = $sock;
 				$run_wait{$jid}->{type} = 'start';	# socket waits for execution start
 				return ($SOCK_WAIT);			# leave socket open for response
 			} else {
-				return (jid=>$jid);
+				return (jid=>$jid);			# nice and fast, no i/o
 			}
 		}	
 	}
@@ -635,6 +676,7 @@ sub schedule {
 		$conf{lastschedtime} = time();
 	}
 
+	# no attempt here to prioritize jobs, just match and go
 	while(my $jid=readdir(D)) {
 		my $jfil = "$conf{spool}/jobs/$jid";
 
@@ -647,7 +689,7 @@ sub schedule {
 
 		if ($jfil =~ /\.run$/) {
 			# check to see whether job has expired
-			if (fmodtime($jfil) < (time()-$conf{expire_secs})) {
+			if ($conf{expire_secs} && (fmodtime($jfil) < (time()-$conf{expire_secs}))) {
 				xlog("error", "TODO: Deal with job expiration of $jfil\n");
 				# rename back to active job?
 				# leave in queue as held (since it may have executed)
@@ -661,6 +703,7 @@ sub schedule {
 		my @n;
 		my ($max_av, $max_n);
 		for my $n (values %nodes) {
+			# jobs need enough memory, cpu availability and disk space... that's it
 			if ($n->{ping} > (time()-$conf{ping_secs}*2)) {
 				if ( ($n->{mem} >= $ref->[0]->{memory}) &&
 				     ($n->{avail} >= $ref->[0]->{cpus}) && 
@@ -1309,7 +1352,7 @@ sub showhist {
 
 	my $mx = -1;
         opendir(D,"$conf{spool}/jhist");
-	while($_=readdir(D)) {
+	while(defined ($_=readdir(D))) {
 		if ($_ > $mx) {
 			$mx = $_;
 		}
@@ -1320,8 +1363,11 @@ sub showhist {
 	my @D = sort {$a-$b} readdir(D);
 	closedir(D);
 
-	my $count = $opt{count};
-	$count = 100 if !$count;
+	my $count = $opt{count}; 
+	$count = 50 if !$count;
+
+	splice @D, 0, @D-$count;
+	
         for my $jid (@D) {
                 my $f = "$conf{spool}/jhist/$mx/$jid";
                 next unless -f $f;
@@ -1343,7 +1389,6 @@ sub showhist {
 			}
                         $r .= sprintf "%s\t%s\t%s\t%s\t%s\t%s\n",$jid,$job{user},$job{host},$job{status},$job{cwd},$cmd;
                 }
-		last if --$count <= 0;
         }
         return $r;
 }
@@ -1442,7 +1487,7 @@ sub startdaemon {
 		my @n = $node ? expandnodes($node) : ([$conf{master},$conf{master_port}]);
 	
 		my $stat = 0;
-		my $xcmd = $reload ? 'reload' : $restart ? 'restart' : $dkill ? 'term' : '';
+		my $xcmd = $reload ? 'relo' : $restart ? 'rest' : $dkill ? 'term' : '';
 		if (!$xcmd) { 
 			die usage();
 		}
@@ -1503,6 +1548,7 @@ sub startdaemon {
 		$quit = 0;
 		while (!$quit) {
 			eval {readsocks()};
+			last if $quit;
 			xlog("error", "Daemon readsocks exception: $@") if $@;
 
 			# theoretically these could be in separate threads, or forked off
