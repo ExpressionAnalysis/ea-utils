@@ -43,7 +43,7 @@ chomp $def{hostname};
 
 my ($qinfo, $help, $config);
 
-GetOptions("help"=>\$help, "daemon"=>\$daemon, "CONF=s"=>\$config, "trace"=>\$def{trace}, "queue"=>\$qinfo) ||
+GetOptions("help"=>\$help, "daemon"=>\$daemon, "CONF=s"=>\$config, "trace"=>\$def{trace}, "query"=>\$qinfo) ||
 	die usage();
 
 $def{config} = $config if $config;
@@ -70,13 +70,13 @@ if ($qinfo) {
 	my %opt;
 	GetOptions(\%opt, "count=i") || die usage();
 	my $cmd = shift @ARGV;
-	die usage() if @ARGV > 1;
+	die usage() if !$cmd || @ARGV > 0;
 	
 	my @arg = @ARGV;
 	$cmd =~ s/^-//;
 	my $tmp = substr bestunique($cmd, qw(config status jobs history)), 0, 4;
 	if (!$tmp) {
-		die "Command $cmd is not available, for help type grun -q -h\n";
+		die "Command $cmd is not available, for help type grun -query -help\n";
 	}
 	$cmd = $tmp;
 
