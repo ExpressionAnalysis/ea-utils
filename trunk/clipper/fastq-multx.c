@@ -319,14 +319,14 @@ int main (int argc, char **argv) {
                 for (b=0;b<bgcnt;++b) {
 			if (bcg[b].gptr->i == gindex) {
 			if (bcg[b].bcnt[i] > bcg[b].ecnt[i]) {
-				++scnt;
+				scnt+=bcg[b].bcnt[i];
 			} else if (bcg[b].bcnt[i] < bcg[b].ecnt[i]) {
-				++ecnt;
+				ecnt+=bcg[b].ecnt[i];
 			}
 			}
 		};
 		end = scnt >= ecnt ? 'b' : 'e';
-		printf("scnt: %d, ecnt, %d, end: %d\n", scnt, ecnt, end);
+		if (debug) printf("scnt: %d, ecnt, %d, end: %c\n", scnt, ecnt, end);
 
 		// since this is a known good set, use a very low threshold, just to catch them all
                 fprintf(stderr, "Using Barcode Group: %s on File: %s (%s), Threshold %2.2f%%\n", grs[gindex].id, in[i], endstr(end), 100.0 * (float) ((float)thresh/6)/sampcnt);
