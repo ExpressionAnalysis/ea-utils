@@ -211,7 +211,7 @@ int main (int argc, char **argv) {
 	// 3 ways to get barcodes
 	if (list) {
 		// use a list of barcode groups... determine the best set, then use the determined set 
-		struct bcg bcg[MAX_GROUP_NUM * MAX_BARCODE_NUM];
+		struct bcg *bcg = (struct bcg *) malloc(sizeof(*bcg) * MAX_GROUP_NUM * MAX_BARCODE_NUM);
 		meminit(bcg);
 		int bgcnt=0;
 		int b;
