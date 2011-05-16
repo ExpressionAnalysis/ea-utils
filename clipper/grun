@@ -1,5 +1,21 @@
 #!/usr/bin/perl
 
+#    grun - lightweight jobs queueing system
+#    Copyright (C) 2011 Erik Aronesty
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 use strict;
 
 use Carp;
@@ -37,16 +53,19 @@ $def{io_keep} = 3600;				# keep io for this long after a job with i/o is finishe
 $def{sched_secs} = '$ping_secs';		# how often to try scheduling
 $def{master} = 'localhost:5184';		# central scheduler
 $def{services} = {queue=>1, exec=>1};		# all can run
-$def{pid_file} = "/var/run/grun.pid";		# pid fild
+$def{pid_file} = "/var/run/grun.pid";		# pid file
+$def{log_file} = "/var/log/grun.log";		# pid file
 $def{hostname} = $ENV{HOSTNAME} ? $ENV{HOSTNAME} : $ENV{COMPUTERNAME} ? $ENV{COMPUTERNAME} : `hostname`;
 chomp $def{hostname};
 
 my ($qinfo, $help, $config);
 
-GetOptions("help"=>\$help, "daemon"=>\$daemon, "CONF=s"=>\$config, "trace"=>\$def{trace}, "query"=>\$qinfo) ||
+GetOptions("help"=>\$help, "daemon"=>\$daemon, "CONF:s"=>\$config, "trace"=>\$def{trace}, "query"=>\$qinfo) ||
 	die usage();
 
 $def{config} = $config if $config;
+
+$help = 1 if defined $config && !$config;
 
 if ($help) {
 	print usage();
@@ -70,17 +89,25 @@ if ($qinfo) {
 	my %opt;
 	GetOptions(\%opt, "count=i") || die usage();
 	my $cmd = shift @ARGV;
-	die usage() if !$cmd || @ARGV > 0;
+	die usage() if !$cmd;
 	
+	if ($conf{trace}) {
+		$opt{trace} = 1;
+		sendcmd($conf{master}, $conf{master_port}, 'trace', 1);
+	}
 	my @arg = @ARGV;
 	$cmd =~ s/^-//;
-	my $tmp = substr bestunique($cmd, qw(config status jobs history)), 0, 4;
+	my $tmp = substr bestunique($cmd, qw(config status jobs file history)), 0, 4;
 	if (!$tmp) {
 		die "Command $cmd is not available, for help type grun -query -help\n";
 	}
 	$cmd = $tmp;
 
-	if (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|stat$/)) {
+	if ($cmd eq 'file') {
+		my ($res, $error) = waitio($conf{master}, $conf{master_port}, "xcmd", $cmd, @arg);
+		die $error, "\n" if $error;
+		print $res if $res;
+	} elsif (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|stat$/)) {
 		# for now, status goes to the main node, and forks ... this could get ugly, if called a lot
 		my ($res) = waitmsg($conf{master}, $conf{master_port}, "xcmd", $cmd, @arg);
 		print $res;
@@ -263,6 +290,7 @@ sub readsocks {
 					# leave it open, and in the read-list
 				} elsif ($resp[0] eq $SOCK_FILE) {
 					# read from one or more files, and send them through the socket
+					xlog("debug", "Got a file request [@resp]\n") if $conf{trace};
 					*$sock{HASH}->{file} = [splice(@resp, 1)];
 					$write_set->add($sock);
 				} else {
@@ -299,7 +327,7 @@ sub readsocks {
 					my $head = "name:$file\nlen:" . (-s $file) . "\n";
 					my $io = new IO::File;
 					if (!open ($io, $file)) {
-						$head .= "error: '$file' : $!\n";
+						$head .= "error:'$file' : $!\n";
 					} else {
 						*$sock{HASH}->{io} = $io;
 					}
@@ -355,17 +383,19 @@ sub process_message {
 	if ($cmd eq 'xcmd') {
 		# these commands 'query or interfere' with normal running of the server 
 		# they are initiated by a user	
+		my $ip = $sock->peerhost();
+
 		if ($args[0] eq 'relo') {
 			# reread config... maybe rebind stuff too
-			xlog("note", "Reload from remote command");
+			xlog("note", "Reload from remote command ($ip)");
 			init();
 			return 'ok';
 		} elsif ($args[0] eq 'term') {
-			xlog("note", "Shutdown from remote command");
+			xlog("note", "Shutdown from remote command ($ip)");
 			$quit = 1;
 			return 'ok';
 		} elsif ($args[0] eq 'rest') {
-			xlog("note", "Restarting from remote command");
+			xlog("note", "Restarting from remote command ($ip)");
 			close_sock($listener);
 			if (!fork) {
 				exec($0, '-d');
@@ -381,6 +411,10 @@ sub process_message {
 			return showconf();
 		} elsif ($args[0] eq 'jobs') {
 			return showjobs();
+		} elsif ($args[0] eq 'file') {
+			shift @args;
+			xlog("note", "Sending file [@args] to remote via xcmd ($ip)");
+			return ($SOCK_FILE, @args);
 		} else {
 			return "Error: unknown xcmd '$args[0]'";	
 		}
@@ -1121,13 +1155,14 @@ sub waitio {
                 return undef;
         }
         my ($dat, $stat, $got) = ('', '', 0);
+	my $err;
         while ($got<3) {
 		my $buf = '';
 		my %head;
 		my $break = 0;
 		do {
 			$buf .= $dat;
-			while ($buf =~ s/^(\w+):\s*(\S+)\n//) {
+			while ($buf =~ s/^([^\n]+?) *: *([^\n]*?) *\n//) {
 				$head{$1}=$2;
 			}
 			if ($buf =~ s/^\n//) {
@@ -1135,6 +1170,8 @@ sub waitio {
 				$break = 1;
 			}
 		} while (!$break && $sock->sysread($dat, 4096));
+
+		$err = $head{error} if $head{error};
 
 #		print Dumper(\%head);
 #		print "DAT IS: $dat\n";
@@ -1164,8 +1201,11 @@ sub waitio {
 #			print STDERR "left: $left dat:" . length($dat) . "\n"; 
 		} while ($left>0 && $sock->sysread($dat, 4096));
 	}
-	$stat = gunpack($stat);
-        return ($stat->{status}, $stat->{error});
+	if ($stat) {
+		$stat = gunpack($stat);
+		return ($stat->{status}, $stat->{error});
+	}
+	return ($err eq '', $err);
 }
 
 sub waitmsg {
@@ -1241,9 +1281,9 @@ Usage: grun <exec-options> command...
    or: grun -d [<local-daemon-options>]
    or: grun -q [<query-options>] <query-command>
 
-Lightweight compute cluster engine, maybe it should be called "lce".  
+Lightweight job queueing system
 
-For more help, run grun -h, or grun -d -h or grun -q -h
+For more help, run grun -h, grun -d -h, grun -C -h or grun -q -h.
 EOF
 
 	$u .= <<'EOF' unless $daemon || $qinfo;
@@ -1297,7 +1337,7 @@ Common Options:
     -h|elp          Show this help page
 EOF
 
-	$u .= <<'EOF' if $config;
+	$u .= <<'EOF' if defined $config;
 
 Configuration File:
 
@@ -1407,7 +1447,9 @@ sub shownodes {
 }
 
 # this reads the registered nodes from disk, and is naive about the internal state of the %nodes hash
-# there's some advantage, efficiency wise to doing this
+# there's some advantage, efficiency wise to doing this, instead of bothering the daemon
+# but the daemon would then need to flush live stats more often
+
 sub shownodes_disk {
 	my $r;
 	$r .= sprintf "%-15s %9s %5s\n", 'Hostname','Memory', 'Cpu';
@@ -1469,19 +1511,47 @@ sub bestunique {
 # returns an array of [host,port], given a list of host[:port] names
 sub expandnodes {
 	my @r;
+	my @n;
 	for (split(/[\s,]/, join ' ', @_)) {
 		my ($h, $p) =  m/^(.*)(:\d+)?$/;
 		$p = $conf{port} if !$p;
-		push @r, [$h, $p];
+		if ($h =~ s/\*/\.\*/g) {
+			if (!@n) {
+				@n=allnodes();	
+			}
+			for (@n) {
+				push @r, [$_->{hostname}, $p] if $_->{hostname} =~ /$h/;
+			}
+		} else {
+			push @r, [$h, $p];
+		}
 	}
 	return @r;
 }
 
-sub startdaemon {
-	my ($dkill, $restart, $reload, $node);
+sub allnodes {
+	my @r;
+	if (%nodes) {
+		return values %nodes;
+	}
+        opendir(D,"$conf{spool}/nodes");
+        while($_=readdir(D)) {
+                $_ = "$conf{spool}/nodes/$_";
+                next unless -f $_;
+                my @node=unpackcmd(slurp($_));
+                push @r, $node[1];
+	}
+	closedir D;
+	return @r;
+}
 
-	GetOptions("kill"=>\$dkill, "RESTART"=>\$restart, "reload"=>\$reload, "nodes=s"=>\$node) ||
+sub startdaemon {
+	my ($dkill, $restart, $reload, $node, $all);
+
+	GetOptions("kill"=>\$dkill, "RESTART"=>\$restart, "reload"=>\$reload, "nodes=s"=>\$node, "all"=>\$all) ||
 		die usage();
+
+	$node = '*' if $all;
 
 	if ($reload || $node) {
 		my @n = $node ? expandnodes($node) : ([$conf{master},$conf{master_port}]);
