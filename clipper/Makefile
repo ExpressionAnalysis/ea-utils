@@ -26,6 +26,7 @@ dist: $(PKG).tar.gz
 
 
 $(PKG).tar.gz: Makefile $(SRC) $(PKG).spec
+	[ -n "${REL}" ]
 	perl -i -pe 's/%define rel \w+/%define rel ${REL}/' ea-utils.spec
 	tar -cvzf $(PKG).tar.gz $^
 	cp $(PKG).tar.gz $(PKG).${VER}-${REL}.tar.gz
