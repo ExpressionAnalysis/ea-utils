@@ -347,6 +347,7 @@ int main (int argc, char **argv) {
 			in[i]=n;
 			out[i]=o;
 		}
+		if (bcg) free(bcg);
 	} else if (guide) {
 		// use the first file as a "guide file" ... and select a set of codes from that
 		FILE *gin = fin[0];
