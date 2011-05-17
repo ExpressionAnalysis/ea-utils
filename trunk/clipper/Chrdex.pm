@@ -3,7 +3,8 @@ package Chrdex;
 # Licensed via the "Artistic License" 
 # See: http://dev.perl.org/licenses/artistic.html
 # Copyright 2011, Expression Analysis
-# Author: Erik Aronesty
+# Author: Erik Aronesty <earonesty@expressionanalysis.com>
+# "Let me know if it's useful"
 
 use Inline 'C';
 
