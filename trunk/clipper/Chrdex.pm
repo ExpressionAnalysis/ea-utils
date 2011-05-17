@@ -5,6 +5,10 @@ package Chrdex;
 # Copyright 2011, Expression Analysis
 # Author: Erik Aronesty <earonesty@expressionanalysis.com>
 # "Let me know if it's useful"
+#
+# EXMAPLE:
+# $x = Chrdex->new("CCDS_Exome_annot.txt", chr=>2, beg=>5, end=>6, skip=>1);
+# $x->search(1, 153432255);
 
 use Inline 'C';
 
