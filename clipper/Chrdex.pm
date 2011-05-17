@@ -59,6 +59,7 @@ sub new {
 			last if !$ref;
 			$ref = undef if !($ref->{_opts}->{$_} eq $opts{$_});
 		}
+
 		if ($ref) {
 			# if begin != end, then type is range
 			if ($ref->{_opts}->{beg} != $ref->{_opts}->{end}) {
@@ -164,12 +165,15 @@ sub new {
 		DONE:
 		$locs{_opts} = \%opts;
 		store \%locs, "$tmpb.chrdex";
+		$locs{_type}='I' if $ref->{_opts}->{beg} == $ref->{_opts}->{end};
 		rename "$tmpb.chrdex", "$annob.chrdex";
 		$ref = \%locs;
 	}
-	if ($ref->{_opts}->{beg} != $ref->{_opts}->{end}) {
+
+	if (!($ref->{_type} eq 'I')) {
 		chrdex_check($ref);
 	}
+
 	return bless $ref, $class;
 }
 
