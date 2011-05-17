@@ -51,19 +51,23 @@ sub new {
 
 	my $ref;
         my $mt = (stat($path))[9];
+	# if index is new
 	if ((stat("$annob.chrdex"))[9] > $mt) {
 		$ref = retrieve "$annob.chrdex";
+		# if arguments were different, then clear ref
 		for (qw(delim skip chr beg end ver)) {
 			last if !$ref;
 			$ref = undef if !($ref->{_opts}->{$_} eq $opts{$_});
 		}
 		if ($ref) {
+			# if begin != end, then type is range
 			if ($ref->{_opts}->{beg} != $ref->{_opts}->{end}) {
 				eval{chrdex_check($ref)};
 				if ($@) {
 					$ref = undef;
 				}
 			} else {
+				# if begin == end, then type is plain hash
 				$ref->{_type}='I';
 			}
 		}
@@ -118,7 +122,9 @@ sub new {
 					my $new_st = $arr->[$i+1]->[1]+1;
 					my $new_en = $arr->[$i]->[1];
 					my $new_ro = $arr->[$i]->[2];
-				
+			
+					# TODO: store as array... string folding will save lots of space when there are many overlaps
+					# but hasn't been a problem so far
 					if ($arr->[$i]->[1] < $arr->[$i+1]->[1]) {
 						# overlap next
 						$new_st = $arr->[$i]->[1] + 1;
