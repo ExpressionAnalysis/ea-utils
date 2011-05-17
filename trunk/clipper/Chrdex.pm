@@ -22,7 +22,7 @@ use Data::Dumper;
 use locale; ##added by vjw to control case of reference bases
 
 our $VERSION = '1.0';
-my $FILEVER = 1;
+my $FILEVER = 2;
 
 sub new {
 	my ($class, $path, %opts) = @_;
@@ -63,6 +63,8 @@ sub new {
 				if ($@) {
 					$ref = undef;
 				}
+			} else {
+				$ref->{_type}='I';
 			}
 		}
 	}
@@ -168,7 +170,7 @@ sub new {
 sub search {
 	my ($self, $chr, $loc) = @_;
 	$chr=~s/^chr//i;
-	if ($self->{_opts}->{beg} == $self->{_opts}->{end}) {
+	if ($self->{_type} eq 'I') {
 		return $self->{"$chr:$loc"};
 	} else {
 		return chrdex_search($self, $chr, $loc);	
