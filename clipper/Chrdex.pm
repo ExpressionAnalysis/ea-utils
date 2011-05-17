@@ -1,5 +1,10 @@
 package Chrdex;
 
+# Licensed via the "Artistic License" 
+# See: http://dev.perl.org/licenses/artistic.html
+# Copyright 2011, Expression Analysis
+# Author: Erik Aronesty
+
 use Inline 'C';
 
 use strict;
@@ -70,7 +75,7 @@ sub new {
 		}
 		close IN;
 
-		# sort & cache annotation files
+		# sort & cache annotation, deal with overlaps nicely
 		my $i;
 		for my $chr (keys(%locs)) {
 			my $arr = $locs{$chr};
@@ -91,9 +96,9 @@ sub new {
 						$new_en = $arr->[$i+1]->[1];
 						$new_ro = $arr->[$i+1]->[2];
 						$arr->[$i+1]->[1] = $arr->[$i]->[1];
-						$arr->[$i+1]->[2] = $arr->[$i+1]->[2] . "\t" . $arr->[$i]->[2];
+						$arr->[$i+1]->[2] = $arr->[$i+1]->[2] . "\n" . $arr->[$i]->[2];
 					} else {
-						$arr->[$i+1]->[2] = $arr->[$i+1]->[2] . "\t" . $arr->[$i]->[2];
+						$arr->[$i+1]->[2] = $arr->[$i+1]->[2] . "\n" . $arr->[$i]->[2];
 					}
 
 					# shorten my end to less than the next's start
