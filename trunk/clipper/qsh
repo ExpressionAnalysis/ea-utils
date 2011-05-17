@@ -2,12 +2,14 @@
 
 use strict;
 use Getopt::Long;
+use Data::Dumper;
+
 Getopt::Long::Configure(qw(passthrough require_order no_ignore_case));
 
 # TODO: put these  in a config file, it can still be perl...for now it's simple enough to edit here
 
 # don't ever try to do make semantics on these commands
-my %nologic 	= map {($_, 1)} qw(if [ calc echo . mv  alc for);
+my %nologic 	= map {($_, 1)} qw(if [ calc echo . mv  alc for export);
 
 # always send to grind engine, no matter how big
 my %wrap 		= map {($_, 1)} qw(bowtie-build tophat juncsdb bwa cufflinks countannot calc-numaligned fastx_quality_stats);
@@ -24,46 +26,73 @@ my $grid_engine	= 'grun';
 # alter default 'big' size and parameter parsing
 my %info = (
 		cp => {big=>'20g'},
+		# input doesn't need to exist, output is calculated from the input
+		gunzip => {big=>'10g', in=>{_noex=>1}, out=>{_eval=>sub{$_[0]=~m/(.*)\.gz$/; return $1}}},
+		gzip => {big=>'20g', in=>{_noex=>1}, out=>{_eval=>sub{$_[0].".gz"}}},
+
+		'auto-clip.sh' => {out=>{_eval=>sub{$_[0]=~ s/\.fastq//; return ($_[0].".qcStats", $_[0].".adapters")}}},
 		bowtie => {big=>'20m'},
 		bwa => {big=>'20m'},
 		tophat => {big=>'10m'},
 		cufflinks => {big=>'10m'},
 		fastx_quality_stats => {in=>{i=>1}, out=>{o=>1}},
+
 		# change to asterisk for dependency globbing
 		'fastq-multx' => {out=>{o=>sub {s/%/\*/}}, in=>{l=>1, g=>1, B=>1}},
+
 		'fastq-mcf' => {out=>{o=>1}},
 );
 
-our $VERSION = '0.9.45';
+our $VERSION = '0.9.46';
 
-my ($debug, $check, $inline, $verbose, $help, $rules_file);
+my ($debug, $check, $inline, $verbose, $help, $rules_file, $list, $passopts);
 
 $| = 1;
 
-GetOptions("debug"=>\$debug, "K"=>\$check, "cmd=s"=>\$inline, "v"=>\$verbose, "help"=>\$help, "rules=s"=>\$rules_file) || die usage();
+GetOptions("DEBUG"=>\$debug, "K"=>\$check, "cmd=s"=>\$inline, "l"=>\$list, "v"=>\$verbose, "help"=>\$help, "rules=s"=>\$rules_file) || die usage();
+
+$verbose = 1 if $debug;
+
+$passopts = '-v' if $verbose;
+$passopts = '-l' if $list;
+$passopts = '-D' if $debug;
 
 if ($help || $ARGV[0] =~ /^-\?/) {
 	print usage();
 	exit 0
 }
 
-
 if ($check) {
-	# base executable name	
-	my $cmd = $ARGV[0];
+	# base executable name
+	my $orig_cmd = shift @ARGV;
+	my $cmd = $orig_cmd;
 	$cmd =~ s/.*\///;
 
+	my @argv = @ARGV;
+	for (@argv) {
+		s/\$(\w+)/$ENV{$1}/g;
+		s/\${(\w+)}/$ENV{$1}/g;
+	}	
+	print STDERR "QSH top '$cmd @argv'\n" if $debug;
 	# don't try to alter non executable lines
-	exit 0 if $cmd !~ /^[\w-]+$/;
+	exit 0 if $cmd !~ /^[\w.-]+$/;
 
 	# don't ever check dependencies, or wrap these commands
 	if ($nologic{$cmd}) {
+		print STDERR "QSH ignore command $cmd\n" if $verbose;
+		if ($debug) {
+			print "echo QSH debug: '$cmd @ARGV'";
+		} elsif ($list) {
+			print "false"
+		}
 		exit 0;
 	}
 
+	print STDERR "QSH check command $cmd\n" if $verbose;
+
 	# walk through arguments, determining inputs, outputs and total sizes 	
-	my ($opt, %opt, $first, $last, @in, @out, $sz);
-	for (@ARGV) {
+	my ($opt, %opt, $first, $firstnox, $last, @in, @out, $sz);
+	for (@argv) {
 		if (s/^--?//) {
 			$opt = $_;
 			next;
@@ -76,12 +105,16 @@ if ($check) {
 				push @out, $_;
 			}
 			$opt = '';
+			next;
 		}
 		$opt = '>' if ($_ eq '>');
 		$opt = '<' if ($_ eq '<');
 		$_ =~ s/^~/$ENV{HOME}/;
+		if (!$firstnox) {
+				$firstnox = $_ 
+		}
 		if (!$first) {
-			if ( -e $_ ) {
+			if ( $info{$cmd}->{in}->{_noex} || -e $_ ) {
 				$first = $_ 
 			}
 		} else {
@@ -91,12 +124,30 @@ if ($check) {
 	}
 
 	push @in, $first if $first && (!@in);		# no input ? assume first file that exists
+	push @in, $firstnox if $firstnox && (!@in);	# no input ? assume first file
+
+	if ( $info{$cmd}->{in}->{_noin} ) {
+		@in = ();
+		$last = $first;
+	}
+
+	if ($info{$cmd}->{out}->{_eval}) {
+		my ($i, $o) = ($in[0], $out[0]);
+		@out = &{$info{$cmd}->{out}->{_eval}}($i, $o);
+		print STDERR "QSH eval $cmd: @out\n" if $verbose;
+		if ($@) {
+			print STDERR "QSH error: $@\n";
+		}
+	}
+
 	push @out, $last if $last && (!@out);		# no output ? assume last argument
+	pop @out if $out[0] eq $in[0];			# no in's = outs
 
 	print STDERR "QSH check: $cmd : sz: $sz, in: @in, out: @out\n" if $verbose;
 
 	my $mx;
 	for (@in) {
+		print STDERR "$_\n" if $list;
 		my $m = fmodtime($_);
 		$mx = $m if ($m > $mx);
 	}
@@ -111,6 +162,7 @@ if ($check) {
 			$need=1;
 		}
 	}
+
 	if (!$need && $nox) {
 		print STDERR "QSH suppress: $cmd, already done\n"  if $verbose;
 		print "false";
@@ -133,11 +185,26 @@ if ($check) {
 		$wrap = 0 if $ENV{"_CONDOR_SLOT"};
 		# || $ENV{"_GRUN"};		# grun's more friendly about sub-submits... not sure whether to allow?
 
+		if ($list) {
+			print STDERR `which $orig_cmd 2>/dev/null`;
+		}
 		if ($wrap) {
 			print STDERR "QSH wrap $cmd, input size:$sz big:$big\n" if $verbose;
-			print "$grid_engine @ARGV";
+			quoteargv();
+			if ($debug) {
+				print "echo QSH debug: $cmd @ARGV";
+			} elsif ($list) {
+				print "false";
+			} else {
+				print "$grid_engine $cmd @ARGV";
+			}
 		} else {
 			print STDERR "QSH no wrap $cmd, input size $sz big: $big\n" if $verbose;
+                        if ($debug) {
+                                print "echo QSH debug: $cmd @ARGV";
+                        } elsif ($list) {
+                                print "false";
+			}
 		}
 	}
 
@@ -149,22 +216,39 @@ sub bash_prefix;
 #TODO ... would be nice if this could be interactive... 
 # but there's a whole TTY attach/reattach thing I can't figure out
 
+open STDERR, "|sort|uniq\n" if $list;
+
+my $in;
+
+if (!$inline) {
+	$in = shift @ARGV;
+	open(IN, $in) || die "Can't open $in: $!\n";
+}
+
 no strict 'refs';
 if (pipe_to_fork('FOO')) {
+	print STDERR "QSH start\n" if $verbose;
 	use strict;
 	# parent
 	print FOO bash_prefix();
 	if ($inline) {
 		print FOO "\n$inline\n";
 	} else {
-		while ( <> ) {
+		while ( <IN> ) {
 			print FOO $_
 		}
 	}
 	close FOO;
 	wait
 } else {
-	exec("bash -s");
+	quoteargv();
+	exec("bash -s @ARGV");
+}
+
+sub quoteargv {
+	for (@ARGV) {
+		s/(['"()])/\\$1/g;
+	}
 }
 
 sub fmodtime {
@@ -174,26 +258,21 @@ sub fmodtime {
 
 sub bash_prefix {
 	my $r;
-	$r = "DEBUG=-d\n" if $debug;
+	$r = "POPTS=$passopts\n" if $passopts;
 	$r .= <<EOF;
 function on_debug {
 	if [ -n "\$BASH_COMMAND" ]; then
-		cmd=`$0 -K \$DEBUG \$BASH_COMMAND`
+		cmd=`$0 -K \$POPTS \$BASH_COMMAND`
 		if [ -n "\$cmd" ]; then
 			\$cmd
 			false
-		elif [ -n "\$DEBUG" ]; then
-			echo \$BASH_COMMAND
-			false
 		fi
-	elif [ -n "\$DEBUG" ]; then
-		echo \$BASH_COMMAND
-		false
 	fi
 }
 
 shopt -s extdebug
 set -o functrace
+set -a
 
 trap on_debug DEBUG
 EOF
@@ -225,6 +304,7 @@ Usage: qsh [options] <bash-script>
 
 Options:
    -d|ebug	    debug
+   -l|ist	    guess list of dependencies
    -v|erbose	    verbose output to STDERR
    -h|elp 	    show this help
    -r|ules FILE	    use FILE instead of /etc/qsh.conf
