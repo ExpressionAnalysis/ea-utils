@@ -45,6 +45,7 @@ my (%conf, %def);
 $def{config} = "/etc/grun.conf";		# config file
 $def{spool} = "/var/spool/grun";		# dir to place jobs
 $def{port} = 5184;				# listen/connect port
+$def{bind} = '0.0.0.0';				# listen addr
 $def{env} = ['PATH'];				# list of environment vars to copy from submit through to exec
 $def{ping_secs} = 30;				# how often to tell about load/mem/stats
 $def{idle_load} = .3;				# how often to tell about load/mem/stats
@@ -87,7 +88,7 @@ my $gjobid = slurp("$conf{spool}/nextid");
 if ($qinfo) {
 	Getopt::Long::Configure qw(no_require_order no_ignore_case passthrough);
 	my %opt;
-	GetOptions(\%opt, "count=i") || die usage();
+	GetOptions(\%opt, "count=i", "silent", "inplace") || die usage();
 	my $cmd = shift @ARGV;
 	die usage() if !$cmd;
 	
@@ -104,9 +105,15 @@ if ($qinfo) {
 	$cmd = $tmp;
 
 	if ($cmd eq 'file') {
-		my ($res, $error) = waitio($conf{master}, $conf{master_port}, "xcmd", $cmd, @arg);
-		die $error, "\n" if $error;
-		print $res if $res;
+		my @need;
+		for (@arg) {
+			push @need, $_ unless -e $_;
+		}
+		if (@need) {
+			my ($res, $error) = waitio({inplace=>$opt{inplace}}, $conf{master}, $conf{master_port}, "xcmd", $cmd, @need);
+			die $error, "\n" if $error && !$opt{silent};
+			exit 1 if $error;
+		}
 	} elsif (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|stat$/)) {
 		# for now, status goes to the main node, and forks ... this could get ugly, if called a lot
 		my ($res) = waitmsg($conf{master}, $conf{master_port}, "xcmd", $cmd, @arg);
@@ -322,6 +329,10 @@ sub readsocks {
 			}
 			if (!*$sock{HASH}->{io}) {
 				my $file = splice(@{*$sock{HASH}->{file}}, 0, 1);
+				while (-d $file) {
+					# requests for directories are, for now, summarily ignored
+					$file = splice(@{*$sock{HASH}->{file}}, 0, 1);
+				}
 				if ($file) {
 					xlog("debug", "Sending $file over $sock\n") if $conf{trace};
 					my $head = "name:$file\nlen:" . (-s $file) . "\n";
@@ -1010,6 +1021,10 @@ sub notifystat {
 
 	# tell scheduler the status
 
+	# this breaks multi-scheduling... but that isn't supported yet, and tunnels are acting odd
+	$info->{ip} = $conf{master};
+	$info->{port} = $conf{master_port};
+
 	funpack("$conf{spool}/pids/$kid.stat", $info);
 	my $sock = _sendcmd($info->{ip}, $info->{port}, 'jstat', id=>$info->{id}, status=>$info->{status}, pid=>$kid, jrun=>$info->{jrun}, error=>$info->{error});
 	$read_set->add($sock) if $sock;
@@ -1107,6 +1122,7 @@ sub readconf {
 	$conf{master_port} = $1 if $conf{master} =~ s/:(\d+)$//;
 	$conf{master_port} = $conf{port} if !$conf{master_port};
 
+	$conf{port} = $1 if $conf{bind} =~ s/:(\d+)$//;
 }
 
 sub _readconf {
@@ -1149,6 +1165,7 @@ sub xlog {
 }
 
 sub waitio {
+	my $opts = shift @_ if ref $_[0];
         my $sock = _sendcmd(@_);
         if (!$sock) {
                 xlog("error","Can't send command ", packcmd(@_));
@@ -1178,12 +1195,24 @@ sub waitio {
 
 		last if (!$head{name});
 
-		my $fh = $head{name}=~/\.err$/ 
-			? *STDERR
-			: *STDOUT;
+		my $statstr;  
+		my $fh;
 
-		my $statstr;  $statstr = 1 if $head{name}=~/\.stat$/;
-		
+		if ($opts->{inplace} && (!$head{error})) {
+			# inplace file retrieval
+			my $dir = $head{name};
+			$dir =~ s/[^\/]+$//;
+			system("mkdir", "-p", $dir) if ! -e $dir;
+			open($fh = new IO::File, '>', $head{name}); 
+		} else {
+			# stderr/out/stat 
+			$fh = $head{name}=~/\.err$/ 
+				? *STDERR
+				: *STDOUT;
+
+			$statstr = 1 if $head{name}=~/\.stat$/;
+		}
+
 		my $left = $head{len};
 
 		++$got;
@@ -1200,12 +1229,15 @@ sub waitio {
 			}
 #			print STDERR "left: $left dat:" . length($dat) . "\n"; 
 		} while ($left>0 && $sock->sysread($dat, 4096));
+		if ($opts->{inplace}) {
+			close $fh;
+		}
 	}
 	if ($stat) {
 		$stat = gunpack($stat);
 		return ($stat->{status}, $stat->{error});
 	}
-	return ($err eq '', $err);
+	return (!($err eq ''), $err);
 }
 
 sub waitmsg {
@@ -1355,7 +1387,8 @@ Common variables:
     spool           (/var/spool/grun) Location for queue & io temp storage
     log_file	    Location of the log
     services        Must be 'queue' and/or 'exec'
-    port            Port to listen on
+    port            Port to listen on (5184)
+    bind[:port]     Address to bind to (0.0.0.0)
     trace           Turn tracing on for the whole server
 
 Queue config vars:
@@ -1610,7 +1643,7 @@ sub startdaemon {
 		$SIG{TERM} = $SIG{INT};
 		$SIG{HUP}  = \&init;
 
-		$listener = IO::Socket::INET->new(Proto=>"tcp",LocalPort=>$conf{port}, LocalAddr=>'0.0.0.0', Reuse=>1, Timeout=>1, Listen=>100)
+		$listener = IO::Socket::INET->new(Proto=>"tcp",LocalPort=>$conf{port}, LocalAddr=>$conf{bind}, Reuse=>1, Timeout=>1, Listen=>100)
 		  or die "Can't make TCP server on port $conf{port}: $@";
 		$read_set = new IO::Select();
 		$write_set = new IO::Select();
