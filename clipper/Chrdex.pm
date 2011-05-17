@@ -9,6 +9,8 @@ package Chrdex;
 # EXMAPLE:
 # $x = Chrdex->new("CCDS_Exome_annot.txt", chr=>2, beg=>5, end=>6, skip=>1);
 # $x->search(1, 153432255);
+# TODO:
+# if begin = end... just dump a regular hash
 
 use Inline 'C';
 
@@ -18,6 +20,9 @@ use warnings::register;
 use Storable qw(store retrieve);
 use Data::Dumper;
 use locale; ##added by vjw to control case of reference bases
+
+our $VERSION = '1.0';
+my $FILEVER = 1;
 
 sub new {
 	my ($class, $path, %opts) = @_;
@@ -31,6 +36,7 @@ sub new {
 	$opts{chr} = 0 if ! $opts{chr};
 	$opts{beg} = 1 if ! $opts{beg};
 	$opts{end} = 2 if ! $opts{end};
+	$opts{ver} = $FILEVER;
 
 	if (! -s $path) {		# be a little more careful about this one
 		if (! -s $path || -d $path) {
@@ -40,19 +46,23 @@ sub new {
 	my $annob = $path;
 	$annob =~ s/([^\/]+)$/\.$1/;
 
+	# allow the user to override the index location
+	$annob = $opts{index_path} if $opts{index_path};
+
 	my $ref;
         my $mt = (stat($path))[9];
 	if ((stat("$annob.chrdex"))[9] > $mt) {
 		$ref = retrieve "$annob.chrdex";
-		
-		for (qw(delim skip chr beg end)) {
+		for (qw(delim skip chr beg end ver)) {
 			last if !$ref;
 			$ref = undef if !($ref->{_opts}->{$_} eq $opts{$_});
 		}
 		if ($ref) {
-			eval{chrdex_check($ref)};
-			if ($@) {
-				$ref = undef;
+			if ($ref->{_opts}->{beg} != $ref->{_opts}->{end}) {
+				eval{chrdex_check($ref)};
+				if ($@) {
+					$ref = undef;
+				}
 			}
 		}
 	}
@@ -76,9 +86,21 @@ sub new {
 			}
 			$chr=~s/^chr//i;
 			# here's where you put the annotation info
-			push @{$locs{$chr}}, [$beg+0, $end+0, $_];
+			if ($opts{beg} == $opts{end}) {
+				if ($locs{"$chr:$beg"}) {
+ 					$locs{"$chr:$beg"} = $locs{"$chr:$beg"} . "$_\n";
+				} else {
+					$locs{"$chr:$beg"} = $_;
+				}
+			} else {
+				push @{$locs{$chr}}, [$beg+0, $end+0, $_];
+			}
 		}
 		close IN;
+
+		if ($opts{beg} == $opts{end}) {
+			goto DONE;
+		}
 
 		# sort & cache annotation, deal with overlaps nicely
 		my $i;
@@ -131,19 +153,26 @@ sub new {
 				}
 			}
 		}
+		DONE:
 		$locs{_opts} = \%opts;
 		store \%locs, "$tmpb.chrdex";
 		rename "$tmpb.chrdex", "$annob.chrdex";
 		$ref = \%locs;
 	}
-	chrdex_check($ref);
+	if ($ref->{_opts}->{beg} != $ref->{_opts}->{end}) {
+		chrdex_check($ref);
+	}
 	return bless $ref, $class;
 }
 
 sub search {
 	my ($self, $chr, $loc) = @_;
 	$chr=~s/^chr//i;
-	return chrdex_search($self, $chr, $loc);	
+	if ($self->{_opts}->{beg} == $self->{_opts}->{end}) {
+		return $self->{"$chr:$loc"};
+	} else {
+		return chrdex_search($self, $chr, $loc);	
+	}
 }
 
 1;
