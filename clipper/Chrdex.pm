@@ -181,6 +181,15 @@ sub search {
 	my ($self, $chr, $loc, $loc2) = @_;
 	$chr=~s/^chr//io;
 	if ($self->{_type} eq 'I') {
+		if ($loc2) {
+			my %hv;
+			for (my $i=$loc;$i<$loc2;++$i) {
+				for (split(/\n/,$self->{"$chr:$loc"})) {
+					$hv{$_}=1;
+				}
+			}
+			return join "\n", keys(%hv);
+		}
 		return $self->{"$chr:$loc"};
 	} else {
 		if ($loc2) {
