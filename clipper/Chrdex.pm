@@ -235,12 +235,13 @@ void chrdex_search(SV *self, SV *schr, SV* sloc) {
 }
 
 void chrdex_search_range(SV *self, SV *schr, SV* sloc, SV* eloc) {
-        SV *roi;
+        SV *roi = NULL;
         AV *arr;
         SV **pav;
         HV *map= (HV*) SvRV(self);
         char *chr = SvPV_nolen(schr);
-        int loc = SvIV(sloc);
+        int isloc = SvIV(sloc);
+        int ieloc = SvIV(eloc);
 
         pav = hv_fetch(map, chr, strlen(chr), 0);
 
@@ -250,14 +251,17 @@ void chrdex_search_range(SV *self, SV *schr, SV* sloc, SV* eloc) {
         arr = (AV*) SvRV(*pav);
 
         int i = chrdex_search_n(arr, schr, sloc);
-        if (i >=0) {
-        	int j = chrdex_search_n(arr, schr, eloc);
-		int x;
+        int j = chrdex_search_n(arr, schr, eloc);
 
+	if (!i) i=j;
+	if (!j) j=i;
+        if (i >=0) {
+		int x;
+		char *rx;
 		for (x=i; x<=j; ++x) {
 			int st, en;
 			if (get_sten(arr, x, &st, &en)) {
-				if (loc >= st && loc <= en) {
+				if (ieloc >= st && isloc <= en) {
 					if (!roi) {
 	                			roi = av_fetch_2(arr, x, 2);
 					} else {
@@ -270,6 +274,7 @@ void chrdex_search_range(SV *self, SV *schr, SV* sloc, SV* eloc) {
 				}
 			}
 		}
+
 
                 if (!roi)
                         return;
@@ -330,6 +335,7 @@ int chrdex_search_n(AV *arr, SV *schr, SV* sloc) {
         return -1;
 }
 
+// doubly indexed array ... fetch 1, fetch 2
 SV * av_fetch_2(AV *arr, int i, int j) {
         SV **pav;
 
