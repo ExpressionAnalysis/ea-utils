@@ -10,7 +10,7 @@ package Chrdex;
 # $x = Chrdex->new("CCDS_Exome_annot.txt", chr=>2, beg=>5, end=>6, skip=>1);
 # $x->search(1, 153432255);
 # TODO:
-# if begin = end... just dump a regular hash
+# work with ranges...should be easy
 
 use Inline 'C';
 
@@ -68,11 +68,11 @@ sub new {
 					$ref = undef;
 				}
 			} else {
-				# if begin == end, then type is plain hash
 				$ref->{_type}='I';
 			}
 		}
 	}
+
 
 	if (!$ref) {
 		my %locs;
@@ -164,8 +164,8 @@ sub new {
 		}
 		DONE:
 		$locs{_opts} = \%opts;
+		$locs{_type}='I' if $opts{beg} == $opts{end};
 		store \%locs, "$tmpb.chrdex";
-		$locs{_type}='I' if $ref->{_opts}->{beg} == $ref->{_opts}->{end};
 		rename "$tmpb.chrdex", "$annob.chrdex";
 		$ref = \%locs;
 	}
@@ -178,12 +178,21 @@ sub new {
 }
 
 sub search {
-	my ($self, $chr, $loc) = @_;
-	$chr=~s/^chr//i;
+	my ($self, $chr, $loc, $loc2) = @_;
+	$chr=~s/^chr//io;
 	if ($self->{_type} eq 'I') {
 		return $self->{"$chr:$loc"};
 	} else {
-		return chrdex_search($self, $chr, $loc);	
+		if ($loc2) {
+			my %hv;
+			my $list = chrdex_search_range($self, $chr, $loc, $loc2);
+			for (split(/\n/, $list)) {
+				$hv{$_}=1;
+			}
+			return join "\n", keys(%hv);
+		} else {
+			return chrdex_search($self, $chr, $loc);	
+		}
 	}
 }
 
@@ -196,20 +205,88 @@ bool get_sten(AV *arr, int i, int *st, int*en);
 SV * av_fetch_2(AV *arr, int i, int j);
 
 void chrdex_search(SV *self, SV *schr, SV* sloc) {
-	int b=0, t, i, st, en;
-	AV *arr;
-	SV **pav;
 	SV *roi;
-	HV *map= (HV*) SvRV(self);
+        AV *arr;
+        SV **pav;
+        HV *map= (HV*) SvRV(self);
+        char *chr = SvPV_nolen(schr);
+        int loc = SvIV(sloc);
+
+        pav = hv_fetch(map, chr, strlen(chr), 0);
+
+        if (!pav)
+                return;
+
+        arr = (AV*) SvRV(*pav);
+
+	int i = chrdex_search_n(arr, schr, sloc);
+	if (i >=0) {
+                roi = av_fetch_2(arr, i, 2);
+                if (!roi)
+                        return;
+
+                Inline_Stack_Vars;
+                Inline_Stack_Reset;
+                Inline_Stack_Push(sv_2mortal(newSVsv(roi)));
+                Inline_Stack_Done;
+                Inline_Stack_Return(1);
+	}
+	return;
+}
+
+void chrdex_search_range(SV *self, SV *schr, SV* sloc, SV* eloc) {
+        SV *roi;
+        AV *arr;
+        SV **pav;
+        HV *map= (HV*) SvRV(self);
+        char *chr = SvPV_nolen(schr);
+        int loc = SvIV(sloc);
+
+        pav = hv_fetch(map, chr, strlen(chr), 0);
+
+        if (!pav)
+                return;
+
+        arr = (AV*) SvRV(*pav);
+
+        int i = chrdex_search_n(arr, schr, sloc);
+        if (i >=0) {
+        	int j = chrdex_search_n(arr, schr, eloc);
+		int x;
+
+		for (x=i; x<=j; ++x) {
+			int st, en;
+			if (get_sten(arr, x, &st, &en)) {
+				if (loc >= st && loc <= en) {
+					if (!roi) {
+	                			roi = av_fetch_2(arr, x, 2);
+					} else {
+                				SV* r2 = av_fetch_2(arr, x, 2);
+						if (r2) {
+							sv_catpv(roi, "\n");
+							sv_catsv(roi, r2);
+						}
+					}
+				}
+			}
+		}
+
+                if (!roi)
+                        return;
+
+                Inline_Stack_Vars;
+                Inline_Stack_Reset;
+                Inline_Stack_Push(sv_2mortal(newSVsv(roi)));
+                Inline_Stack_Done;
+                Inline_Stack_Return(1);
+        }
+        return;
+}
+
+int chrdex_search_n(AV *arr, SV *schr, SV* sloc) {
+	int b=0, t, i, st, en;
 	char *chr = SvPV_nolen(schr);
 	int loc = SvIV(sloc);
-
-	pav = hv_fetch(map, chr, strlen(chr), 0);
-
-	if (!pav)
-		return;
-
-	arr = (AV*) SvRV(*pav);
 
 	b = 0;
 	t = av_len(arr);
@@ -247,18 +324,10 @@ void chrdex_search(SV *self, SV *schr, SV* sloc) {
 	}
 
         if (loc >= st && loc <= en) {
-		roi = av_fetch_2(arr, i, 2);
-		if (!roi)
-			return;
-
-		Inline_Stack_Vars;
-		Inline_Stack_Reset;
-		Inline_Stack_Push(sv_2mortal(newSVsv(roi)));
-		Inline_Stack_Done;
-		Inline_Stack_Return(1);
+		return i;
         }
 
-        return;
+        return -1;
 }
 
 SV * av_fetch_2(AV *arr, int i, int j) {
