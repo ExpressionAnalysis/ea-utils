@@ -213,7 +213,7 @@ int main (int argc, char **argv) {
 		++acnt;
 	}
 
-	if (acnt == 0) 
+	if (acnt == 0 && !force) 
 		exit(1);
 
 	fprintf(fstat, "Scale used: %g\n", scale);
