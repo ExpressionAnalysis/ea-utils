@@ -21,8 +21,10 @@ use Storable qw(store retrieve);
 use Data::Dumper;
 use locale; ##added by vjw to control case of reference bases
 
-our $VERSION = '1.0';
+our $VERSION = '1.2';
 my $FILEVER = 2;
+
+my $tmpb;
 
 sub new {
 	my ($class, $path, %opts) = @_;
@@ -43,6 +45,9 @@ sub new {
 			die "Can't open $path.\n";
 		}
 	}
+
+#	$opts{db} = 1 if (-s $path) > (10 * 1000000000);		# giant 10GB annotation file? use db... ?
+
 	my $annob = $path;
 	$annob =~ s/([^\/]+)$/\.$1/;
 
@@ -53,30 +58,37 @@ sub new {
         my $mt = (stat($path))[9];
 	# if index is new
 	if ((stat("$annob.chrdex"))[9] > $mt) {
-		$ref = retrieve "$annob.chrdex";
+		$ref = eval {retrieve "$annob.chrdex"};
+		if (!$ref) {
+			$ref->{_type} = 'D';
+			#$ref->{_fh} = new IO::File;
+			#open($ref->{_fh}, "$annob.chrdex") || die "Can't open $annob.chrdex";
+			#ReadHeader($ref);
+		}
 		# if arguments were different, then clear ref
-		for (qw(delim skip chr beg end ver)) {
+		for (qw(delim skip chr beg end ver db)) {
 			last if !$ref;
 			$ref = undef if !($ref->{_opts}->{$_} eq $opts{$_});
 		}
 
-		if ($ref) {
+		# set "type"
+		if ($ref && !$ref->{_opts}->{db}) {
 			# if begin != end, then type is range
 			if ($ref->{_opts}->{beg} != $ref->{_opts}->{end}) {
 				eval{chrdex_check($ref)};
 				if ($@) {
 					$ref = undef;
 				}
+				$ref->{_type}='C';
 			} else {
 				$ref->{_type}='I';
 			}
 		}
 	}
 
-
 	if (!$ref) {
 		my %locs;
-		my $tmpb = "$annob.$$";
+		$tmpb = "$annob.$$";
 		open( IN, $path ) or die "Can't open $path: $!\n";
 		my $skip = $opts{skip};
 		while ($skip > 0) { scalar <IN>; --$skip };
@@ -95,12 +107,12 @@ sub new {
 			# here's where you put the annotation info
 			if ($opts{beg} == $opts{end}) {
 				if ($locs{"$chr:$beg"}) {
- 					$locs{"$chr:$beg"} = $locs{"$chr:$beg"} . "$_\n";
+ 					push @{$locs{"$chr:$beg"}}, $_;;
 				} else {
-					$locs{"$chr:$beg"} = $_;
+					$locs{"$chr:$beg"} = [$_];
 				}
 			} else {
-				push @{$locs{$chr}}, [$beg+0, $end+0, $_];
+				push @{$locs{$chr}}, [$beg+0, $end+0, [$_]];
 			}
 		}
 		close IN;
@@ -132,9 +144,9 @@ sub new {
 						$new_en = $arr->[$i+1]->[1];
 						$new_ro = $arr->[$i+1]->[2];
 						$arr->[$i+1]->[1] = $arr->[$i]->[1];
-						$arr->[$i+1]->[2] = $arr->[$i+1]->[2] . "\n" . $arr->[$i]->[2];
+						push @{$arr->[$i+1]->[2]}, $arr->[$i]->[2];
 					} else {
-						$arr->[$i+1]->[2] = $arr->[$i+1]->[2] . "\n" . $arr->[$i]->[2];
+						push @{$arr->[$i+1]->[2]}, $arr->[$i]->[2];
 					}
 
 					# shorten my end to less than the next's start
@@ -164,44 +176,99 @@ sub new {
 		}
 		DONE:
 		$locs{_opts} = \%opts;
-		$locs{_type}='I' if $opts{beg} == $opts{end};
-		store \%locs, "$tmpb.chrdex";
-		rename "$tmpb.chrdex", "$annob.chrdex";
+		$locs{_type}='C';
+		$locs{_type}='I' if !$opts{db} && ($opts{beg} == $opts{end});
 		$ref = \%locs;
+		if ($opts{db}) {
+#			$ref->{_type}='D';
+#			$ref->{_fh} = new IO::File;
+#			open($ref->{_fh}, ">$tmpb.chrdex") || die "Can't open $tmpb.chrdex";
+#			my $rec=Dumper($ref->{_opts});
+#
+#			PrintRec($ref, "_opts", Dumper($ref->{_opts}));
+#
+#			my %chrs;
+#			for (sort keys(%locs)) {
+#				$chrs{$_}->{off} = pack("Q", 0);
+#				$chrs{$_}->{len} = pack("Q", 0);
+#			}
+#			PrintRec($ref, "_chrs", Dumper(%chrs));
+#
+#			for (keys(%locs)) {
+#				if (ref($locs{$_}) eq 'ARRAY') {
+#					for (@{$locs{$_}}) {
+#							
+#					}
+#					delete $locs{$_};
+#				}
+#			}
+#			$db->disconnect();
+#			rename "$tmpb.chrdex", "$annob.chrdex";
+#			$ref->{db} = DBI->connect("dbi:SQLite:dbname=$annob.chrdex","","");
+		} else {
+			store \%locs, "$tmpb.chrdex";
+			rename "$tmpb.chrdex", "$annob.chrdex";
+		}
 	}
 
-	if (!($ref->{_type} eq 'I')) {
+	if ($ref->{_type} eq 'C') {
 		chrdex_check($ref);
+	}
+	if ($ref->{_type} eq 'D') {
 	}
 
 	return bless $ref, $class;
 }
 
+sub DESTROY {
+	my ($self) = (@_);
+	if ($self->{db}) {
+		for (keys(%$self)) {
+		}
+	}
+}
+
+sub cleanup {
+	unlink("$tmpb.chrdex");
+}
+
+END {
+	cleanup();
+}
+
 sub search {
+	return join "\n", query(@_);
+}
+
+sub query {
 	my ($self, $chr, $loc, $loc2) = @_;
 	$chr=~s/^chr//io;
-	if ($self->{_type} eq 'I') {
-		if ($loc2) {
-			my %hv;
-			for (my $i=$loc;$i<$loc2;++$i) {
-				for (split(/\n/,$self->{"$chr:$loc"})) {
-					$hv{$_}=1;
-				}
-			}
-			return join "\n", keys(%hv);
-		}
-		return $self->{"$chr:$loc"};
-	} else {
+	my $type = $self->{_type};
+	if ($type eq 'C') {
 		if ($loc2) {
 			my %hv;
 			my $list = chrdex_search_range($self, $chr, $loc, $loc2);
-			for (split(/\n/, $list)) {
+			for (@$list) {
 				$hv{$_}=1;
 			}
-			return join "\n", keys(%hv);
+			return keys(%hv);
 		} else {
-			return chrdex_search($self, $chr, $loc);	
+			my $list = chrdex_search($self, $chr, $loc);	
+			return @$list;
 		}
+	} elsif ($type eq 'I') {
+		if ($loc2) {
+			# if only this wasn't a hash.... sheesh
+			my %hv;
+			for (my $i=$loc;$i<$loc2;++$i) {
+				for (@{$self->{"$chr:$loc"}}) {
+					$hv{$_}=1;
+				}
+			}
+			return keys(%hv);
+		}
+		return @{$self->{"$chr:$loc"}};
+	} elsif ($type eq 'D') {
 	}
 }
 
@@ -212,6 +279,7 @@ __C__
 
 bool get_sten(AV *arr, int i, int *st, int*en);
 SV * av_fetch_2(AV *arr, int i, int j);
+int chrdex_search_n(AV *arr, SV *schr, SV* sloc);
 
 void chrdex_search(SV *self, SV *schr, SV* sloc) {
 	SV *roi;
@@ -265,32 +333,33 @@ void chrdex_search_range(SV *self, SV *schr, SV* sloc, SV* eloc) {
 	if (!i) i=j;
 	if (!j) j=i;
         if (i >=0) {
-		int x;
+		int x, found = 0;
 		char *rx;
+		AV *rav=newAV();
 		for (x=i; x<=j; ++x) {
 			int st, en;
 			if (get_sten(arr, x, &st, &en)) {
 				if (ieloc >= st && isloc <= en) {
-					if (!roi) {
-	                			roi = av_fetch_2(arr, x, 2);
-					} else {
-                				SV* r2 = av_fetch_2(arr, x, 2);
-						if (r2) {
-							sv_catpv(roi, "\n");
-							sv_catsv(roi, r2);
+					SV* ret = av_fetch_2(arr, x, 2);
+					if (ret) {
+						int z;
+						found = 1;
+						for (z=0;z<=av_len(SvRV(ret));++z) {
+							SV ** s = av_fetch(SvRV(ret), z, 0);
+							if (s) av_push(rav, *s);
 						}
 					}
 				}
 			}
 		}
 
-
-                if (!roi)
+                if (!found)
                         return;
 
                 Inline_Stack_Vars;
                 Inline_Stack_Reset;
-                Inline_Stack_Push(sv_2mortal(newSVsv(roi)));
+                Inline_Stack_Push(newRV_noinc((SV*)rav));
+                Inline_Stack_Push(roi);
                 Inline_Stack_Done;
                 Inline_Stack_Return(1);
         }
