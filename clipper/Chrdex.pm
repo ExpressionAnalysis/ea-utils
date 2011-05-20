@@ -46,22 +46,19 @@ sub new {
 		}
 	}
 
+	# location of data store
 	my $annob = $path;
 	$annob =~ s/([^\/]+)$/\.$1/;
+	$annob = "$annob.chrdex";
 
-	# allow the user to override the index location
 	$annob = $opts{index_path} if $opts{index_path};
 
 	my $ref;
         my $mt = (stat($path))[9];
 	# if index is new
-	if ((stat("$annob.chrdex"))[9] > $mt) {
-		$ref = eval {retrieve "$annob.chrdex"};
-		if (!$ref) {
-			#$ref->{_fh} = new IO::File;
-			#open($ref->{_fh}, "$annob.chrdex") || die "Can't open $annob.chrdex";
-			#ReadHeader($ref);
-		}
+	if ((stat($annob))[9] > $mt) {
+		$ref = eval {retrieve $annob};
+
 		# if arguments were different, then clear ref
 		for (qw(delim skip chr beg end ver byref)) {
 			last if !$ref;
@@ -175,8 +172,8 @@ sub new {
 		DONE:
 		$locs{_opts} = \%opts;
 		$ref = \%locs;
-		store \%locs, "$tmpb.chrdex";
-		rename "$tmpb.chrdex", "$annob.chrdex";
+		store \%locs, "$tmpb";
+		rename "$tmpb", "$annob";
 	}
 
 	# stuff these into the top level, since tests showed it was significantly more expensive to doubly-reference
