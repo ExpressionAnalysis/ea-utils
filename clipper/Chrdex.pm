@@ -21,8 +21,8 @@ use Storable qw(store retrieve);
 use Data::Dumper;
 use locale; ##added by vjw to control case of reference bases
 
-our $VERSION = '1.2';
-my $FILEVER = 2;
+our $VERSION = '1.2.11';		# major = object interface is different, minor = new features, release=fixes/performance improve
+my $FILEVER = 2;			# only increment this if existing files won't work with the new version
 
 my $tmpb;
 
@@ -46,8 +46,6 @@ sub new {
 		}
 	}
 
-#	$opts{db} = 1 if (-s $path) > (10 * 1000000000);		# giant 10GB annotation file? use db... ?
-
 	my $annob = $path;
 	$annob =~ s/([^\/]+)$/\.$1/;
 
@@ -60,28 +58,23 @@ sub new {
 	if ((stat("$annob.chrdex"))[9] > $mt) {
 		$ref = eval {retrieve "$annob.chrdex"};
 		if (!$ref) {
-			$ref->{_type} = 'D';
 			#$ref->{_fh} = new IO::File;
 			#open($ref->{_fh}, "$annob.chrdex") || die "Can't open $annob.chrdex";
 			#ReadHeader($ref);
 		}
 		# if arguments were different, then clear ref
-		for (qw(delim skip chr beg end ver db)) {
+		for (qw(delim skip chr beg end ver byref)) {
 			last if !$ref;
 			$ref = undef if !($ref->{_opts}->{$_} eq $opts{$_});
 		}
 
-		# set "type"
-		if ($ref && !$ref->{_opts}->{db}) {
+		if ($ref) {
 			# if begin != end, then type is range
 			if ($ref->{_opts}->{beg} != $ref->{_opts}->{end}) {
 				eval{chrdex_check($ref)};
 				if ($@) {
 					$ref = undef;
 				}
-				$ref->{_type}='C';
-			} else {
-				$ref->{_type}='I';
 			}
 		}
 	}
@@ -93,7 +86,9 @@ sub new {
 		my $skip = $opts{skip};
 		while ($skip > 0) { scalar <IN>; --$skip };
 
-		while(<IN>){
+		my $pos = 0;
+		$pos = tell IN if $opts{byref};
+		while(<IN>) {
 			my ($chr, $beg, $end);
 			$_ =~ s/\s+$//;
 			my @data = split /\t/;
@@ -104,6 +99,8 @@ sub new {
 				die "Invalid data in $path at line $., expected a number, got '$beg'\n";
 			}
 			$chr=~s/^chr//i;
+			$_ = $pos if $opts{byref};
+
 			# here's where you put the annotation info
 			if ($opts{beg} == $opts{end}) {
 				if ($locs{"$chr:$beg"}) {
@@ -114,6 +111,7 @@ sub new {
 			} else {
 				push @{$locs{$chr}}, [$beg+0, $end+0, [$_]];
 			}
+			$pos = tell IN if $opts{byref};
 		}
 		close IN;
 
@@ -176,64 +174,35 @@ sub new {
 		}
 		DONE:
 		$locs{_opts} = \%opts;
-		$locs{_type}='C';
-		$locs{_type}='I' if !$opts{db} && ($opts{beg} == $opts{end});
 		$ref = \%locs;
-		if ($opts{db}) {
-#			$ref->{_type}='D';
-#			$ref->{_fh} = new IO::File;
-#			open($ref->{_fh}, ">$tmpb.chrdex") || die "Can't open $tmpb.chrdex";
-#			my $rec=Dumper($ref->{_opts});
-#
-#			PrintRec($ref, "_opts", Dumper($ref->{_opts}));
-#
-#			my %chrs;
-#			for (sort keys(%locs)) {
-#				$chrs{$_}->{off} = pack("Q", 0);
-#				$chrs{$_}->{len} = pack("Q", 0);
-#			}
-#			PrintRec($ref, "_chrs", Dumper(%chrs));
-#
-#			for (keys(%locs)) {
-#				if (ref($locs{$_}) eq 'ARRAY') {
-#					for (@{$locs{$_}}) {
-#							
-#					}
-#					delete $locs{$_};
-#				}
-#			}
-#			$db->disconnect();
-#			rename "$tmpb.chrdex", "$annob.chrdex";
-#			$ref->{db} = DBI->connect("dbi:SQLite:dbname=$annob.chrdex","","");
-		} else {
-			store \%locs, "$tmpb.chrdex";
-			rename "$tmpb.chrdex", "$annob.chrdex";
-		}
+		store \%locs, "$tmpb.chrdex";
+		rename "$tmpb.chrdex", "$annob.chrdex";
 	}
 
-	if ($ref->{_type} eq 'C') {
+	# stuff these into the top level, since tests showed it was significantly more expensive to doubly-reference
+
+	$ref->{_type}='C';
+	$ref->{_type}='I' if ($opts{beg} == $opts{end});
+
+	if (($ref->{_type} eq 'C')) {
 		chrdex_check($ref);
 	}
-	if ($ref->{_type} eq 'D') {
+
+	if ($opts{byref}) {
+		# only storing pointers to file, not whole record
+		require IO::File;
+		$ref->{_byref}=1;
+		$ref->{_refh} = new IO::File;
+		open($ref->{_refh}, $path) || die "Can't open $path\n";
 	}
 
-	return bless $ref, $class;
-}
+	bless $ref, $class;
 
-sub DESTROY {
-	my ($self) = (@_);
-	if ($self->{db}) {
-		for (keys(%$self)) {
-		}
-	}
-}
-
-sub cleanup {
-	unlink("$tmpb.chrdex");
+	return $ref;
 }
 
 END {
-	cleanup();
+	unlink("$tmpb.chrdex");
 }
 
 sub search {
@@ -244,17 +213,24 @@ sub query {
 	my ($self, $chr, $loc, $loc2) = @_;
 	$chr=~s/^chr//io;
 	my $type = $self->{_type};
+	my $list;
 	if ($type eq 'C') {
 		if ($loc2) {
-			my %hv;
-			my $list = chrdex_search_range($self, $chr, $loc, $loc2);
-			for (@$list) {
-				$hv{$_}=1;
+			$list = chrdex_search_range($self, $chr, $loc, $loc2);
+			return undef if ! defined $list;
+			my $prev;
+			for (my $i = 0; $i < @$list; ++$i) {
+				if ($prev eq $list->[$i]) {
+					splice @$list, $i, 1;
+					--$i;
+				}
+				$prev = $list->[$i];
 			}
-			return keys(%hv);
+			return @$list if !($self->{_byref});
 		} else {
-			my $list = chrdex_search($self, $chr, $loc);	
-			return @$list;
+			$list = chrdex_search($self, $chr, $loc);	
+			return undef if ! defined $list;
+			return @$list if !($self->{_byref});
 		}
 	} elsif ($type eq 'I') {
 		if ($loc2) {
@@ -265,11 +241,21 @@ sub query {
 					$hv{$_}=1;
 				}
 			}
-			return keys(%hv);
+			$list = [keys(%hv)];
+		} else {
+			$list = $self->{"$chr:$loc"};
 		}
-		return @{$self->{"$chr:$loc"}};
 	} elsif ($type eq 'D') {
 	}
+
+	if ($self->{_byref}) {
+		for (@$list) {
+			seek $self->{_refh}, $_, 0;
+			$_=$self->{_refh}->getline();
+			chomp $_;
+		}
+	}
+	return @$list;
 }
 
 1;
@@ -333,9 +319,9 @@ void chrdex_search_range(SV *self, SV *schr, SV* sloc, SV* eloc) {
 	if (!i) i=j;
 	if (!j) j=i;
         if (i >=0) {
-		int x, found = 0;
+		int x;
 		char *rx;
-		AV *rav=newAV();
+		AV *rav=NULL;
 		for (x=i; x<=j; ++x) {
 			int st, en;
 			if (get_sten(arr, x, &st, &en)) {
@@ -343,17 +329,20 @@ void chrdex_search_range(SV *self, SV *schr, SV* sloc, SV* eloc) {
 					SV* ret = av_fetch_2(arr, x, 2);
 					if (ret) {
 						int z;
-						found = 1;
+						if (!rav) rav = newAV();
 						for (z=0;z<=av_len(SvRV(ret));++z) {
 							SV ** s = av_fetch(SvRV(ret), z, 0);
-							if (s) av_push(rav, *s);
+							if (s) {
+								SvREFCNT_inc(*s);
+								av_push(rav, *s);
+							}
 						}
 					}
 				}
 			}
 		}
 
-                if (!found)
+                if (!rav)
                         return;
 
                 Inline_Stack_Vars;
@@ -454,6 +443,8 @@ void chrdex_check(SV *annoR) {
 	HV *hv;		// annotation hash table
 	AV *av;		// array in hash
 	SV **v;		// entry in array
+	char *key;
+	int len;
 
         if (!SvRV(annoR))
                 croak("annotation hash must be a reference");
@@ -468,8 +459,10 @@ void chrdex_check(SV *annoR) {
 	}
 
 	he = hv_iternext(hv);
-	ent = hv_iterval(hv, he);
-
+	ent = hv_iternextsv(hv, &key, &len);
+	while (key && *key == '_') {
+		ent = hv_iternextsv(hv, &key, &len);
+	}
 	if ( SvTYPE(ent) != SVt_RV || (SvTYPE(SvRV(ent)) != SVt_PVAV) ) {
 		croak("each entry in the annotation hash must be a reference to an array");
 	}
