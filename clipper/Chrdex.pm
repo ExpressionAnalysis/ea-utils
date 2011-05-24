@@ -242,7 +242,6 @@ sub query {
 		} else {
 			$list = $self->{"$chr:$loc"};
 		}
-	} elsif ($type eq 'D') {
 	}
 
 	if ($self->{_byref}) {
