@@ -8,20 +8,19 @@ Getopt::Long::Configure(qw(passthrough require_order no_ignore_case));
 
 # TODO: put these  in a config file, it can still be perl...for now it's simple enough to edit here
 
-# don't ever try to do make semantics on these commands
-my %nologic 	= map {($_, 1)} qw(if [ calc echo . mv  alc for export);
+my %nologic 	= map {($_, 1)} qw(if [ calc echo . alc for export);
 
-# always send to grind engine, no matter how big
+# always send to grid engine, no matter how big
 my %wrap 		= map {($_, 1)} qw(bowtie-build tophat juncsdb bwa cufflinks countannot calc-numaligned fastx_quality_stats);
 
 # never send to grid engine, no matter how big
-my %nowrap 	= map {($_, 1)} qw(condor_run run-analysis);
+my %nowrap 	= map {($_, 1)} qw(condor_run run-analysis mv grun);
 
 # always run these, regardless of dependencies - still send to grid if needed
 my %nodep 		= map {($_, 1)} qw();
 
 # this can be condor_run, qsub... whatever you want
-my $grid_engine	= 'grun';
+my $grid_engine	= 'condor_run';
 
 # alter default 'big' size and parameter parsing
 my %info = (
@@ -45,21 +44,34 @@ my %info = (
 
 our $VERSION = '0.9.46';
 
-my ($debug, $check, $inline, $verbose, $help, $rules_file, $list, $passopts);
+my ($debug, $check, $inline, $verbose, $help, $rules_file, $list, $noexec, $passopts);
 
 $| = 1;
 
-GetOptions("DEBUG"=>\$debug, "K"=>\$check, "cmd=s"=>\$inline, "l"=>\$list, "v"=>\$verbose, "help"=>\$help, "rules=s"=>\$rules_file) || die usage();
+GetOptions("DEBUG"=>\$debug, "K"=>\$check, "grid"=>\$grid_engine, "cmd=s"=>\$inline, "noexec"=>\$noexec, "l"=>\$list, "v"=>\$verbose, "help"=>\$help, "rules=s"=>\$rules_file) || die usage();
 
 $verbose = 1 if $debug;
 
 $passopts = '-v' if $verbose;
 $passopts = '-l' if $list;
 $passopts = '-D' if $debug;
+$passopts .= ' -n' if $noexec;
 
 if ($help || $ARGV[0] =~ /^-\?/) {
 	print usage();
 	exit 0
+}
+
+sub reptail {
+	my ($f, $r) = @_;
+	$f =~ s/\Q$r\E$//;
+	return $f;
+}
+
+sub repwith {
+        my ($f, $r, $t) = @_;
+        $f =~ s/\Q$r\E/$t/;
+        return $f;
 }
 
 if ($check) {
@@ -69,9 +81,13 @@ if ($check) {
 	$cmd =~ s/.*\///;
 
 	my @argv = @ARGV;
+	print STDERR "QSH preex '$cmd @argv'\n" if $debug;
 	for (@argv) {
+		# bash vars come in unexpanded... expand them
 		s/\$(\w+)/$ENV{$1}/g;
 		s/\${(\w+)}/$ENV{$1}/g;
+		s/\${(\w+)\%([^{}]+)}/reptail($ENV{$1},$2)/ge;
+		s/\${(\w+)\/([^\/]+)\/([^{}]+)}/repwith($ENV{$1},$2,$3)/ge;
 	}	
 	print STDERR "QSH top '$cmd @argv'\n" if $debug;
 	# don't try to alter non executable lines
@@ -81,9 +97,7 @@ if ($check) {
 	if ($nologic{$cmd}) {
 		print STDERR "QSH ignore command $cmd\n" if $verbose;
 		if ($debug) {
-			print "echo QSH debug: '$cmd @ARGV'";
-		} elsif ($list) {
-			print "false"
+			print STDERR "QSH debug: '$cmd @ARGV'";
 		}
 		exit 0;
 	}
@@ -164,7 +178,8 @@ if ($check) {
 	}
 
 	if (!$need && $nox) {
-		print STDERR "QSH suppress: $cmd, already done\n"  if $verbose;
+		print STDERR "QSH suppress: @out, already done\n"  if $verbose;
+		print STDERR "QSH suppress: @out, already done\n"  if $noexec;
 		print "false";
 	} else {
 		my $wrap = $wrap{$cmd};
@@ -183,6 +198,7 @@ if ($check) {
 
 		# never submit a job to the condor, if we're already in condor
 		$wrap = 0 if $ENV{"_CONDOR_SLOT"};
+		$wrap = 0 if $nowrap{$cmd};
 		# || $ENV{"_GRUN"};		# grun's more friendly about sub-submits... not sure whether to allow?
 
 		if ($list) {
@@ -195,13 +211,17 @@ if ($check) {
 				print "echo QSH debug: $cmd @ARGV";
 			} elsif ($list) {
 				print "false";
+			} elsif ($noexec) {
+				print "echo $grid_engine $cmd @ARGV";
 			} else {
-				print "$grid_engine $cmd @ARGV";
+				print "$grid_engine '$cmd @ARGV'";
 			}
 		} else {
 			print STDERR "QSH no wrap $cmd, input size $sz big: $big\n" if $verbose;
                         if ($debug) {
                                 print "echo QSH debug: $cmd @ARGV";
+			} elsif ($noexec) {
+				print "echo $cmd @ARGV";
                         } elsif ($list) {
                                 print "false";
 			}
@@ -258,7 +278,7 @@ sub fmodtime {
 
 sub bash_prefix {
 	my $r;
-	$r = "POPTS=$passopts\n" if $passopts;
+	$r = "POPTS=\"$passopts\"\n" if $passopts;
 	$r .= <<EOF;
 function on_debug {
 	if [ -n "\$BASH_COMMAND" ]; then
