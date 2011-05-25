@@ -21,7 +21,7 @@ use Storable qw(store retrieve);
 use Data::Dumper;
 use locale; ##added by vjw to control case of reference bases
 
-our $VERSION = '1.2.11';		# major = object interface is different, minor = new features, release=fixes/performance improve
+our $VERSION = '1.2.15';		# major = object interface is different, minor = new features, release=fixes/performance improve
 my $FILEVER = 4;			# only increment this if existing files won't work with the new version
 
 my $tmpb;
