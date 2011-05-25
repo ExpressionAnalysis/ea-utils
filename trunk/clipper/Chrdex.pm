@@ -56,7 +56,7 @@ sub new {
 	my $ref;
         my $mt = (stat($path))[9];
 	# if index is new
-	if ((stat($annob))[9] > $mt) {
+	if (!$opts{force} && (stat($annob))[9] > $mt) {
 		$ref = eval {retrieve $annob};
 
 		# if arguments were different, then clear ref
@@ -137,18 +137,15 @@ sub new {
 						# overlap next
 						$new_st = $arr->[$i]->[1] + 1;
 						$new_en = $arr->[$i+1]->[1];
-						$new_ro = $arr->[$i+1]->[2];
+						$new_ro = [@{$arr->[$i+1]->[2]}];
 						$arr->[$i+1]->[1] = $arr->[$i]->[1];
-						push @{$arr->[$i+1]->[2]}, $arr->[$i]->[2];
+						push @{$arr->[$i+1]->[2]}, @{$arr->[$i]->[2]};
 					} else {
-						push @{$arr->[$i+1]->[2]}, $arr->[$i]->[2];
+						push @{$arr->[$i+1]->[2]}, @{$arr->[$i]->[2]};
 					}
 
 					# shorten my end to less than the next's start
 					$arr->[$i]->[1] = $arr->[$i+1]->[0]-1;
-
-					#die "$new_st $new_en $new_ro", Dumper($arr->[$i])
-					#	if $chr eq 'III' && $arr->[$i]->[0] == 208130;
 
 					if ($new_en >= $new_st) {
 						# warn "NEW: $new_st $new_en $new_ro\n";
