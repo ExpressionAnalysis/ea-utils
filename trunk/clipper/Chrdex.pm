@@ -211,7 +211,7 @@ sub query {
 	if ($type eq 'C') {
 		if ($loc2) {
 			$list = chrdex_search_range($self, $chr, $loc, $loc2);
-			return undef if ! defined $list;
+			return () if ! defined $list;
 			my $prev;
 			for (my $i = 0; $i < @$list; ++$i) {
 				if ($prev eq $list->[$i]) {
@@ -223,7 +223,7 @@ sub query {
 			return @$list if !($self->{_byref});
 		} else {
 			$list = chrdex_search($self, $chr, $loc);	
-			return undef if ! defined $list;
+			return () if ! defined $list;
 			return @$list if !($self->{_byref});
 		}
 	} elsif ($type eq 'I') {
