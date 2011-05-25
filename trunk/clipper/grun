@@ -48,10 +48,11 @@ $def{port} = 5184;				# listen/connect port
 $def{bind} = '0.0.0.0';				# listen addr
 $def{env} = ['PATH'];				# list of environment vars to copy from submit through to exec
 $def{ping_secs} = 30;				# how often to tell about load/mem/stats
+$def{remove_secs} = '$ping_secs * 1000';	# don't even try kickstarting if the node is this old
 $def{idle_load} = .3;				# how often to tell about load/mem/stats
 $def{retry_secs} = 60;				# how often to retry notifications
 $def{io_keep} = 3600;				# keep io for this long after a job with i/o is finished in a detached session
-$def{sched_secs} = '$ping_secs';		# how often to try scheduling
+$def{sched_secs} = '1';				# how often to try scheduling
 $def{master} = 'localhost:5184';		# central scheduler
 $def{services} = {queue=>1, exec=>1};		# all can run
 $def{pid_file} = "/var/run/grun.pid";		# pid file
@@ -105,9 +106,14 @@ if ($qinfo) {
 	$cmd = $tmp;
 
 	if ($cmd eq 'file') {
+		my $cwd = cwd;
 		my @need;
 		for (@arg) {
-			push @need, $_ unless -e $_;
+			next if -e $_;
+			if ($_ !~ /^\//) {
+				$_ = "$cwd/$_";	
+			}
+			push @need, $_;
 		}
 		if (@need) {
 			my ($res, $error) = waitio({inplace=>$opt{inplace}}, $conf{master}, $conf{master_port}, "xcmd", $cmd, @need);
@@ -160,8 +166,19 @@ my %opt;
 $opt{wait} = 1;				# keep socket open until job is finished
 $opt{io} = 1;				# copy io back on the socket, implies wait
 
-Getopt::Long::Configure qw(require_order no_ignore_case no_passthrough);
-GetOptions(\%opt, "file=s", "memory", "nodes", "cpus", "io!", "wait!", "err=s", "out=s", "kill=i");
+Getopt::Long::Configure qw(require_order no_ignore_case passthrough);
+GetOptions(\%opt, "file=s", "memory", "nodes", "cpus", "io!", "wait!", "ferr=s", "fout=s", "kill=i");
+
+while ($ARGV[0] =~ /^--([\w-]+)=([\w=]+)/) {
+	# allow arbitrary job options, that jan later be referred to in match expressions
+	# or in execution wrappers, etc
+	$opt{$1} = $2;
+	shift @ARGV;
+}
+
+if ($ARGV[0] =~ /^-/) {
+	die "Unknown option $ARGV[0]\n";
+}
 
 my @cmd = @ARGV;
 
@@ -179,6 +196,16 @@ if ($opt{file}) {
 			# simple: split, pass as is to exec
 			@cmd = split / /, $opt{cmd};
 		}
+	}
+}
+
+if ($opt{memory}) {
+	$opt{memory} *= 1000;
+	if ($opt{memory} =~ /gb?$/) {
+		$opt{memory} *= 1000;
+	}
+	if ($opt{memory} =~ /kb?$/) {
+		$opt{memory} /= 1000;
 	}
 }
 
@@ -414,14 +441,14 @@ sub process_message {
 			$quit = 1;
 			return "ok";
 		} elsif ($args[0] eq 'stat') {
-			return shownodes();
+			return shownodes(@args);
 		} elsif ($args[0] eq 'hist') {
 			splice(@args, 1);
 			return showhist(@args);
 		} elsif ($args[0] eq 'conf') {
 			return showconf();
 		} elsif ($args[0] eq 'jobs') {
-			return showjobs();
+			return showjobs(@args);
 		} elsif ($args[0] eq 'file') {
 			shift @args;
 			xlog("note", "Sending file [@args] to remote via xcmd ($ip)");
@@ -524,6 +551,10 @@ sub process_message {
 
 		my $pid;
 
+		if ($conf{wrap}) {
+			@cmd = ($conf{wrap}, @cmd);
+		}
+
 		if (!$err && !($pid=fork)) {
 			if (! defined $pid) {
 				$err = "Can't fork";
@@ -572,11 +603,7 @@ sub process_message {
 				$err = $@ if $@;
 
 				if (!$err) {
-					if ($conf{wrap}) {
-						exec($conf{wrap}, @cmd);
-					} else {
-						exec(@cmd);
-					}
+					exec(@cmd);
 					$err=$!;
 				}
 
@@ -594,7 +621,7 @@ sub process_message {
 			xlog("note", "Error $err with job $opts->{id}");
 		}
 
-		xlog("note", "Starting job $opts->{id}, pid $pid") if !$err;
+		xlog("note", "Starting job $opts->{id}, pid $pid, '@cmd'") if !$err;
 
 		my $file = "$conf{spool}/pids/$pid";
 
@@ -719,6 +746,8 @@ sub schedule {
 
 	if (time() > ($conf{lastschedtime} + $conf{sched_secs})) {
 		$conf{lastschedtime} = time();
+	} else {
+		return;
 	}
 
 	# no attempt here to prioritize jobs, just match and go
@@ -755,23 +784,12 @@ sub schedule {
 				     ($n->{disk} >= $ref->[0]->{disk}) 
 				   ) {
 					my $match = 1;
-					if ($conf{match}) {				# eval perl expression
-						my $msafe = new Safe;			# more for closure than safety
-						$msafe->permit(qw(:subprocess));	# allow backticks
-						# node keys become local vars
-						for (keys(%$n)) {
-							${$msafe->varglob($_)}=$n->{$_};
-						}
-						
-						# whole config is accessible (and changeable...weird)
-						$msafe->share(qw(%conf));
-						$match = $msafe->reval($conf{match});
+					if ($conf{match}) {
+						$match = evalctx($conf{match}, node=>$n, job=>$ref->[0]);	# eval perl expression
 						if ($@) {
-							xlog("error", "Error evaluating {$conf{match}} : $@\n");
-							$match = 1;			# permit all on error?
+							$match = 1;						# permit all on error?
 						}
 					}
-
 					next unless $match;
 
 					if ($n->{load} < $conf{idle_load}) {
@@ -814,6 +832,10 @@ sub schedule {
 			xlog("debug", "Can't find node for $jfil " . Dumper(%nodes) . "\n") if $conf{trace};
 		}
 	}
+
+	# kickstart nodes, if needed
+	kicknodes();
+
 	return undef;
 }
 
@@ -915,9 +937,10 @@ sub srvexec {
 		my $status = $?;
 #		print "waitpid worked status is $?\n";
 		if (writestat($kid, $status)) {
+			$conf{node}->{ping}-=5;					# hurry up to let scheduler know I'm free
 			notifystat($kid);
 		} else {
-			xlog("error", "premature status sent on pid $kid");
+			xlog("error", "Premature status sent on pid $kid");
 		}
 	};
 
@@ -1326,12 +1349,12 @@ Execution Options:
 
     -m|em INT       memory minimum in MB
     -c|pu CPUS	    minimum number of cpus 
-    -n|ode N1,N2    specify certain nodes
+    -node N1,N2     specify certain nodes
 
-    -noio		disable io-processing, but wait for completion
-    -nowait		no io and don't wait, just start the command
-    -e|rr FILE	write stderr directly to FILE, no spool
-    -o|ut FILE	write stdout directly to FILE, no spool
+    -noio           disable io-processing, but wait for completion
+    -nowait         no io and don't wait, just start the command
+    -e|rr FILE      write stderr directly to FILE, no spool
+    -o|ut FILE      write stdout directly to FILE, no spool
 
 If the command contains shell metacharacters, it's prefixed with "bash -c".
 EOF
@@ -1469,7 +1492,8 @@ sub showhist {
 sub shownodes {
         my $r;
         $r .= sprintf "%-15s %9s %5s\n", 'Hostname','Memory', 'Cpu';
-        for my $node (sort {$a->{hostname} cmp $b->{hostname}} values %nodes) {
+	my @nodes = getnodes();
+        for my $node (sort {$a->{hostname} cmp $b->{hostname}} @nodes) {
                 if ($node->{ping} > time() - ($conf{ping_secs} * 2) ) {
                         $node->{hostname} = substr($node->{hostname},0,15);
                         chomp($node->{hostname});
@@ -1479,31 +1503,14 @@ sub shownodes {
         return $r;
 }
 
-# this reads the registered nodes from disk, and is naive about the internal state of the %nodes hash
-# there's some advantage, efficiency wise to doing this, instead of bothering the daemon
-# but the daemon would then need to flush live stats more often
-
-sub shownodes_disk {
-	my $r;
-	$r .= sprintf "%-15s %9s %5s\n", 'Hostname','Memory', 'Cpu';
-	opendir(D,"$conf{spool}/nodes");
-	while($_=readdir(D)) {
-		$_ = "$conf{spool}/nodes/$_";
-		next unless -f $_;
-		my @node=unpackcmd(slurp($_));
-		my %node=%{$node[1]};
-		if ($node{ping} > time() - ($conf{ping_secs} * 2) ) {
-			my $avail = $node{cpus}-$node{load};
-			$node{hostname} = substr($node{hostname},0,15);
-			chomp($node{hostname});
-			$r .= sprintf "%-15s %8dm %5.1f\n", $node{hostname}, $node{mem}/1000, $avail;
-		}		
-	}
-	closedir(D);
-	return $r;
-}
-
 sub showjobs {
+	my $user;
+	if (@_ == 1) {
+		$user = shift @_;	
+	}
+	%opt=grep s/^--?//,@_;
+	$opt{user}=$user if defined $user;
+
         my $r;
 #        $r .= sprintf "%s\t%s\t%s\t%s\t%s\n", 'JobID','User','Host','Cwd','Command';
         opendir(D,"$conf{spool}/jobs");
@@ -1514,6 +1521,7 @@ sub showjobs {
                 my ($job, @cmd) = @job;
 		if (ref($job)) {
 			my %job=%{$job};
+			next if $opt{user} && ! ($opt{user} eq $job{user});
 			my $stat = '(I)';
 			if ($jid =~ s/:([.\d]+?)\.run$//) {
 				my $ip = $1;
@@ -1550,7 +1558,7 @@ sub expandnodes {
 		$p = $conf{port} if !$p;
 		if ($h =~ s/\*/\.\*/g) {
 			if (!@n) {
-				@n=allnodes();	
+				@n=getnodes();	
 			}
 			for (@n) {
 				push @r, [$_->{hostname}, $p] if $_->{hostname} =~ /$h/;
@@ -1562,16 +1570,69 @@ sub expandnodes {
 	return @r;
 }
 
-sub allnodes {
+sub evalctx {
+	my ($expr, %ctx) = @_;
+	my $msafe = new Safe;
+	$msafe->permit(qw(:subprocess));        # allow backticks
+	for my $class (keys(%ctx)) {
+		%{$msafe->varglob($class)}=%{$ctx{$class}}
+	}
+	$msafe->share(qw(%conf %ENV));
+	if ($conf{trace}) {
+		xlog("debug", "Evaluating {$expr}\n");
+	}
+	my $res = $msafe->reval($expr);
+	my $save = $@;
+	if ($@) {
+		xlog("error", "Error evaluating {$expr} : $@\n");
+		return undef;
+	}
+	$@=$save;
+	return $res;
+}
+
+sub kicknodes {
+        my @nodes = getnodes(cached=>1);
+	return if !$conf{kickstart};
+        return if (time() < ($conf{lastkicktime} + $conf{ping_secs} * 4));
+	$conf{lastkicktime} = time();
+	for my $node (@nodes) {
+		# sometime in the last 24 hours?
+		if ($node->{ping} > (time() - ($conf{remove_secs}))) {
+			# but not in the last couple minutes
+			if ($node->{ping} < (time() - ($conf{ping_secs} * 4)) ) {
+				# kick it
+				xlog("note", "Kicking node $node->{hostname}\n");
+				if (fork) {
+					my $cmd = $conf{kickstart};
+					if ($cmd =~ /^\{(.*)\}$/) {
+						$cmd = evalctx($1, node=>$node);
+					}
+					if ($cmd && $cmd !~ /\$/) {
+						exec("$cmd");	
+					}
+				}
+			}
+		}
+	}
+}
+
+sub getnodes {
+	my (%opt) = @_;
 	my @r;
-	if (%nodes) {
+	if (!$opt{cached} && %nodes) {
+		# return memcached values
 		return values %nodes;
 	}
+	# read all from disk, including old ones
         opendir(D,"$conf{spool}/nodes");
         while($_=readdir(D)) {
                 $_ = "$conf{spool}/nodes/$_";
                 next unless -f $_;
                 my @node=unpackcmd(slurp($_));
+		if (! defined $node[1]->{avail}) {
+			$node[1]->{avail} = $node[1]->{cpus}-$node[1]->{load};
+		}
                 push @r, $node[1];
 	}
 	closedir D;
