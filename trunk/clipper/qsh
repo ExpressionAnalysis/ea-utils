@@ -14,7 +14,7 @@ my %nologic 	= map {($_, 1)} qw(if [ calc echo . alc for export);
 my %wrap 		= map {($_, 1)} qw(bowtie-build tophat juncsdb bwa cufflinks countannot calc-numaligned fastx_quality_stats);
 
 # never send to grid engine, no matter how big
-my %nowrap 	= map {($_, 1)} qw(condor_run run-analysis mv grun);
+my %nowrap 	= map {($_, 1)} qw(condor_run run-analysis mv grun qpipe);
 
 # always run these, regardless of dependencies - still send to grid if needed
 my %nodep 		= map {($_, 1)} qw();
