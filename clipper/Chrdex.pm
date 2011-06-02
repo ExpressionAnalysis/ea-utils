@@ -231,13 +231,16 @@ sub query {
 			# if only this wasn't a hash.... sheesh
 			my %hv;
 			for (my $i=$loc;$i<$loc2;++$i) {
-				for (@{$self->{"$chr:$loc"}}) {
+				$list = $self->{"$chr:$loc"};
+				next unless defined $list;
+				for (@$list) {
 					$hv{$_}=1;
 				}
 			}
 			$list = [keys(%hv)];
 		} else {
 			$list = $self->{"$chr:$loc"};
+			return () if ! defined $list;
 		}
 	}
 
