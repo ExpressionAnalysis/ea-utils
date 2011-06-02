@@ -33,7 +33,8 @@ my %info = (
 		bowtie => {big=>'20m'},
 		bwa => {big=>'20m'},
 		tophat => {big=>'10m'},
-		cufflinks => {big=>'10m'},
+		cufflinks => {big=>'10m', in=>{b=>1, r=>1, G=>1}},
+		'cufflinks0.9.3' => {big=>'10m', in=>{b=>1, r=>1, G=>1}},
 		fastx_quality_stats => {in=>{i=>1}, out=>{o=>1}},
 
 		# change to asterisk for dependency globbing
@@ -44,18 +45,22 @@ my %info = (
 
 our $VERSION = '0.9.46';
 
-my ($debug, $check, $inline, $verbose, $help, $rules_file, $list, $noexec, $passopts);
+my ($debug, $check, $inline, $verbose, $help, $rules_file, $list, $noexec, $passopts, $waitout, $force);
 
 $| = 1;
 
-GetOptions("DEBUG"=>\$debug, "K"=>\$check, "grid"=>\$grid_engine, "cmd=s"=>\$inline, "noexec"=>\$noexec, "l"=>\$list, "v"=>\$verbose, "help"=>\$help, "rules=s"=>\$rules_file) || die usage();
+$waitout=1;	# by default we wait for grid jobs output
+
+GetOptions("DEBUG"=>\$debug, "K"=>\$check, "force"=>\$force, "grid"=>\$grid_engine, "waitout"=>\$waitout, "cmd=s"=>\$inline, "noexec"=>\$noexec, "l"=>\$list, "v"=>\$verbose, "help"=>\$help, "rules=s"=>\$rules_file) || die usage();
 
 $verbose = 1 if $debug;
+$noexec = 1 if $debug;
 
 $passopts = '-v' if $verbose;
-$passopts = '-l' if $list;
-$passopts = '-D' if $debug;
+$passopts .= ' -l' if $list;
+$passopts .= ' -D' if $debug;
 $passopts .= ' -n' if $noexec;
+$passopts .= ' -f' if $force;
 
 if ($help || $ARGV[0] =~ /^-\?/) {
 	print usage();
@@ -177,9 +182,8 @@ if ($check) {
 		}
 	}
 
-	if (!$need && $nox) {
-		print STDERR "QSH suppress: @out, already done\n"  if $verbose;
-		print STDERR "QSH suppress: @out, already done\n"  if $noexec;
+	if (!$need && $nox && !$force) {
+		print STDERR "QSH suppress: @out, already done\n"  if $verbose || $noexec || $debug;
 		print "false";
 	} else {
 		my $wrap = $wrap{$cmd};
@@ -199,31 +203,31 @@ if ($check) {
 		# never submit a job to the condor, if we're already in condor
 		$wrap = 0 if $ENV{"_CONDOR_SLOT"};
 		$wrap = 0 if $nowrap{$cmd};
+		$wrap = 0 if $cmd eq $grid_engine;
 		# || $ENV{"_GRUN"};		# grun's more friendly about sub-submits... not sure whether to allow?
 
 		if ($list) {
 			print STDERR `which $orig_cmd 2>/dev/null`;
 		}
+		my $suff =  "#>\"" . join('" "',@out) . "\"";
+
+		$suff .=  "#wait" if !$debug && ($wrap || ($cmd eq $grid_engine));
+
+		print STDERR "QSH debug: wait '$out[0]' " . ($wrap || ($cmd eq $grid_engine)) . "\n" if $debug;
 		if ($wrap) {
 			print STDERR "QSH wrap $cmd, input size:$sz big:$big\n" if $verbose;
 			quoteargv();
-			if ($debug) {
-				print "echo QSH debug: $cmd @ARGV";
-			} elsif ($list) {
+			if ($list) {
 				print "false";
-			} elsif ($noexec) {
-				print "echo $grid_engine $cmd @ARGV";
 			} else {
-				print "$grid_engine '$cmd @ARGV'";
+				print "$grid_engine '$cmd @ARGV' $suff";
 			}
 		} else {
-			print STDERR "QSH no wrap $cmd, input size $sz big: $big\n" if $verbose;
-                        if ($debug) {
-                                print "echo QSH debug: $cmd @ARGV";
-			} elsif ($noexec) {
-				print "echo $cmd @ARGV";
-                        } elsif ($list) {
+			print STDERR "QSH no wrap $cmd @ARGV, input size $sz big: $big\n" if $verbose;
+                        if ($list) {
                                 print "false";
+                        } elsif ($suff) {
+				print "$cmd @ARGV $suff";
 			}
 		}
 	}
@@ -242,7 +246,10 @@ my $in;
 
 if (!$inline) {
 	$in = shift @ARGV;
-	open(IN, $in) || die "Can't open $in: $!\n";
+	if (!$in) {
+		die "qsh: missing input file operand\n"
+	}
+	open(IN, $in) || die "qsh: can't open $in: $!\n";
 }
 
 no strict 'refs';
@@ -278,23 +285,82 @@ sub fmodtime {
 
 sub bash_prefix {
 	my $r;
+	my $wx;
+	my ($won, $woff);
+
+	$wx = '[ -n "$wait" ] && qsh_waitforoutput $out' if ($waitout);
+
+	$won = 'wait=1' if $waitout;
+	$woff = 'wait=' if $waitout;
+
+	my $dx;
+	$dx = 'echo QSH debug: Cmd=$cmd Out=$out Wait=$wait' if $debug;
+	$dx = 'echo "$cmd"' if $noexec && !$debug;
+
 	$r = "POPTS=\"$passopts\"\n" if $passopts;
 	$r .= <<EOF;
-function on_debug {
+
+function qsh_on_debug {
 	if [ -n "\$BASH_COMMAND" ]; then
 		cmd=`$0 -K \$POPTS \$BASH_COMMAND`
+
+		if [[ \$cmd =~ "(.*)#>(.*)" ]]; then
+			cmd=\${BASH_REMATCH[1]}
+			out=\${BASH_REMATCH[2]}
+		fi
+
+		$woff
+                if [[ \$out =~ "(.*)#wait" ]]; then
+			out=\${BASH_REMATCH[1]}
+			$won
+                fi
+		$dx
+
 		if [ -n "\$cmd" ]; then
-			\$cmd
+			if [ -n "\$out" ]; then
+				if [ -z "$noexec" ]; then
+					bash -c "\$cmd" || qsh_rmdie \$out
+					$wx
+				fi
+			else
+				if [ -z "$noexec" ]; then
+					\$cmd
+				fi
+			fi
 			false
 		fi
 	fi
+}
+
+function qsh_rmdie {
+        for xout in \$*; do
+                if [ -n \$xout ]; then
+                        echo QSH removing \$xout 1>&2
+                fi
+                rm -rf \$xout
+        done
+}
+
+function qsh_waitforoutput {
+        i=0
+        while [ \$i -lt 80 ]
+        do
+                (( i++ ))
+                if [ -z "\$1" ]; then
+			break;
+		fi
+                if [ -e "\$1" ]; then
+                        break;
+                fi
+                sleep .25
+        done
 }
 
 shopt -s extdebug
 set -o functrace
 set -a
 
-trap on_debug DEBUG
+trap qsh_on_debug DEBUG
 EOF
 return $r;
 die $r;
