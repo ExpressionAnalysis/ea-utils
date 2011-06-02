@@ -89,14 +89,10 @@ my $gjobid = slurp("$conf{spool}/nextid");
 if ($qinfo) {
 	Getopt::Long::Configure qw(no_require_order no_ignore_case passthrough);
 	my %opt;
-	GetOptions(\%opt, "count=i", "silent", "inplace") || die usage();
+	GetOptions(\%opt, "count=i", "silent", "inplace", "hosts=s") || die usage();
 	my $cmd = shift @ARGV;
 	die usage() if !$cmd;
-	
-	if ($conf{trace}) {
-		$opt{trace} = 1;
-		sendcmd($conf{master}, $conf{master_port}, 'trace', 1);
-	}
+
 	my @arg = @ARGV;
 	$cmd =~ s/^-//;
 	my $tmp = substr bestunique($cmd, qw(config status jobs file history)), 0, 4;
@@ -104,6 +100,24 @@ if ($qinfo) {
 		die "Command $cmd is not available, for help type grun -query -help\n";
 	}
 	$cmd = $tmp;
+
+	# some commands default to localhost, others default to queue host... this is confusing... fix?
+
+	my @dest = $opt{hosts} ? expandnodes($opt{hosts}) : 
+		$cmd eq 'conf' ? [$conf{bind}, $conf{port}] : 
+		[$conf{master},$conf{master_port}];
+
+	if ($cmd eq 'file' && @dest > 1) {
+		die "Command $cmd cannot be run on multiple hosts";
+	}
+
+	for my $d (@dest) {
+	my ($host, $port) = @$d;
+
+	if ($conf{trace}) {
+		$opt{trace} = 1;
+		sendcmd($host, $port, 'trace', 1);
+	}
 
 	if ($cmd eq 'file') {
 		my $cwd = cwd;
@@ -116,13 +130,13 @@ if ($qinfo) {
 			push @need, $_;
 		}
 		if (@need) {
-			my ($res, $error) = waitio({inplace=>$opt{inplace}}, $conf{master}, $conf{master_port}, "xcmd", $cmd, @need);
+			my ($res, $error) = waitio({inplace=>$opt{inplace}}, $host, $port, "xcmd", $cmd, @need);
 			die $error, "\n" if $error && !$opt{silent};
 			exit 1 if $error;
 		}
-	} elsif (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|stat$/)) {
-		# for now, status goes to the main node, and forks ... this could get ugly, if called a lot
-		my ($res) = waitmsg($conf{master}, $conf{master_port}, "xcmd", $cmd, @arg);
+	} elsif (!($host eq $conf{bind}) || (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|stat$/))) {
+		# this could get ugly, if called a lot, may want to make more efficient
+		my ($res) = waitmsg($host, $port, "xcmd", $cmd, @arg);
 		print $res;
 	} else {
 		if ($cmd eq 'stat') {
@@ -134,6 +148,7 @@ if ($qinfo) {
 		if ($cmd eq 'hist') {
 			print showhist(%opt);
 		}	
+	}
 	}
 	exit 0;
 }
@@ -167,7 +182,7 @@ $opt{wait} = 1;				# keep socket open until job is finished
 $opt{io} = 1;				# copy io back on the socket, implies wait
 
 Getopt::Long::Configure qw(require_order no_ignore_case passthrough);
-GetOptions(\%opt, "file=s", "memory", "nodes", "cpus", "io!", "wait!", "ferr=s", "fout=s", "kill=i");
+GetOptions(\%opt, "file=s", "memory", "hosts", "cpus", "io!", "wait!", "ferr=s", "fout=s", "kill=i");
 
 while ($ARGV[0] =~ /^--([\w-]+)=([\w=]+)/) {
 	# allow arbitrary job options, that jan later be referred to in match expressions
@@ -1048,6 +1063,8 @@ sub notifystat {
 	$info->{ip} = $conf{master};
 	$info->{port} = $conf{master_port};
 
+	xlog("debug", "Notifying status " . Dumper($info) . ".\n") if ($conf{trace} || $info->{trace});
+
 	funpack("$conf{spool}/pids/$kid.stat", $info);
 	my $sock = _sendcmd($info->{ip}, $info->{port}, 'jstat', id=>$info->{id}, status=>$info->{status}, pid=>$kid, jrun=>$info->{jrun}, error=>$info->{error});
 	$read_set->add($sock) if $sock;
@@ -1642,7 +1659,7 @@ sub getnodes {
 sub startdaemon {
 	my ($dkill, $restart, $reload, $node, $all);
 
-	GetOptions("kill"=>\$dkill, "RESTART"=>\$restart, "reload"=>\$reload, "nodes=s"=>\$node, "all"=>\$all) ||
+	GetOptions("kill"=>\$dkill, "RESTART"=>\$restart, "reload"=>\$reload, "host=s"=>\$node, "all"=>\$all) ||
 		die usage();
 
 	$node = '*' if $all;
