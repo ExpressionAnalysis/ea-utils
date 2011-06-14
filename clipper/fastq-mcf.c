@@ -87,14 +87,14 @@ int main (int argc, char **argv) {
 	int nmin = 1, nkeep = 15, nmax=0;
 	float minpct = 0.25;
 	int pctdiff = 20;
-	int sampcnt = 40000;				// # of reads to sample to determine adapter profile, and base skewing
+	int sampcnt = 80000;			// # of reads to sample to determine adapter profile, and base skewing
 	int xmax = -1;
 	float scale = 2.2;
 	int noclip=0;
 	char end[MAX_FILES]; meminit(end);
 	float skewpct = 2; 			// any base at any position is less than skewpct of reads
-	float pctns = 5;				// any base that is more than 10% n's
-	bool rmns = 1;				// any base that is more than 10% n's
+	float pctns = 5;			// any base that is more than 5% n's
+	bool rmns = 1;				// remove n's at the end of the read
 	int qthr = 10;				// remove end of-read with quality < qthr
 	char phred = 64;
 	bool force = 0;
