@@ -326,7 +326,7 @@ int main (int argc, char **argv) {
 				int thr_n = (int) ( (float) bcnt[i][e][p][B_CNT] * ( pctns / 100.0 ) );		// n-threshold
 	
 				if (debug > 1) 
-					printf("Sk Prof [%d, %d]: skth=%d, bcnt=%d, ncnt=%d, a=%d, c=%d, g=%d, t=%d\n", e, p, skth, 
+					fprintf(stderr,"Sk Prof [%d, %d]: skth=%d, bcnt=%d, ncnt=%d, a=%d, c=%d, g=%d, t=%d\n", e, p, skth, 
 						bcnt[i][e][p][B_CNT], bcnt[i][e][p][B_N], bcnt[i][e][p][B_A], 
 						bcnt[i][e][p][B_C], bcnt[i][e][p][B_G], bcnt[i][e][p][B_T]);
 
@@ -337,11 +337,16 @@ int main (int argc, char **argv) {
 				for (b = 0; b < 4; ++b) {
 					if (bcnt[i][e][p][b] < skth) {			// too few bases of this type
 						tr=1;
+						if (debug > 1) 
+							fprintf(stderr, "Skew at i:%d e:%d p:%d b:%d\n", i, e, p, b);
 						break;
 					}
 				}
-				if (bcnt[i][e][p][B_N] > thr_n) 			// too many n's
+				if (bcnt[i][e][p][B_N] > thr_n) {			// too many n's
+					if (debug > 1) 
+						fprintf(stderr, "Too many N's at i:%d e:%d p:%d b:%d ( %d > %d )\n", i, e, p, b, bcnt[i][e][p][B_N], thr_n);
 					tr=1;
+				}
 
 				if (tr) {
 					if (p == sktrim[i][e]) {				// adjacent, so increase trim
@@ -359,7 +364,7 @@ int main (int argc, char **argv) {
 	for (i=0;i<i_n;++i) {
 		int totskew = sktrim[i][0] + sktrim[i][1];
 		if (maxns - totskew < nkeep) {
-			fprintf(fstat, "Warning: Too much skewing found, disabling skew clipping\n");
+			fprintf(fstat, "Warning: Too much skewing found (%d), disabling skew clipping\n", totskew);
 			meminit(sktrim);
 			break;
 		}
@@ -790,6 +795,7 @@ void usage(FILE *f, char *msg) {
 "	-R      Don't remove N's from the fronts/ends of reads\n"
 "	-n	Don't clip, just output what would be done\ni"
 "	-C N	Number of reads to use for subsampling\n"
+"	-d	Output lots of random debugging stuff\n"
 "\n"
 "Increasing the scale makes recognition-lengths longer, a scale\n"
 "of 100 will force full-length recognition.\n"
