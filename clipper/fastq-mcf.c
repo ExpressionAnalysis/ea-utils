@@ -87,7 +87,7 @@ int main (int argc, char **argv) {
 	int nmin = 1, nkeep = 15, nmax=0;
 	float minpct = 0.25;
 	int pctdiff = 20;
-	int sampcnt = 80000;			// # of reads to sample to determine adapter profile, and base skewing
+	int sampcnt = 100000;			// # of reads to sample to determine adapter profile, and base skewing
 	int xmax = -1;
 	float scale = 2.2;
 	int noclip=0;
@@ -108,7 +108,7 @@ int main (int argc, char **argv) {
 	int o_n = 0;
 	int e_n = 0;
 
-	while (	(c = getopt (argc, argv, "-nfVRdbehp:o:l:s:m:t:k:x:P:q:L:")) != -1) {
+	while (	(c = getopt (argc, argv, "-nfVRdbehp:o:l:s:m:t:k:x:P:q:L:C:")) != -1) {
 		switch (c) {
 		case '\1': 
 			if (!afil) 
@@ -126,6 +126,7 @@ int main (int argc, char **argv) {
 		case 'f': force = true; break;
 		case 'k': skewpct = atof(optarg); break;
 		case 'q': qthr = atoi(optarg); break;
+		case 'C': sampcnt = atoi(optarg); break;
 		case 'x': pctns = atof(optarg); break;
 		case 'R': rmns = false; break;
 		case 'V': printf("Revision: %d\n", atoi(strchr(SVNREV, ':')+1)); return 0; break;
@@ -788,6 +789,7 @@ void usage(FILE *f, char *msg) {
 "	-x N	'N' (Bad read) percentage causing trimming (10)\n"
 "	-R      Don't remove N's from the fronts/ends of reads\n"
 "	-n	Don't clip, just output what would be done\ni"
+"	-C N	Number of reads to use for subsampling\n"
 "\n"
 "Increasing the scale makes recognition-lengths longer, a scale\n"
 "of 100 will force full-length recognition.\n"
