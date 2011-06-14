@@ -14,7 +14,7 @@ my %nologic 	= map {($_, 1)} qw(if [ calc echo . alc for export);
 my %wrap 		= map {($_, 1)} qw(bowtie-build tophat juncsdb bwa cufflinks countannot calc-numaligned fastx_quality_stats);
 
 # never send to grid engine, no matter how big
-my %nowrap 	= map {($_, 1)} qw(condor_run run-analysis mv grun qpipe);
+my %nowrap 	= map {($_, 1)} qw(condor_run run-analysis mv grun qpipe ea);
 
 # always run these, regardless of dependencies - still send to grid if needed
 my %nodep 		= map {($_, 1)} qw();
@@ -86,7 +86,7 @@ if ($check) {
 	$cmd =~ s/.*\///;
 
 	my @argv = @ARGV;
-	print STDERR "QSH preex '$cmd @argv'\n" if $debug;
+	print STDERR "QSH preex '$orig_cmd @argv'\n" if $debug;
 	for (@argv) {
 		# bash vars come in unexpanded... expand them
 		s/\$(\w+)/$ENV{$1}/g;
@@ -215,19 +215,19 @@ if ($check) {
 
 		print STDERR "QSH debug: wait '$out[0]' " . ($wrap || ($cmd eq $grid_engine)) . "\n" if $debug;
 		if ($wrap) {
-			print STDERR "QSH wrap $cmd, input size:$sz big:$big\n" if $verbose;
+			print STDERR "QSH wrap $orig_cmd, input size:$sz big:$big\n" if $verbose;
 			quoteargv();
 			if ($list) {
 				print "false";
 			} else {
-				print "$grid_engine '$cmd @ARGV' $suff";
+				print "$grid_engine '$orig_cmd @ARGV' $suff";
 			}
 		} else {
-			print STDERR "QSH no wrap $cmd @ARGV, input size $sz big: $big\n" if $verbose;
+			print STDERR "QSH no wrap $orig_cmd @ARGV, input size $sz big: $big\n" if $verbose;
                         if ($list) {
                                 print "false";
                         } elsif ($suff) {
-				print "$cmd @ARGV $suff";
+				print "$orig_cmd @ARGV $suff";
 			}
 		}
 	}
@@ -319,11 +319,13 @@ function qsh_on_debug {
 		if [ -n "\$cmd" ]; then
 			if [ -n "\$out" ]; then
 				if [ -z "$noexec" ]; then
+					echo "+ \$cmd" 1>&2
 					bash -c "\$cmd" || qsh_rmdie \$out
 					$wx
 				fi
 			else
 				if [ -z "$noexec" ]; then
+					echo "+ \$cmd" 1>&2
 					\$cmd
 				fi
 			fi
@@ -333,12 +335,15 @@ function qsh_on_debug {
 }
 
 function qsh_rmdie {
+	if [ ! "" == "\$*" ]; then
         for xout in \$*; do
                 if [ -n \$xout ]; then
                         echo QSH removing \$xout 1>&2
                 fi
                 rm -rf \$xout
         done
+	fi
+	exit 1
 }
 
 function qsh_waitforoutput {
