@@ -289,15 +289,16 @@ int main (int argc, char **argv) {
 			strncpy(buf, s, SCANLEN);
 			for(a=0;a<acnt;++a) {
 				char *p;
-				// change to s+1 ... don't match begin on end search
+				// search whole seq for 15 char "end" of adap string
 				if (p = strstr(s+1, ad[a].escan)) { 
 					if (debug) fprintf(stderr, "  END S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", s, ad[a].id, ad[a].escan, p-s, ns, (p-s) == ns-SCANLEN);
 					if ((p-s) == ns-SCANLEN) 
 						++ad[a].ecntz[i];
 					++ad[a].ecnt[i];
 				}
-				// change to >=0 ... match begin
-				if ((p = strstr(ad[a].seq, buf))>=0) { 
+				if (debug) fprintf(stderr, "BM? %s, %s\n", ad[a].seq, buf);
+				// search 15 char begin of seq in longer adap string
+				if (p = strstr(ad[a].seq, buf)) { 
 					if (debug) fprintf(stderr, "BEGIN S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", buf, ad[a].id, ad[a].seq, p-ad[a].seq, ns, (p-ad[a].seq )  == ad[a].nseq-SCANLEN);
 					if (p-ad[a].seq == ad[a].nseq-SCANLEN) 
 						++ad[a].bcntz[i];
