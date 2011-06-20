@@ -48,6 +48,10 @@ of 100 will force full-length recognition.
 Set the skew (-k) or N-pct (-x) to 100 or 0 to turn it off
 }}}
 
+== Notes ==
+
+Adapter file format is fasta.  You can set it to /dev/null, and pass "-f" to do skew detection only.
+
 == Todo ==
 
   * When discarding one read for being "too short", it has to discard both pairs.   For a sequencing run of normal quality this is not an issue.   It should, though, write "un-mated" reads (whose mate was skipped) to a separate file.  Typically, since these read mates were poor quality, it's not really useful... but it can be for diagnostics.   I've seen runs where these provide valuable data.
