@@ -76,7 +76,7 @@ if ($help) {
 
 if (!$daemon) {
 	# -k <id> works as long as -d wasn't specified
-	GetOptions("kill=i"=>\$killjob) ||
+	GetOptions("kill=i"=>\$killjob, "trace"=>\$def{trace}) ||
 		die usage();
 }
 
@@ -87,6 +87,8 @@ init();
 my $gjobid = slurp("$conf{spool}/nextid");
 
 if ($qinfo) {
+	# this is the code for grun -q
+
 	Getopt::Long::Configure qw(no_require_order no_ignore_case passthrough);
 	my %opt;
 	GetOptions(\%opt, "count=i", "silent", "inplace", "hosts=s") || die usage();
@@ -115,7 +117,6 @@ if ($qinfo) {
 	my ($host, $port) = @$d;
 
 	if ($conf{trace}) {
-		$opt{trace} = 1;
 		sendcmd($host, $port, 'trace', 1);
 	}
 
@@ -134,7 +135,7 @@ if ($qinfo) {
 			die $error, "\n" if $error && !$opt{silent};
 			exit 1 if $error;
 		}
-	} elsif (!($host eq $conf{bind}) || (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|stat$/))) {
+	} elsif (!samehost($host,$conf{bind}) || (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|stat$/))) {
 		# this could get ugly, if called a lot, may want to make more efficient
 		my ($res) = waitmsg($host, $port, "xcmd", $cmd, @arg);
 		print $res;
@@ -160,8 +161,26 @@ if (open(IN, $conf{pid_file})) {
 }
 
 if ($killjob) {
+	my $sig = 2;
+        GetOptions("signal=i"=>\$sig) || die usage();
+	if ($conf{trace}) {
+                sendcmd($conf{master}, $conf{master_port}, 'trace', 1);
+	}
 	my ($err) = waitmsg($conf{master}, $conf{master_port}, 'jkill', $killjob);
-	die "E: $err\n" if ($err);
+	if ($err =~ /Forward:?\s*([\d.]+):?(\d*)/) {
+		my ($ip, $port) = ($1, $2);
+		$port = $conf{port} if !$port;
+		# this is WRONG ... messages should all have trace bits... that would be nice
+		sendcmd($ip, $port, 'trace', 1) if ($conf{trace});
+		($err) = waitmsg($ip, $port, 'xabort', $killjob);
+		sendcmd($ip, $port, 'trace', 0) if ($conf{trace});
+		if (!defined($err) && $@) {
+			die $@,"\n";
+		}
+	}
+	my $ok = ($err =~ /^Job.*aborted/);
+	warn "$err\n" if $ok; 
+	die "Error: $err\n" if !$ok;
 	exit 0;
 }
 
@@ -172,7 +191,8 @@ if ($daemon) {
 	exit 0;
 }
 
-# client
+####################
+# client mode
 
 my %nodes;
 my %jobs;
@@ -456,6 +476,7 @@ sub process_message {
 			$quit = 1;
 			return "ok";
 		} elsif ($args[0] eq 'stat') {
+			shift @args;
 			return shownodes(@args);
 		} elsif ($args[0] eq 'hist') {
 			splice(@args, 1);
@@ -463,6 +484,7 @@ sub process_message {
 		} elsif ($args[0] eq 'conf') {
 			return showconf();
 		} elsif ($args[0] eq 'jobs') {
+			shift @args;
 			return showjobs(@args);
 		} elsif ($args[0] eq 'file') {
 			shift @args;
@@ -496,9 +518,14 @@ sub process_message {
 		# this is the 'job kill command'
 		my ($jid) = @args;
 		if (! -e "$conf{spool}/jobs/$jid") {
-			# send to the actual job server... TODO... jmine was dumb, IP/node chosen needs to be in a separate file
-			xlog("error", "Need to forward onward...");
-			return "TODO: Check to see if there's a jmine";
+			if (! -e "$conf{spool}/jobs/$jid.ip") {
+				xlog("error", "Job $jid not running.");
+				return "Job $jid not running.";
+			} else {
+				my $ip = slurp("$conf{spool}/jobs/$jid.ip");
+				# send xabort to correct node
+				return "Forward $ip:" . $nodes{ip}->{port};
+			}
 		} else {
 			unlink "$conf{spool}/jobs/$jid";
 			return "Job $jid aborted\n";
@@ -523,6 +550,7 @@ sub process_message {
 				print ST $jhist;
 				close ST;
 				unlink("$conf{spool}/jobs/$opts{id}:$ip.run");
+				unlink("$conf{spool}/jobs/$opts{id}.ip");
 			} else {
 				xlog("error", "Got a report for a job $opts{id} with no status info");
 			}
@@ -769,6 +797,11 @@ sub schedule {
 	while(my $jid=readdir(D)) {
 		my $jfil = "$conf{spool}/jobs/$jid";
 
+		# these are annoying... see jmine
+		if ($jfil =~ /\.ip$/) {
+			next;
+		}
+
 		next unless -f $jfil;
 		my $ref = $safe->reval(slurp($jfil));
 		if (!(ref($ref) eq 'ARRAY')) {
@@ -827,12 +860,15 @@ sub schedule {
 			delete $nodes{$ip};
 		}
 		if ($max_n) {
+			# todo... change this
 			my $jmine = "$jfil:" . $max_n->{ip} . ".run";
 			touch($jfil);
 			rename($jfil, $jmine);
 			if ( -e $jmine ) {
+				my $jptr = "$jfil" . ".ip";
+				burp($jptr, $max_n->{ip});
 				if (!noderun($max_n, $jid, $ref)) {
-					# failed to execute job
+					# failed to execute job, put it back
 					rename($jmine, $jfil);
 					$max_n->{avail} = 0;
 				} else {
@@ -842,7 +878,7 @@ sub schedule {
 			}
 		} else {
 			if ($conf{full_cmd}) {
-				# TODO: fork exec to backup grid, and add to list of pids to track
+				# TODO: fork exec to backup grid, and add to list of pids to track... as if you're an exec node
 			}
 			xlog("debug", "Can't find node for $jfil " . Dumper(%nodes) . "\n") if $conf{trace};
 		}
@@ -890,6 +926,7 @@ sub init {
 		# reregister on reread
 		delete $conf{node};
 	}
+	$conf{hostip} = host2ip($conf{hostname});
 }
 
 sub getmem {
@@ -1351,6 +1388,7 @@ sub usage {
 	$u .= <<'EOF';
 Usage: grun <exec-options> command...
    or: grun -d [<local-daemon-options>]
+   or: grun -k <jobid>
    or: grun -q [<query-options>] <query-command>
 
 Lightweight job queueing system
@@ -1506,6 +1544,7 @@ sub showhist {
         return $r;
 }
 
+# grun -q status
 sub shownodes {
         my $r;
         $r .= sprintf "%-15s %9s %5s\n", 'Hostname','Memory', 'Cpu';
@@ -1520,13 +1559,15 @@ sub shownodes {
         return $r;
 }
 
+# grun -q jobs
 sub showjobs {
 	my $user;
 	if (@_ == 1) {
 		$user = shift @_;	
 	}
 	%opt=grep s/^--?//,@_;
-	$opt{user}=$user if defined $user;
+	$opt{user}=$user if !($user eq '');
+	xlog("debug", "Show job for user: $opt{user}\n");
 
         my $r;
 #        $r .= sprintf "%s\t%s\t%s\t%s\t%s\n", 'JobID','User','Host','Cwd','Command';
@@ -1755,3 +1796,23 @@ sub killgpid {
 	}
 	$gpid = 0;
 }
+
+sub samehost {
+	my($h1, $h2);
+	$h1=host2ip($h1);
+	$h2=host2ip($h2);
+	# localhost = dig `hostname`
+	$h1 =~ s/^(0\.0\.0\.0|127\.0\.0\.1)$/$conf{hostip}/;
+	$h2 =~ s/^(0\.0\.0\.0|127\.0\.0\.1)$/$conf{hostip}/;
+	return $h1 eq $h2;
+}
+
+sub host2ip {
+  my (@octets, $raw_addr, $ip);
+  return $_[0] if $_[0] =~ /^(\d+\.){3}\d+$/;
+  $raw_addr = (gethostbyname($_[0]))[4];
+  @octets = unpack("C4", $raw_addr);
+  $ip = join(".", @octets);
+  return($ip);
+}
+
