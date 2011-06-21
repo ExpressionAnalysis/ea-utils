@@ -13,6 +13,7 @@ err()
 
 trap err ERR
 
+set -o xtrace
 for v in new ok; do
 	eval prog=\$$v
 	${prog} test.fa test1.fq > test1.$v.out 2> test1.$v.err

@@ -52,6 +52,7 @@ See "void usage" below for usage.
 #define B_N     4
 #define B_CNT   5
 #define SVNREV  "$LastChangedRevision$"
+#define MAXWARN 10
 
 struct fq {
 	char *id;   int nid;   size_t naid;
@@ -81,6 +82,7 @@ char bp2char(int b);
 void usage(FILE *f, char *msg=NULL);
 int hd(char *a, char *b, int n);
 int debug=0;
+int warncount = 0;
 int main (int argc, char **argv) {
 	char c;
 	bool eol;
@@ -96,7 +98,7 @@ int main (int argc, char **argv) {
 	float pctns = 5;			// any base that is more than 5% n's
 	bool rmns = 1;				// remove n's at the end of the read
 	int qthr = 10;				// remove end of-read with quality < qthr
-	char phred = 64;
+	char phred = 0;
 	bool force = 0;
 
 	int i;
@@ -228,23 +230,42 @@ int main (int argc, char **argv) {
             fseek(fin[i], st.st_size > sampcnt ? (st.st_size-sampcnt)/3 : 0, 0);
 
             char *s = NULL; size_t na = 0; int nr = 0, ns = 0, totn[MAX_FILES]; meminit(totn);
+	    char *q = NULL; size_t naq = 0; int nq =0;
+	    int j;
             while (getline(&s, &na, fin[i]) > 0) {
                 if (*s == '@')  {
                         if ((ns=getline(&s, &na, fin[i])) <=0)
                                 break;
+			if (phred == 0) {
+				nq=getline(&q, &naq, fin[i]);
+				nq=getline(&q, &naq, fin[i]);		// qual is 2 lines down
+				--nq;
+				for (j=0;j<nq;++j) {
+					if (q[j] < 64) {
+						if (debug) fprintf(stderr, "Using phred 33, because saw: %c\n", q[j]);
+						// default to sanger 33, if you see a qual < 64
+						phred = 33;
+					}
+				}
+			}
                         --ns;                                   // don't count newline for read len
                         ++nr;
 	                avgns[i] += ns;
 			if (ns > maxns) maxns = ns;
 
+			// just 1000 reads for readlength sampling
 			if (nr >= 1000)	
 				break;
 		}
 	    }
-
+	    if (s) free(s);
+	    if (q) free(q);
 	    if (nr)
 		    avgns[i] = avgns[i]/nr;
 	}
+	// default to illumina 64 if you never saw a qual < 33
+	if (phred == 0) phred = 64;
+	if (debug) fprintf(stderr, "Phred used: %d\n", phred);
 
 	for (i=0;i<i_n;++i) {
 		if (avgns[i] == 0) {
@@ -257,6 +278,8 @@ int main (int argc, char **argv) {
 
 	// total base count per read position in sample
 	int bcnt[MAX_FILES][2][maxns][6]; meminit(bcnt);
+	int qcnt[MAX_FILES][2]; meminit(qcnt);
+	char qmin=127, qmax=0;
 	int nr;
 	for (i=0;i<i_n;++i) {
 
@@ -265,15 +288,28 @@ int main (int argc, char **argv) {
 	    fseek(fin[i], st.st_size > sampcnt ? (st.st_size-sampcnt)/3 : 0, 0);
 
 	    char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
+	    char *q = NULL; size_t naq = 0; int nq =0;
             while (getline(&s, &na, fin[i]) > 0) {
 		if (*s == '@')  {
 			if ((ns=getline(&s, &na, fin[i])) <=0) 
 				break;
-			--ns;					// don't count newline for read len
-			++nr;
+			nq=getline(&q, &naq, fin[i]);
+			nq=getline(&q, &naq, fin[i]);		// qual is 2 lines down
+
+			--nq; --ns;				// don't count newline for read len
+
+			if (nq != ns) {
+				if (warncount < MAXWARN) {
+					fprintf(stderr, "Warning, corrupt quality for sequence: %s", s);
+					++warncount;
+				}
+				continue;
+			}
 
 			if (avgns[i] < 11) 			// reads of avg length < 11 ? barcode lane, skip it
 				continue;
+
+			++nr;
 
 			// to be safe, we don't assume reads are fixed-length, not any slower, just a little more code
 			int b;
@@ -283,6 +319,9 @@ int main (int argc, char **argv) {
 				++bcnt[i][1][b][char2bp(s[ns-b-1])];	// count from end
 				++bcnt[i][1][b][B_CNT];			// count of samples at offset-from-end position
 			}
+			qcnt[i][0]+=((q[0]-phred)<qthr);		// count of q<thr for last (first trimmable) base
+			qcnt[i][1]+=((q[ns-1]-phred)<qthr);	
+			//fprintf(stderr,"qcnt i%d e0=%d, e1=%d\n", i, qcnt[i][0], qcnt[i][1]);
 			
 			int a;
 			char buf[SCANLEN+1];
@@ -291,15 +330,14 @@ int main (int argc, char **argv) {
 				char *p;
 				// search whole seq for 15 char "end" of adap string
 				if (p = strstr(s+1, ad[a].escan)) { 
-					if (debug) fprintf(stderr, "  END S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", s, ad[a].id, ad[a].escan, p-s, ns, (p-s) == ns-SCANLEN);
+					if (debug > 1) fprintf(stderr, "  END S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", s, ad[a].id, ad[a].escan, p-s, ns, (p-s) == ns-SCANLEN);
 					if ((p-s) == ns-SCANLEN) 
 						++ad[a].ecntz[i];
 					++ad[a].ecnt[i];
 				}
-				if (debug) fprintf(stderr, "BM? %s, %s\n", ad[a].seq, buf);
 				// search 15 char begin of seq in longer adap string
 				if (p = strstr(ad[a].seq, buf)) { 
-					if (debug) fprintf(stderr, "BEGIN S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", buf, ad[a].id, ad[a].seq, p-ad[a].seq, ns, (p-ad[a].seq )  == ad[a].nseq-SCANLEN);
+					if (debug > 1) fprintf(stderr, "BEGIN S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", buf, ad[a].id, ad[a].seq, p-ad[a].seq, ns, (p-ad[a].seq )  == ad[a].nseq-SCANLEN);
 					if (p-ad[a].seq == ad[a].nseq-SCANLEN) 
 						++ad[a].bcntz[i];
 					++ad[a].bcnt[i];
@@ -309,17 +347,27 @@ int main (int argc, char **argv) {
 		if (nr >= sampcnt)		// enough samples 
 			break;
             }
+	    if (s) free(s);
+	    if (q) free(q);
 	    if (nr < sampcnt)			// fewer than max, set for thresholds
 		sampcnt=nr;
 	}
 
 	// look for severe base skew, and auto-trim ends based on it
 	int sktrim[i_n][2]; meminit(sktrim);
+	int needqtrim=0;
+	if (nr > 0) {
 	for (i=0;i<i_n;++i) {
 		if (avgns[i] < 11) 			// reads of avg length < 11 ? barcode lane, skip it
 			continue;
 		int e;
 		for (e = 0; e < 2; ++e) {
+			// 5% qual less than low-threshold?  need qualtrim
+			if (qthr > 0 && (100*qcnt[i][e])/nr > 5) {
+				//fprintf(stderr,"HERE: qcnt i%d e%d=%d\n", i, qcnt[i][e]);
+				needqtrim = 1;
+			}
+
 			int p;
 			for (p = 0; p < maxns/2; ++p) {
 				int b;
@@ -359,6 +407,7 @@ int main (int argc, char **argv) {
 				}
 			}
 		}
+	}
 	}
 
 	int e;
@@ -425,10 +474,15 @@ int main (int argc, char **argv) {
 	}
 	acnt=newc;
 
-	if (acnt == 0 && !someskew && !force) {
-		fprintf(fstat, "No adapters found and no skewing detected\n");
+	if (acnt == 0 && !someskew && !force && !needqtrim) {
+		fprintf(fstat, "No adapters found");
+		if (skewpct > 0) fprintf(fstat, ", no skewing detected"); 
+		if (qthr > 0) fprintf(fstat, ", and no trimming needed");
+		fprintf(fstat, ".\n");
 		if (noclip) exit (1);			// for including in a test
 		exit(0);				// not really an error, check size of output files
+	} else {
+		if (debug) fprintf(stderr, "acnt: %d, ssk: %d, force: %d, needq: %d\n", acnt, someskew, force, needqtrim);
 	}
 
 	if (noclip)
@@ -755,7 +809,10 @@ int read_fq(FILE *in, int rno, struct fq *fq) {
         if (fq->nqual <= 0)
                 return 0;
         if (fq->id[0] != '@' || fq->com[0] != '+' || fq->nseq != fq->nqual) {
-                fprintf(stderr, "Malformed fastq record at line %d\n", rno*2+1);
+		if (warncount < MAXWARN) {
+                	fprintf(stderr, "Malformed fastq record at line %d\n", rno*2+1);
+			++warncount;
+		}
                 return -1;
         }
 
