@@ -1,0 +1,26 @@
+OVERVIEW:
+
+
+fastq-mcf
+
+Scans a sequence file for adapters, and, based on a log-scaled threshold, determines a set of clipping parameters and performs clipping. Also does skewing detection and quality filtering.
+
+fastq-multx
+
+Demultiplexes a fastq. Capable of auto-determining barcode id's based on a master set fields. Keeps multiple reads in-sync during demultiplexing. Can verify that the reads are in-sync as well, and fail if they're not.
+
+
+fastq-join
+Similar to audy's stitch program, but in C, more efficient and supports some automatic benchmarking and tuning. It uses the same "squared distance for anchored alignment" as other tools.
+
+QUICK FAQ:
+
+This is based on feedback/emails, etc.
+
+fastq-mcf does a 100k sub-sampling to determine what to do.   There are lots of paramters to play with, but the "automatic" mode should do the right thing most of the time.  If it doesn't, I really would like to hear why/what it did.  The point in this tool is that the basic quality and adapter filtering should be something that's done automagically 90% of the time - not by manually picking paramters for each run.   The fact that it's making decisions "for the user" means it will probably change more over time than the other tools.  
+
+If you want fastq-mcf to be similar to other tools, you need to pass -f (force run, regardless of heuristic), also pass -m XX, and -s 100, so it's a fixed-length.  If you try running with unrealistic, or "test" data, the heuristic won't work.  Instead, try with a subsample of 500 or so "real" reads.
+
+fastq-join produces a "report".  This is just a list of lengths of joined reads.   Also it chooses the "better quality base" when overlapping.  Very stable code at this point.
+
+fastq-multx is intended to keep mates in sync, so you can demultiplex in one-pass.  For single-reads, it's not better than other tools out there.  Also, notice the output file's "%-sign" substitution... this is instead of lots of prefix and suffix arguments.  Mismatch algorithm is "maximal unique"... ie... if it's possible that 2 barcodes can match, it won't use *either*.   Qualities are ignored.  Very stable code at this point.
