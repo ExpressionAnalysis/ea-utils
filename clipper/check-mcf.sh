@@ -11,16 +11,22 @@ err()
 	err=1	
 } 
 
+if [ "$1" = "-b" ]; then
+	list="new ok"
+else
+	list="new"
+fi
+
 trap err ERR
 
 set -o xtrace
-for v in new ok; do
+for v in $list; do
 	eval prog=\$$v
 	${prog} test.fa test1.fq > test1.$v.out 2> test1.$v.err
 	${prog} test.fa test2.fq > test2.$v.out 2> test2.$v.err
 	${prog} test.fa test1.fq -o test3.$v.out > test3.$v.err
 done
-	
+set +o xtrace	
 
 for n in test1 test2 test3; do
 	echo $n
@@ -30,7 +36,7 @@ done
 
 shopt -s extglob
 
-rm test?.@(new|ok).@(out|err)
+rm test?.@(new).@(out|err)
 
 if [ $err == 1 ]; then
 	echo NOT OK, some differences
