@@ -336,9 +336,20 @@ int main (int argc, char **argv) {
 					++ad[a].ecnt[i];
 				}
 				// search 15 char begin of seq in longer adap string
-				if (p = strstr(ad[a].seq, buf)) { 
-					if (debug > 1) fprintf(stderr, "BEGIN S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", buf, ad[a].id, ad[a].seq, p-ad[a].seq, ns, (p-ad[a].seq )  == ad[a].nseq-SCANLEN);
-					if (p-ad[a].seq == ad[a].nseq-SCANLEN) 
+				int slen;
+				if (SCANLEN <= ad[a].nseq) {
+					slen = SCANLEN;
+					p = strstr(ad[a].seq, buf);
+				} else {
+					slen = ad[a].nseq;
+					if (!strncmp(ad[a].seq,buf,ad[a].nseq)) 
+						p=ad[a].seq;
+					else
+						p=NULL;
+				}
+				if (p) { 
+					if (debug > 1) fprintf(stderr, "BEGIN S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", buf, ad[a].id, ad[a].seq, p-ad[a].seq, ns, (p-ad[a].seq )  == ad[a].nseq-slen);
+					if (p-ad[a].seq == ad[a].nseq-slen) 
 						++ad[a].bcntz[i];
 					++ad[a].bcnt[i];
 				}
@@ -363,10 +374,10 @@ int main (int argc, char **argv) {
 		int e;
 		for (e = 0; e < 2; ++e) {
 			// 5% qual less than low-threshold?  need qualtrim
-			if (qthr > 0 && (100*qcnt[i][e])/nr > 5) {
-				//fprintf(stderr,"HERE: qcnt i%d e%d=%d\n", i, qcnt[i][e]);
+			if (qthr > 0 && (100.0*qcnt[i][e])/nr > 5) {
 				needqtrim = 1;
 			}
+
 
 			int p;
 			for (p = 0; p < maxns/2; ++p) {
@@ -546,7 +557,6 @@ int main (int argc, char **argv) {
 		for (f=0;f<i_n;++f) {
 		    dotrim[f][0] = sktrim[f][0];					// default, trim to detected skew levels
 		    dotrim[f][1] = sktrim[f][1];
-
 		    if (avgns[f] < 11)  
 	 			// reads of avg length < 11 ? barcode lane, skip it
 				continue;
