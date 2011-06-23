@@ -24,8 +24,9 @@ $(PREFIX)/bin/%: % $(PREFIX)/bin
 
 dist: $(PKG).tar.gz
 
+$(PKG).spec:
+	perl -pe 's/%RELEASE%/${REL}/' $(PKG).spex > $(PKG).spec
 
 $(PKG).tar.gz: Makefile $(SRC) $(PKG).spec README CHANGES
-	perl -pe 's/%RELEASE%/${REL}/' ea-utils.spex > ea-utils.spec
 	tar -cvzf $(PKG).tar.gz $^
 	[ -n "${REL}" ] && cp $(PKG).tar.gz $(PKG).${VER}-${REL}.tar.gz
