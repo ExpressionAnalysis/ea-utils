@@ -562,17 +562,21 @@ int main (int argc, char **argv) {
 				continue;
 
 		    if (rmns) {
-			    for (i=dotrim[f][0];i<fq[f].nseq/3;++i) {
+			    for (i=dotrim[f][0];i<(fq[f].nseq/2-1);++i) {
 			    		// trim N's from the front
 					if (fq[f].seq[i] == 'N') 
 						dotrim[f][0] = i + 1;
+					else
+						break;
 			    }
 			    // don't trim inside pairs, since it invalidates the distances
 			    if (i_n == 1) {
-				    for (i=dotrim[f][1];i<fq[f].nseq/3;++i) {
+				    for (i=dotrim[f][1];i<(fq[f].nseq/2-1);++i) {
 						// trim N's from the end
 						if (fq[f].seq[fq[f].nseq-i-1] == 'N')
 							dotrim[f][1] = i + 1;
+						else 
+							break;
 				    }
 			    }
 		    }
@@ -581,22 +585,24 @@ int main (int argc, char **argv) {
 			    bool istrimq = false;
 
                             // trim qual from the begin
-			    for (i=dotrim[f][0];i<fq[f].nseq/3;++i) {
+			    for (i=dotrim[f][0];i<(fq[f].nseq/2-1);++i) {
 				if ((fq[f].qual[i]-phred) < qthr) {
 					++trimqb[f];
 					istrimq = true;
 					dotrim[f][0] = i + 1;
-				}
+				} else
+					break;
 			    }
 
                             // trim qual from the end only if not mated
 			    if (i_n == 1) {
-                            	for (i=dotrim[f][1];i<fq[f].nseq/3;++i) {
+                            	for (i=dotrim[f][1];i<(fq[f].nseq/2-1);++i) {
 					if ((fq[f].qual[fq[f].nseq-i-1]-phred) < qthr) {
 						++trimqb[f];
 						istrimq = true;
 						dotrim[f][1] = i + 1;
-					}
+					} else 
+						break;
                             	}
 			    }
 			    if (istrimq) ++trimql[f];
