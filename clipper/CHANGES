@@ -1,0 +1,2 @@
+r154	- fixed major bug in RMN's that would invalidate reads
+r152	- allowed short adapters to work at the 'begin' of reads
