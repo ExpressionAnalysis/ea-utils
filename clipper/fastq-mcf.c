@@ -280,7 +280,6 @@ int main (int argc, char **argv) {
 	int bcnt[MAX_FILES][2][maxns][6]; meminit(bcnt);
 	int qcnt[MAX_FILES][2]; meminit(qcnt);
 	char qmin=127, qmax=0;
-	int nr;
 	for (i=0;i<i_n;++i) {
 
 	    struct stat st;
@@ -364,17 +363,22 @@ int main (int argc, char **argv) {
 		sampcnt=nr;
 	}
 
+	if (sampcnt == 0) {
+		fprintf(stderr, "ERROR: Unable to read file for subsampling\n");
+		exit(1);
+	}
+
 	// look for severe base skew, and auto-trim ends based on it
 	int sktrim[i_n][2]; meminit(sktrim);
 	int needqtrim=0;
-	if (nr > 0) {
+	if (sampcnt > 0) {
 	for (i=0;i<i_n;++i) {
 		if (avgns[i] < 11) 			// reads of avg length < 11 ? barcode lane, skip it
 			continue;
 		int e;
 		for (e = 0; e < 2; ++e) {
 			// 5% qual less than low-threshold?  need qualtrim
-			if (qthr > 0 && (100.0*qcnt[i][e])/nr > 5) {
+			if (qthr > 0 && (100.0*qcnt[i][e])/sampcnt > 5) {
 				needqtrim = 1;
 			}
 
