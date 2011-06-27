@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 g++ fastq-mcf.c -o fastq-mcf.ex
 
