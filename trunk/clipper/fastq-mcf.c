@@ -359,8 +359,10 @@ int main (int argc, char **argv) {
             }
 	    if (s) free(s);
 	    if (q) free(q);
-	    if (nr < sampcnt)			// fewer than max, set for thresholds
-		sampcnt=nr;
+	    if (avgns[i] >= 11) {
+		    if (nr < sampcnt)			// fewer than max, set for thresholds
+			sampcnt=nr;
+	    }
 	}
 
 	if (sampcnt == 0) {
