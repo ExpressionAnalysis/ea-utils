@@ -4,7 +4,6 @@ CFLAGS?=-O3
 
 PKG=ea-utils
 REL := $(shell svnversion 2>/dev/null | perl -ne 'print $$1 if /:(\d+)/' )
-ALWAYS := $(shell grep ${REL} $(PKG).spec || touch $(PKG).spex && echo 'OK' )
 VER := $(shell grep '%define ver' ${PKG}.spex | perl -ne 'print $$1 if / (\S+) *$$/')
 
 SRC=fastq-clipper.c fastq-mcf.c fastq-multx.c fastq-join.c
@@ -24,6 +23,7 @@ $(PREFIX)/bin/%: % $(PREFIX)/bin
 	cp $< $@
 
 dist: $(PKG).${VER}-${REL}.tar.gz
+	grep "${REL}" $(PKG).spec || touch $(PKG).spex
 
 $(PKG).spec: $(PKG).spex
 	perl -pe 's/%RELEASE%/${REL}/' $(PKG).spex > $(PKG).spec
