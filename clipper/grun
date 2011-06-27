@@ -1588,6 +1588,11 @@ sub showjobs {
 					$stat = $node[1]->{hostname}; chomp $stat;
 				}
 			}
+			# trim for display
+			for (@cmd) {
+				s/^\s+//g;
+				s/\n\s*/;/g;
+			}
 			$r .= sprintf "%s\t%s\t%s\t%s\t%s\n", $jid,$job{user},$stat,$job{cwd},join(' ', @cmd);
 		}
         }
