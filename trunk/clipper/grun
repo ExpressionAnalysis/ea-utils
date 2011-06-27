@@ -312,7 +312,7 @@ if ($opt{wait}) {
 	if ($err) {
 		print STDERR $err, "\n";
 	}
-	exit $stat<<8;
+	exit $stat>>8;
 } else {
 	# aah... nicer
 	print STDOUT "Job id $info{jid}\n";
