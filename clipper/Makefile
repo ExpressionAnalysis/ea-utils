@@ -22,8 +22,12 @@ $(PREFIX)/bin:
 $(PREFIX)/bin/%: % $(PREFIX)/bin
 	cp $< $@
 
-dist: $(PKG).${VER}-${REL}.tar.gz
+dist: getrel $(PKG).${VER}-${REL}.tar.gz
+
+getrel:
 	grep "${REL}" $(PKG).spec || touch $(PKG).spex
+
+.PHONY: getrel
 
 $(PKG).spec: $(PKG).spex
 	perl -pe 's/%RELEASE%/${REL}/' $(PKG).spex > $(PKG).spec
