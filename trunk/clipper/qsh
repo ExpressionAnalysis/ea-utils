@@ -20,7 +20,7 @@ my %nowrap 	= map {($_, 1)} qw(condor_run run-analysis mv grun qpipe ea);
 my %nodep 		= map {($_, 1)} qw();
 
 # this can be condor_run, qsub... whatever you want
-my $grid_engine	= 'condor_run';
+my $grid_engine	= 'grun';
 
 # alter default 'big' size and parameter parsing
 my %info = (
@@ -29,14 +29,20 @@ my %info = (
 		gunzip => {big=>'10g', in=>{_noex=>1}, out=>{_eval=>sub{$_[0]=~m/(.*)\.gz$/; return $1}}},
 		gzip => {big=>'20g', in=>{_noex=>1}, out=>{_eval=>sub{$_[0].".gz"}}},
 
-		'auto-clip.sh' => {out=>{_eval=>sub{$_[0]=~ s/\.fastq//; return ($_[0].".qcStats", $_[0].".adapters")}}},
+		'auto-clip.sh' => {out=>{_eval=>sub{$_[0]=~ s/\.(fastq|fq)//; return ($_[0].".qcStats", $_[0].".adapters")}}},
 		bowtie => {big=>'20m'},
 		bwa => {big=>'20m'},
 		tophat => {big=>'10m'},
 		cufflinks => {big=>'10m', in=>{b=>1, r=>1, G=>1}},
 		'cufflinks0.9.3' => {big=>'10m', in=>{b=>1, r=>1, G=>1}},
 		fastx_quality_stats => {in=>{i=>1}, out=>{o=>1}},
-
+		samtools => { match => [
+				{ pat=>qr/sort\s*(?:-n)?\s+(\S+bam)\s*(\S+)/, post=>'$out[0] .= ".bam"' } ,
+				{ pat=>qr/pileup.*\s(\S+[bs]am)/ } ,
+		] },
+                bwasam =>   { match => [
+                                { pat=>qr/(?:-o \S+\s+)?(?:\S+)\s+(\S+)/, post=>'$out[1] = "$out[0].sam"; $out[0] = "$out[0].bam"'} ,
+                ] },
 		# change to asterisk for dependency globbing
 		'fastq-multx' => {out=>{o=>sub {s/%/\*/}}, in=>{l=>1, g=>1, B=>1}},
 
@@ -51,7 +57,7 @@ $| = 1;
 
 $waitout=1;	# by default we wait for grid jobs output
 
-GetOptions("DEBUG"=>\$debug, "K"=>\$check, "force"=>\$force, "grid"=>\$grid_engine, "waitout"=>\$waitout, "cmd=s"=>\$inline, "noexec"=>\$noexec, "l"=>\$list, "v"=>\$verbose, "help"=>\$help, "rules=s"=>\$rules_file) || die usage();
+GetOptions("DEBUG"=>\$debug, "K"=>\$check, "force"=>\$force, "grid"=>\$grid_engine, "waitout"=>\$waitout, "cmd=s"=>\$inline, "noexec"=>\$noexec, "l"=>\$list, "verbose|v"=>\$verbose, "help"=>\$help, "rules=s"=>\$rules_file) || die usage();
 
 $verbose = 1 if $debug;
 $noexec = 1 if $debug;
@@ -85,6 +91,11 @@ if ($check) {
 	my $cmd = $orig_cmd;
 	$cmd =~ s/.*\///;
 
+	my $cmd_nv = $cmd;
+	$cmd_nv =~ s/\-[0-9.-]+//;
+	$cmd_nv = $cmd if $cmd_nv !~ /^[\w-]+$/;
+
+
 	my @argv = @ARGV;
 	print STDERR "QSH preex '$orig_cmd @argv'\n" if $debug;
 	for (@argv) {
@@ -100,7 +111,7 @@ if ($check) {
 
 	# don't ever check dependencies, or wrap these commands
 	if ($nologic{$cmd}) {
-		print STDERR "QSH ignore command $cmd\n" if $verbose;
+		print STDERR "QSH ignore command '$cmd'\n" if $verbose;
 		if ($debug) {
 			print STDERR "QSH debug: '$cmd @ARGV'";
 		}
@@ -111,16 +122,17 @@ if ($check) {
 
 	# walk through arguments, determining inputs, outputs and total sizes 	
 	my ($opt, %opt, $first, $firstnox, $last, @in, @out, $sz);
+	my $info = $info{$cmd} ? $info{$cmd} : $info{$cmd_nv};
 	for (@argv) {
 		if (s/^--?//) {
 			$opt = $_;
 			next;
 		}
 		if ($opt) {
-			if ($opt eq '<' || $info{$cmd}->{in}->{$opt}) {
+			if ($opt eq '<' || $info->{in}->{$opt}) {
 				push @in, $_;
 			}
-			if ($opt eq '>' || $info{$cmd}->{out}->{$opt}) {
+			if ($opt eq '>>' || $opt eq '>' || $info->{out}->{$opt}) {
 				push @out, $_;
 			}
 			$opt = '';
@@ -133,7 +145,7 @@ if ($check) {
 				$firstnox = $_ 
 		}
 		if (!$first) {
-			if ( $info{$cmd}->{in}->{_noex} || -e $_ ) {
+			if ( $info->{in}->{_noex} || -e $_ ) {
 				$first = $_ 
 			}
 		} else {
@@ -145,14 +157,33 @@ if ($check) {
 	push @in, $first if $first && (!@in);		# no input ? assume first file that exists
 	push @in, $firstnox if $firstnox && (!@in);	# no input ? assume first file
 
-	if ( $info{$cmd}->{in}->{_noin} ) {
+	if ( $info->{match} ) {
+		my $args = "@ARGV";	
+		for my $m (@{$info->{match}}) {
+			my @m = $args =~ /$m->{pat}/;
+			if (@m) {
+				@in = shift @m;
+				if (@m) {
+					@out = @m;
+					if ($m->{post}) {
+						eval($m->{post});
+					}
+				}
+			}
+		}
+	}
+	if ($info->{post}) {
+		eval($info->{post});
+	}
+
+	if ( $info->{in}->{_noin} ) {
 		@in = ();
 		$last = $first;
 	}
 
-	if ($info{$cmd}->{out}->{_eval}) {
+	if ($info->{out}->{_eval}) {
 		my ($i, $o) = ($in[0], $out[0]);
-		@out = &{$info{$cmd}->{out}->{_eval}}($i, $o);
+		@out = &{$info->{out}->{_eval}}($i, $o);
 		print STDERR "QSH eval $cmd: @out\n" if $verbose;
 		if ($@) {
 			print STDERR "QSH error: $@\n";
@@ -184,11 +215,11 @@ if ($check) {
 
 	if (!$need && $nox && !$force) {
 		print STDERR "QSH suppress: @out, already done\n"  if $verbose || $noexec || $debug;
-		print "false";
+		print "true";
 	} else {
-		my $wrap = $wrap{$cmd};
+		my $wrap = $wrap{$cmd} || $wrap{$cmd_nv};
 
-		my $big = $info{$cmd}->{big};
+		my $big = $info->{big};
 		if (!$big) {
 			$big = '50m';
 		}
@@ -220,7 +251,7 @@ if ($check) {
 			if ($list) {
 				print "false";
 			} else {
-				print "$grid_engine '$orig_cmd @ARGV' $suff";
+				print "$grid_engine \"$orig_cmd @ARGV\" $suff";
 			}
 		} else {
 			print STDERR "QSH no wrap $orig_cmd @ARGV, input size $sz big: $big\n" if $verbose;
@@ -266,10 +297,11 @@ if (pipe_to_fork('FOO')) {
 		}
 	}
 	close FOO;
-	wait
+	while (wait > 1) {};
 } else {
 	quoteargv();
 	exec("bash -s @ARGV");
+	while (wait > 1) {};
 }
 
 sub quoteargv {
@@ -294,7 +326,7 @@ sub bash_prefix {
 	$woff = 'wait=' if $waitout;
 
 	my $dx;
-	$dx = 'echo QSH debug: Cmd=$cmd Out=$out Wait=$wait' if $debug;
+	$dx = 'echo QSH debug: Cmd=$cmd Out=$out Wait=$wait 1>&2' if $debug;
 	$dx = 'echo "$cmd"' if $noexec && !$debug;
 
 	$r = "POPTS=\"$passopts\"\n" if $passopts;
