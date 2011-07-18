@@ -24,6 +24,9 @@ $(PREFIX)/bin/%: % $(PREFIX)/bin
 
 dist: getrel $(PKG).${VER}-${REL}.tar.gz
 
+# these shenanigans are done to ensure than the release in the spec file is the same as the subversion release
+# a less verbose way should be possible
+
 getrel:
 	grep "${REL}" $(PKG).spec || touch $(PKG).spex
 
