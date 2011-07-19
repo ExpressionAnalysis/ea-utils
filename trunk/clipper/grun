@@ -276,6 +276,7 @@ for (@{$conf{env}}) {
 }
 
 $opt{user} = getpwuid($>);
+$opt{umask} = umask();
 
 my %info;
 my $interrupt;
@@ -653,6 +654,8 @@ sub process_message {
 					open STDOUT, ">/dev/null";
 				}
 				
+				# copy in the umask & the environment
+				umask $opts->{umask};
 				for (keys(%{$opts->{env}})) {
 					$ENV{$_}=$opts->{env}->{$_};
 				}
@@ -1352,6 +1355,7 @@ sub waitio {
 		} while ($left>0 && $sock->sysread($dat, 4096));
 		if ($opts->{inplace}) {
 			close $fh;
+			$got = 3;
 		}
 	}
 	if ($stat) {

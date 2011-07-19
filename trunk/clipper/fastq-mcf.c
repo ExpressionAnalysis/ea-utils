@@ -280,6 +280,7 @@ int main (int argc, char **argv) {
 	int bcnt[MAX_FILES][2][maxns][6]; meminit(bcnt);
 	int qcnt[MAX_FILES][2]; meminit(qcnt);
 	char qmin=127, qmax=0;
+	int nsampcnt = 0;
 	for (i=0;i<i_n;++i) {
 
 	    struct stat st;
@@ -360,15 +361,18 @@ int main (int argc, char **argv) {
 	    if (s) free(s);
 	    if (q) free(q);
 	    if (avgns[i] >= 11) {
-		    if (nr < sampcnt)			// fewer than max, set for thresholds
-			sampcnt=nr;
+		    if (nsampcnt == 0 || nr < nsampcnt)			// fewer than max, set for thresholds
+			nsampcnt=nr;
 	    }
 	}
 
-	if (sampcnt == 0) {
+	if (nsampcnt == 0) {
 		fprintf(stderr, "ERROR: Unable to read file for subsampling\n");
 		exit(1);
 	}
+
+	// adjust down
+	sampcnt = nsampcnt;
 
 	// look for severe base skew, and auto-trim ends based on it
 	int sktrim[i_n][2]; meminit(sktrim);
@@ -575,15 +579,12 @@ int main (int argc, char **argv) {
 					else
 						break;
 			    }
-			    // don't trim inside pairs, since it invalidates the distances
-			    if (i_n == 1) {
-				    for (i=dotrim[f][1];i<(fq[f].nseq/2-1);++i) {
-						// trim N's from the end
-						if (fq[f].seq[fq[f].nseq-i-1] == 'N')
-							dotrim[f][1] = i + 1;
-						else 
-							break;
-				    }
+			    for (i=dotrim[f][1];i<(fq[f].nseq/2-1);++i) {
+					// trim N's from the end
+					if (fq[f].seq[fq[f].nseq-i-1] == 'N')
+						dotrim[f][1] = i + 1;
+					else 
+						break;
 			    }
 		    }
 
@@ -600,17 +601,15 @@ int main (int argc, char **argv) {
 					break;
 			    }
 
-                            // trim qual from the end only if not mated
-			    if (i_n == 1) {
-                            	for (i=dotrim[f][1];i<(fq[f].nseq/2-1);++i) {
-					if ((fq[f].qual[fq[f].nseq-i-1]-phred) < qthr) {
-						++trimqb[f];
-						istrimq = true;
-						dotrim[f][1] = i + 1;
-					} else 
-						break;
-                            	}
-			    }
+                            for (i=dotrim[f][1];i<(fq[f].nseq/2-1);++i) {
+				if ((fq[f].qual[fq[f].nseq-i-1]-phred) < qthr) {
+					++trimqb[f];
+					istrimq = true;
+					dotrim[f][1] = i + 1;
+				} else 
+					break;
+                            }
+			    
 			    if (istrimq) ++trimql[f];
                     }
 
