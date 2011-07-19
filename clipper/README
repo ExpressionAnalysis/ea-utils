@@ -1,6 +1,5 @@
 OVERVIEW:
 
-
 fastq-mcf
 
 Scans a sequence file for adapters, and, based on a log-scaled threshold, determines a set of clipping parameters and performs clipping. Also does skewing detection and quality filtering.
@@ -24,3 +23,15 @@ If you want fastq-mcf to be similar to other tools, you need to pass -f (force r
 fastq-join produces a "report".  This is just a list of lengths of joined reads.   Also it chooses the "better quality base" when overlapping.  Very stable code at this point.
 
 fastq-multx is intended to keep mates in sync, so you can demultiplex in one-pass.  For single-reads, it's not better than other tools out there.  Also, notice the output file's "%-sign" substitution... this is instead of lots of prefix and suffix arguments.  Mismatch algorithm is "maximal unique"... ie... if it's possible that 2 barcodes can match, it won't use *either*.   Qualities are ignored.  Very stable code at this point.
+
+INSTALL:
+
+Should be able to run "make install" on most machines that have g++ installed.  On windows, install a copy of the MinGW environment.
+
+Example:
+
+PREFIX=/usr make install
+
+Or
+
+CC=g++ PREFIX=/usr/local make install
