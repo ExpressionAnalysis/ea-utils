@@ -36,7 +36,7 @@ my $EOT = pack("cc",0,4);
 my $SOCK_WAIT = -1;				# wait for resp
 my $SOCK_FILE = -2;				# send files over socket
  
-my ($daemon, $killjob);
+my ($daemon, $killjob, $editjob);
 my (%conf, %def);
 
 # defaults just run things locally, no master
@@ -80,7 +80,7 @@ if ($help) {
 
 if (!$daemon) {
 	# -k <id> works as long as -d wasn't specified
-	GetOptions("kill=i"=>\$killjob, "trace"=>\$def{trace}) ||
+	GetOptions("kill=i"=>\$killjob, "trace"=>\$def{trace}, "edit"=>\$editjob) ||
 		die usage();
 }
 
@@ -165,6 +165,7 @@ if (open(IN, $conf{pid_file})) {
 }
 
 if ($killjob) {
+	# grun -k code
 	my $sig = 2;
         GetOptions("signal=i"=>\$sig) || die usage();
 	if ($conf{trace}) {
@@ -184,8 +185,18 @@ if ($killjob) {
 	}
 	my $ok = ($err =~ /^Job.*aborted/);
 	warn "$err\n" if $ok; 
+	$err = 'No response to jkill' if !$ok && !$err;
 	die "Error: $err\n" if !$ok;
 	exit 0;
+}
+
+if ($editjob) {
+        my ($err) = waitmsg($conf{master}, $conf{master_port}, 'jedit', @ARGV);
+        my $ok = ($err =~ /^Job.*edited/);
+        warn "$err\n" if $ok;
+	$err = 'No response to jedit' if !$ok && !$err;
+        die "Error: $err\n" if !$ok;
+        exit 0;
 }
 
 my ($listener, $read_set, $write_set, $quit, %io_wait, %run_wait);	# daemon globals
@@ -252,7 +263,7 @@ if ($conf{auto_profile}) {
 	if (-e ($conf{auto_profile})) {
 		my $cmd = join ' ', @cmd;
 		# safe'ish eval, just so there aren't weird side effects
-		my ($mem, $cpu) = evalctx(slurp($conf{auto_profile}) . ";\nreturn (\$cpu, \$mem);", cmd=>$cmd, cmd=>\@cmd);
+		my ($cpu, $mem) = evalctx(slurp($conf{auto_profile}) . ";\nreturn (\$cpu, \$mem);", cmd=>$cmd, cmd=>\@cmd);
 		$opt{memory}=$mem if ($mem > $opt{memory});
 		$opt{cpus}=$cpu if ($cpu > $opt{cpus});
 	}
@@ -272,7 +283,7 @@ $opt{cwd} = cwd;
 
 # copy env
 for (@{$conf{env}}) {
-	$opt{env}->{$_} = $ENV{$_};
+	$opt{env}->{$_} = $ENV{$_} if defined $ENV{$_};
 }
 
 $opt{user} = getpwuid($>);
@@ -547,12 +558,33 @@ sub process_message {
 		} else {
 			return "Error: invalid node registration info";	
 		}
+        } elsif ($cmd eq 'jedit') {
+		my ($jid, $key, $val) = @args;
+		if (!$key || !defined($val)) {
+                	xlog("error", "Invalid edit request ($jid,$key,$val)");
+                	return "Invalid edit request ($jid,$key,$val)\n";
+		} elsif (! -e "$conf{spool}/jobs/$jid") {
+                        if (! -e "$conf{spool}/jobs/$jid.ip") {
+                                xlog("error", "Job $jid not found.");
+                                return "Job $jid not found.";
+                        } else {
+                                my $ip = slurp("$conf{spool}/jobs/$jid.ip");
+                                # tell client to send an 'xedit' to the running node
+                                return "Forward $ip:" . $nodes{ip}->{port};
+                        }
+                } else {
+			my $ref = $safe->reval(slurp("$conf{spool}/jobs/$jid"));
+			$ref->[0]->{$key} = $val;
+			burp("$conf{spool}/jobs/$jid.jedit");
+			rename("$conf{spool}/jobs/$jid.jedit", "$conf{spool}/jobs/$jid");
+                        return "Job $jid edited\n";
+                }
         } elsif ($cmd eq 'jkill') {
 		# this is the 'job kill command'
 		my ($jid) = @args;
 		if (! -e "$conf{spool}/jobs/$jid") {
 			if (! -e "$conf{spool}/jobs/$jid.ip") {
-				xlog("error", "Job $jid not running.");
+				xlog("error", "Job $jid not running, but kill requested");
 				return "Job $jid not running.";
 			} else {
 				my $ip = slurp("$conf{spool}/jobs/$jid.ip");
@@ -743,7 +775,7 @@ sub process_message {
                 my ($jid, $sig) = @args;
                 my $pid = slurp("$conf{spool}/jpids/$jid");
 		if ($pid > 1) {
-			xlog("note", "Abording jobs $jid ($pid) on request");
+			xlog("note", "Aborting jobs $jid ($pid) on request");
 			$sig = 2 if !$sig;
 			my $ok = kill $sig, -$pid;		# parent, and all kids
 			$ok |= kill $sig, $pid;		# parent if, for some reason, that didn't work
@@ -869,7 +901,10 @@ sub schedule {
 
 		for my $n (values %nodes) {
 			# jobs need enough memory, cpu availability and disk space... that's it
-			if ($n->{ping} > (time()-$conf{ping_secs}*2)) {
+			if (!$n->{ip}) {
+				xlog("error", "Node has no ip! " . Data::Dumper->new($n)->Indent(0)->Terse(1)->Dump());
+			}
+			if ($n->{ping} > (time()-$conf{ping_secs}*3)) {
 				if ( ($n->{mem} >= $ref->[0]->{memory}) &&
 				     ($n->{avail} >= $ref->[0]->{cpus}) && 
 				     ($n->{disk} >= $ref->[0]->{disk}) 
@@ -901,7 +936,7 @@ sub schedule {
 			}
 		}
 		for my $ip (@dereg) {
-			xlog("note", "Deregister node $ip, last ping was " . (time()-$nodes{$ip}->{ping}) . " seconds ago");
+			xlog("note", "Deregister node '$ip', last ping was " . (time()-$nodes{$ip}->{ping}) . " seconds ago");
 			delete $nodes{$ip};
 		}
 		if ($max_n) {
@@ -1437,6 +1472,7 @@ sub usage {
 Usage: grun <exec-options> command...
    or: grun -d [<local-daemon-options>]
    or: grun -k <jobid>
+   or: grun -e <jobid> key val
    or: grun -q [<query-options>] <query-command>
 
 Lightweight job queueing system
@@ -1609,12 +1645,19 @@ sub shownodes {
 
 # grun -q jobs
 sub showjobs {
-	my $user;
-	if (@_ == 1) {
-		$user = shift @_;	
+	my %opt;
+	
+	{
+		local @ARGV = @_;
+		GetOptions(\%opt, "dump", "user=s");
+		@_=@ARGV;
 	}
-	%opt=grep s/^--?//,@_;
-	$opt{user}=$user if !($user eq '');
+
+	if (@_ == 1) {
+		my $user = shift @_;	
+		$opt{user}=$user if !($user eq '');
+	}
+
 	xlog("debug", "Show job for user: $opt{user}\n");
 
         my $r;
@@ -1641,7 +1684,11 @@ sub showjobs {
 				s/^\s+//g;
 				s/\n\s*/;/g;
 			}
-			$r .= sprintf "%s\t%s\t%s\t%s\t%s\n", $jid,$job{user},$stat,$job{cwd},join(' ', @cmd);
+			if ($opt{dump}) {
+				$r .= packdump($job) . "\n";
+			} else {
+				$r .= sprintf "%s\t%s\t%s\t%s\t%s\n", $jid,$job{user},$stat,$job{cwd},join(' ', @cmd);
+			}
 		}
         }
         closedir(D);
@@ -1884,5 +1931,9 @@ sub host2ip {
   @octets = unpack("C4", $raw_addr);
   $ip = join(".", @octets);
   return($ip);
+}
+
+sub packdump {
+	Data::Dumper->new(\@_)->Indent(0)->Terse(1)->Dump();
 }
 
