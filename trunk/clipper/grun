@@ -601,7 +601,12 @@ sub process_message {
 		if ($opts{id}) {
 			my $ip = $sock->peerhost();	# should match the ip from jmine (see above how dumb this is)
 			if (! -e "$conf{spool}/jobs/$opts{id}:$ip.run") {
-				xlog("error", "Got a report for a job $opts{id} from $ip");
+				my $should = slurp("$conf{spool}/jobs/$opts{id}.ip");
+				if (!$should) {
+					xlog("error", "Got a report for a job $opts{id} from $ip, which has no info???");
+				} else {
+					xlog("error", "Got a report for a job $opts{id} from $ip, should be $should");
+				}
 			}
 			if ($opts{jrun}) {
 				# just a ping
@@ -902,7 +907,7 @@ sub schedule {
 		for my $n (values %nodes) {
 			# jobs need enough memory, cpu availability and disk space... that's it
 			if (!$n->{ip}) {
-				xlog("error", "Node has no ip! " . Data::Dumper->new($n)->Indent(0)->Terse(1)->Dump());
+				xlog("error", "Node has no ip! " . packdump($n));
 			}
 			if ($n->{ping} > (time()-$conf{ping_secs}*3)) {
 				if ( ($n->{mem} >= $ref->[0]->{memory}) &&
@@ -1059,7 +1064,7 @@ sub srvexec {
 		$conf{node}->{port} = $conf{port};
 		$conf{node}->{hostname} = $conf{hostname};
 		$conf{node}->{kernel} = `uname -rv`; chomp $conf{node}->{kernel};
-		$conf{node}->{arch} = `uname -h`; chomp $conf{node}->{arch};
+		$conf{node}->{arch} = `uname -m`; chomp $conf{node}->{arch};
 		
 		$conf{registered} = 1;
 		if (!xsend("node", $conf{node})) {
@@ -1392,6 +1397,11 @@ sub waitio {
 			close $fh;
 			$got = 3;
 		}
+	}
+	if (!$opts->{inplace} && !defined $stat && $opts->{retry} < 4) {
+		$opts->{retry}++;
+		sleep(5);
+		waitio(@_);
 	}
 	if ($stat) {
 		$stat = gunpack($stat);
