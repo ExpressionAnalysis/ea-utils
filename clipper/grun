@@ -141,7 +141,7 @@ if ($qinfo) {
 	} elsif (!samehost($host,$conf{bind}) || (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|stat$/))) {
 		# this could get ugly, if called a lot, may want to make more efficient
 		sendcmd($host, $port, 'trace', 1) if ($conf{trace});
-		my ($res) = waitmsg($host, $port, "xcmd", $cmd, @arg);
+		my ($res) = waitmsg($host, $port, "xcmd", $cmd, @arg, %opt);
 		print $res;
 		sendcmd($host, $port, 'trace', 0) if ($conf{trace});
 	} else {
@@ -504,6 +504,8 @@ sub process_message {
 	if ($cmd eq 'xcmd') {
 		# these commands 'query or interfere' with normal running of the server 
 		# they are initiated by a user	
+		# they are limped together like this for basically no reason
+
 		my $ip = $sock->peerhost();
 
 		if ($args[0] eq 'relo') {
@@ -527,7 +529,7 @@ sub process_message {
 			shift @args;
 			return shownodes(@args);
 		} elsif ($args[0] eq 'hist') {
-			splice(@args, 1);
+			shift @args;
 			return showhist(@args);
 		} elsif ($args[0] eq 'conf') {
 			return showconf();
@@ -936,7 +938,7 @@ sub schedule {
 			}
 			if ($n->{ping} > (time()-$conf{ping_secs}*3)) {
 				if ( ($n->{mem} >= $ref->[0]->{memory}) &&
-				     ($n->{avail} >= $ref->[0]->{cpus}) && 
+				     (($n->{avail}+$conf{idle_load}) >= $ref->[0]->{cpus}) && 
 				     ($n->{disk} >= $ref->[0]->{disk}) 
 				   ) {
 					next if $ref->[0]->{hosts} && $ref->[0]->{hosts} !~ /$n->{hostname}/;
@@ -1442,6 +1444,7 @@ sub waitio {
 			$got = 3;
 		}
 	}
+
 	if ($stat) {
 		$stat = gunpack($stat);
 		return ($stat->{status}, $stat->{error});
@@ -1496,7 +1499,8 @@ sub unpackcmd {
 	if (ref($ref) eq 'ARRAY') {
 		return @$ref;
 	} else {
-               	xlog("error",$@="Protocol error, packed array expected");
+		eval{confess "Protocol error, packed array expected (@_), got $ref"};
+               	xlog("error",$@);
 		return ();
 	}
 }
@@ -1709,7 +1713,7 @@ sub shownodes {
 # grun -q jobs
 sub showjobs {
 	my %opt;
-	
+
 	{
 		local @ARGV = @_;
 		GetOptions(\%opt, "dump", "user=s","job=i");
@@ -1731,6 +1735,7 @@ sub showjobs {
 #        $r .= sprintf "%s\t%s\t%s\t%s\t%s\n", 'JobID','User','Host','Cwd','Command';
         opendir(D,"$conf{spool}/jobs");
         while(my $jid=readdir(D)) {
+		next if $jid =~ /\.ip$/;
                 my $f = "$conf{spool}/jobs/$jid";
                 next unless -f $f;
                 my @job=unpackcmd(slurp($f));
