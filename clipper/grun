@@ -24,12 +24,12 @@ use Data::Dumper;
 use IO::Socket;
 use IO::Select;
 use IO::File;
-use POSIX ":sys_wait_h";
+use POSIX qw(:sys_wait_h strftime);
 use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
 use Safe;
 use Cwd;
 
-our $VERSION = 0.8.95;				# 0.9 will be feature lock.   1.0 will be config backward lock
+our $VERSION = 0.8.141;				# 0.9 will be feature lock.   1.0 will be config backward lock
 
 my $WIN32 = ($^O =~ /Win32/);
 my $EOT = pack("cc",0,4);
@@ -52,10 +52,11 @@ $def{retry_secs} = 60;				# how often to retry notifications
 $def{io_keep} = 3600;				# keep io for this long after a job with i/o is finished in a detached session
 $def{sched_secs} = '1';				# how often to try scheduling
 $def{master} = 'localhost:5184';		# central scheduler
-$def{services} = {queue=>1, exec=>1};		# all can run
+$def{services} = "queue exec";			# all can run
 $def{pid_file} = "/var/run/grun.pid";		# pid file
 $def{log_file} = "/var/log/grun.log";		# pid file
 $def{hostname} = $ENV{HOSTNAME} ? $ENV{HOSTNAME} : $ENV{COMPUTERNAME} ? $ENV{COMPUTERNAME} : `hostname`;
+$def{log_types} = "debug note error warn";	# log all
 chomp $def{hostname};
 
 my ($qinfo, $help, $config);
@@ -120,10 +121,6 @@ if ($qinfo) {
 	for my $d (@dest) {
 	my ($host, $port) = @$d;
 
-	if ($conf{trace}) {
-		sendcmd($host, $port, 'trace', 1);
-	}
-
 	if ($cmd eq 'file') {
 		my $cwd = cwd;
 		my @need;
@@ -134,15 +131,19 @@ if ($qinfo) {
 			}
 			push @need, $_;
 		}
+		sendcmd($host, $port, 'trace', 1) if ($conf{trace});
 		if (@need) {
-			my ($res, $error) = waitio({inplace=>$opt{inplace}}, $host, $port, "xcmd", $cmd, @need);
+			my ($res, $error) = waitio({inplace=>$opt{inplace}}, $host, $port, "xcmd", 'file', @need);
 			die $error, "\n" if $error && !$opt{silent};
 			exit 1 if $error;
 		}
+		sendcmd($host, $port, 'trace', 0) if ($conf{trace});
 	} elsif (!samehost($host,$conf{bind}) || (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|stat$/))) {
 		# this could get ugly, if called a lot, may want to make more efficient
+		sendcmd($host, $port, 'trace', 1) if ($conf{trace});
 		my ($res) = waitmsg($host, $port, "xcmd", $cmd, @arg);
 		print $res;
+		sendcmd($host, $port, 'trace', 0) if ($conf{trace});
 	} else {
 		if ($cmd eq 'stat') {
 			print shownodes(@arg);
@@ -171,18 +172,12 @@ if ($killjob) {
 	if ($conf{trace}) {
                 sendcmd($conf{master}, $conf{master_port}, 'trace', 1);
 	}
-	my ($err) = waitmsg($conf{master}, $conf{master_port}, 'jkill', $killjob);
-	if ($err =~ /Forward:?\s*([\d.]+):?(\d*)/) {
-		my ($ip, $port) = ($1, $2);
-		$port = $conf{port} if !$port;
-		# this is WRONG ... messages should all have trace bits... that would be nice
-		sendcmd($ip, $port, 'trace', 1) if ($conf{trace});
-		($err) = waitmsg($ip, $port, 'xabort', $killjob);
-		sendcmd($ip, $port, 'trace', 0) if ($conf{trace});
-		if (!defined($err) && $@) {
-			die $@,"\n";
-		}
+
+	my $err = kill_job($killjob);
+	if (!defined($err) && $@) {
+		die $@,"\n";
 	}
+
 	my $ok = ($err =~ /^Job.*aborted/);
 	warn "$err\n" if $ok; 
 	$err = 'No response to jkill' if !$ok && !$err;
@@ -294,9 +289,12 @@ my $interrupt;
 
 sub sigh {
 	my $signame = shift;
-	if ($info{ip}) {
-		print STDERR "Aborting command, sending xabort to $info{ip}\n";
-		sendcmd($info{ip}, $info{port}, 'xabort', $info{jid});
+	if ($info{jid}) {
+		print STDERR "Aborting command, sending jkill for $info{jid}\n";
+		my $err = kill_job($info{jid});
+		if (!defined($err) && $@) {
+			die $@,"\n";
+		}
 		exit -1;
 	} else {
 		# for now, don't interrupt the initial message
@@ -329,6 +327,12 @@ if ($info{error}) {
 }
 
 if ($opt{wait}) {
+	%info = waitmsg($conf{master}, $conf{master_port}, 'jinfo', $info{jid});
+	if ($info{error}) {
+		print STDERR $info{error}, "\n";
+		exit -1;
+	}
+
 	# look at all the work you can avoid if you don't wait
 	my ($stat, $err);
 	# connect to executing node directly and ask for stderr, stdout, and status based on job id
@@ -493,9 +497,9 @@ sub close_sock {
 sub process_message {
 	my ($data, $sock) = @_;
 	xlog("note", "Received command $data from " . $sock->peerhost() . "\n") if $conf{trace};
-	my $arr = $safe->reval($data);
-	return unless ref($arr) eq 'ARRAY';
-	my ($cmd, @args) = @$arr;
+
+	my ($cmd, @args) = unpackcmd($data);
+	return ('error'=>$@) if ($@);
 
 	if ($cmd eq 'xcmd') {
 		# these commands 'query or interfere' with normal running of the server 
@@ -540,11 +544,15 @@ sub process_message {
 	} elsif ($cmd eq 'trace') {
 		# turn tracing on... should be 'session' oriented but too lazy for now
 		$conf{trace} = 0+$args[0];
+		return '';
 	} elsif ($cmd eq 'node') {
 		# this is the 'node ping'
 		if (ref($args[0]) eq 'HASH') {		# bit of validation
 			my $ip = $sock->peerhost();	# store info in a file, for fun
 			my $file = "$conf{spool}/nodes/$ip.reg";
+			if (!$ip) {
+				xlog("error", "Socket has no ip?");
+			}
 			open(F, ">$file") || return("Error: can't create $file : $!");
 			print F $data;
 			close F;
@@ -570,7 +578,7 @@ sub process_message {
                         } else {
                                 my $ip = slurp("$conf{spool}/jobs/$jid.ip");
                                 # tell client to send an 'xedit' to the running node
-                                return "Forward $ip:" . $nodes{ip}->{port};
+                                return "Forward $ip:" . $nodes{$ip}->{port};
                         }
                 } else {
 			my $ref = $safe->reval(slurp("$conf{spool}/jobs/$jid"));
@@ -587,9 +595,9 @@ sub process_message {
 				xlog("error", "Job $jid not running, but kill requested");
 				return "Job $jid not running.";
 			} else {
-				my $ip = slurp("$conf{spool}/jobs/$jid.ip");
 				# send xabort to correct node
-				return "Forward $ip:" . $nodes{ip}->{port};
+                                my $ip = slurp("$conf{spool}/jobs/$jid.ip");
+				return "Forward $ip:" . $nodes{$ip}->{port};
 			}
 		} else {
 			unlink "$conf{spool}/jobs/$jid";
@@ -616,7 +624,7 @@ sub process_message {
 				# job is done
 				open(ST, ">" . jhistpath($opts{id}));
 				my $jhist = slurp("$conf{spool}/jobs/$opts{id}:$ip.run");
-				substr($jhist,0,2) = "[{host=>'" . $ip  . "', status=>" . (0+$opts{status}) . ",";
+				substr($jhist,0,2) = "[{host=>'" . $ip  . "', status=>" . (0+$opts{status}) . ", proc=>'" . $opts{proc} . "',";
 				print ST $jhist;
 				close ST;
 				unlink("$conf{spool}/jobs/$opts{id}:$ip.run");
@@ -723,19 +731,19 @@ sub process_message {
 				$err = "Error setting uid to $uid: $@\n" if !$err && $@;
 				if (!$err) {
 					exec(@cmd);
-					printf STDERR "Can't cd to $opts->{cwd} : $!\n";	
+					printf STDERR "Can't exec $cmd[0] : $!\n";	
 					exit 101;
 				} else {
 					printf STDERR "$err\n";	
 					exit -1;
 				}
-				# special exit code means couldn't run the command
+				# special exit code 101 means couldn't run the command
 			}
 		}
 
 		if ($err) {
 			# fake it
-			$pid = $opts->{id};
+			$pid = 'e' . $opts->{id};
 			xlog("note", "Error $err with job $opts->{id}");
 		}
 
@@ -786,6 +794,8 @@ sub process_message {
 			$ok |= kill $sig, $pid;		# parent if, for some reason, that didn't work
 			if ($ok) {
 				return "Job $jid aborted"; 
+			} else {
+				return "Job $jid kill $sig failed : $!"; 
 			}
 		} else {
 			return "Job $jid not found"; 
@@ -806,13 +816,32 @@ sub process_message {
 		$io_wait{$jid}->{sock} = $sock;
 		$io_wait{$jid}->{time} = time();		# toss this entry if it gets old
 		return ($SOCK_WAIT);				# leave socket open for response
+	} elsif ($cmd eq 'jinfo') {				# tell me what host a job is on
+                my ($jid) = @args;
+                if (! -e "$conf{spool}/jobs/$jid") {
+                        if (! -e "$conf{spool}/jobs/$jid.ip") {
+                                xlog("error", "Job $jid does not exist");
+                                return "Job $jid does not exist.";
+                        } else {
+                                my $ip = slurp("$conf{spool}/jobs/$jid.ip");
+				if (!$ip) {
+					xlog("error", "No ip for job $jid");
+				}
+                                # send xabort to correct node
+				return (jid=>$jid, ip=>$ip, port=>$nodes{$ip}->{port});
+                        }
+                } else {
+			$run_wait{$jid}->{sock} = $sock;
+			$run_wait{$jid}->{type} = 'start';      # socket waits for execution start
+			return ($SOCK_WAIT);                    # leave socket open for response
+		}
 	} elsif ($cmd eq 'run') {
 		# user command, returns jid=>jobid [, error=>string]
 		if (!$conf{services}->{queue}) {
 			return (error=>"No queue service running on this host");	
 		} else {
 			# get rid of the 'run' at the front of the array
-			return(error=>"Network data format error") 
+			return(error=>"Network data format error ($data)") 
 				unless $data =~ s/^\['run',/[/;
 
 			my ($opts) = @args;
@@ -835,17 +864,13 @@ sub process_message {
 			print F $data;
 			close F;
 
-			# want i/o or status?
-			if ($opts->{wait}) {
-				$run_wait{$jid}->{sock} = $sock;
-				$run_wait{$jid}->{type} = 'start';	# socket waits for execution start
-				return ($SOCK_WAIT);			# leave socket open for response
-			} else {
-				return (jid=>$jid);			# nice and fast, no i/o
-			}
+			return (jid=>$jid);
 		}	
+	} else {
+		return ('error'=>"Unknown command $cmd ($data)");
 	}
-	return ();
+
+	return ('');
 }
 
 sub jhistpath {
@@ -937,7 +962,7 @@ sub schedule {
 					}
 				}
 			} else {
-				push @dereg, $n->{ip};
+				push @dereg, $n->{ip} if $n->{ip};
 			}
 		}
 		for my $ip (@dereg) {
@@ -957,6 +982,10 @@ sub schedule {
 					rename($jmine, $jfil);
 					$max_n->{avail} = 0;
 				} else {
+					$max_n->{rcpu} += $ref->[0]->{cpus};
+					$max_n->{rmem} += $ref->[0]->{memory};
+					$max_n->{rtime} = time();
+
 					$max_n->{avail} -= $ref->[0]->{cpus} ? $ref->[0]->{cpus} : 1;
 					$max_n->{memory} -= $ref->[0]->{memory} ? $ref->[0]->{memory} : 10000;
 				}
@@ -1072,6 +1101,7 @@ sub srvexec {
 		}
 	}
 
+	# this needs to be wait3 for cpu/mem usage history, maybe use Inline::C
 	while ((my $kid = waitpid(-1, WNOHANG)) > 0) {
 		my $status = $?;
 #		print "waitpid worked status is $?\n";
@@ -1260,33 +1290,38 @@ sub readconf {
 			# match rules are evaluated during matching, but reval now just to test
 			my $test = $conf{$_};
 			# see http://www.perlmonks.org/?node_id=685699 for why this is OK
-			$test =~ s/`[^`]+`/1/g;
-			$test =~ s/system\([^\)]\)/1/g;
-			$safe->reval($test);
+			$test =~ s/`[^`]+`/1/g;			# turn off backtics
+			$test =~ s/system\([^\)]\)/1/g;		# turn off system calls
+			$safe->reval($test);			# check syntax
 			if ($@) {
+				# report a problem with the rule
 				xlog("error", "Error testing match rule : $@");
 			}
 			$@='';
 		} elsif ( ! ($conf{$_} =~ s/^\{(.*)\}$/eval($1)/gei) ) {
+			# evaluate simple inline vars at configure-time
                 	$conf{$_} =~ s/\$([\w-]+)/$conf{lc($1)}?$conf{lc($1)}:$1/gei;
 		}
         }
 
-        #reorganize stuff
-
-	my $v;
-	$v = $conf{services};
-	$conf{services} = {};
-	for (split(/[\s,]+/,$v)) {
-		$conf{services}->{$_} = 1;
+        # reorganize some conf vars into a hash
+	for my $k (qw(services log_types)) {
+		my $v;
+		$v = $conf{$k};
+		$conf{$k} = {};
+		for (split(/[\s,]+/,$v)) {
+			$conf{$k}->{$_} = 1;
+		}
 	}
 
+	# stored as an array reference
 	$conf{env} = [split(/[\s,]+/,$conf{env})] unless ref($conf{env}) eq 'ARRAY';
 
+	# split up host/port
+	$conf{port} = $1 if $conf{bind} =~ s/:(\d+)$//;
+	# same for master (if different - has to be if there's a queue/exec on the same box)
 	$conf{master_port} = $1 if $conf{master} =~ s/:(\d+)$//;
 	$conf{master_port} = $conf{port} if !$conf{master_port};
-
-	$conf{port} = $1 if $conf{bind} =~ s/:(\d+)$//;
 }
 
 sub _readconf {
@@ -1315,6 +1350,8 @@ sub fail {
 
 sub xlog {
         my $m = join("\t", @_);
+	my $class = $_[0];
+	return unless $conf{log_types}->{$class};
         $m =~ s/\n/ /g;
         my $line = scalar(localtime) . "\t" . $m . "\n";
         my $log = $conf{"log_file"};
@@ -1329,7 +1366,9 @@ sub xlog {
 }
 
 sub waitio {
-	my $opts = shift @_ if ref $_[0];
+    my $opts = shift @_ if ref $_[0];
+    while (1) {
+
         my $sock = _sendcmd(@_);
         if (!$sock) {
                 xlog("error","Can't send command ", packcmd(@_));
@@ -1355,8 +1394,11 @@ sub waitio {
 		$err = $head{error} if $head{error};
 
 #		print Dumper(\%head);
-#		print "DAT IS: $dat\n";
+#		print "DAT IS: ($dat)\n";
 
+		if (!$head{name}) {
+			warn "Didn't get name: header, issue with file transfer\n";
+		}
 		last if (!$head{name});
 
 		my $statstr;  
@@ -1388,31 +1430,33 @@ sub waitio {
 				} else {
 					print $fh substr($dat,0,$left);
 				}
-				$left -= length($dat);
+				my $ldat = length($dat);
 				substr($dat,0,$left) = '';
+				$left -= $ldat;
 			}
 #			print STDERR "left: $left dat:" . length($dat) . "\n"; 
 		} while ($left>0 && $sock->sysread($dat, 4096));
+
 		if ($opts->{inplace}) {
 			close $fh;
 			$got = 3;
 		}
 	}
-	if (!$opts->{inplace} && !defined $stat && $opts->{retry} < 4) {
-		$opts->{retry}++;
-		sleep(5);
-		waitio(@_);
-	}
 	if ($stat) {
 		$stat = gunpack($stat);
 		return ($stat->{status}, $stat->{error});
+	} elsif ($err) {
+		return (-2, $err);
+	} elsif ($opts->{inplace}) {
+		return (0, '');
+	} else {
+		sleep(5)
 	}
-	return (!($err eq ''), $err);
+    }
 }
 
 sub waitmsg {
 	my $sock = _sendcmd(@_);
-
 	if (!$sock) {
                 xlog("error", "Can't send command ", packcmd(@_));
 		return ();
@@ -1425,7 +1469,7 @@ sub waitmsg {
 		substr($buf,-2,2) = '';
 		return unpackcmd($buf);
 	}
-	$@="Socket protocol error, no EOT";
+	$@="Socket protocol error, no EOT ($.)";
 	return ();
 }
 
@@ -1451,6 +1495,9 @@ sub unpackcmd {
 	my $ref = $safe->reval($_[0]);
 	if (ref($ref) eq 'ARRAY') {
 		return @$ref;
+	} else {
+               	xlog("error",$@="Protocol error, packed array expected");
+		return ();
 	}
 }
 
@@ -1594,7 +1641,7 @@ sub showhist {
 	my %opt=@_;
 
         my $r;
-
+	
 	my $mx = -1;
         opendir(D,"$conf{spool}/jhist");
 	while(defined ($_=readdir(D))) {
@@ -1615,8 +1662,9 @@ sub showhist {
 	
         for my $jid (@D) {
                 my $f = "$conf{spool}/jhist/$mx/$jid";
+		my $mtime = (stat($f))[9];
                 next unless -f $f;
-                my @job=unpackcmd(slurp($f));
+                my @job=unpackcmd(slurp($f), 1);
                 my ($job, @cmd) = @job;
                 if (ref($job)) {
                         my %job=%{$job};
@@ -1629,13 +1677,18 @@ sub showhist {
 			if ($nodes{$job{host}}->{hostname}) {
 				$job{host}=$nodes{$job{host}}->{hostname} 
 			} elsif (-e (my $n="$conf{spool}/nodes/$job{host}.reg")) {
-				my @node=unpackcmd(slurp($n));
+				my @node=unpackcmd(slurp($n), 0);
 				$job{host}=$node[1]->{hostname};
 			}
-                        $r .= sprintf "%s\t%s\t%s\t%s\t%s\t%s\n",$jid,$job{user},$job{host},$job{status},$job{cwd},$cmd;
+                        $r .= sprintf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",$jid,$job{user},$job{host},$job{status},$job{cwd},$cmd,fmtime($mtime);
                 }
         }
         return $r;
+}
+
+sub fmtime {
+	my ($t) = @_;
+	return strftime("%m/%d %H:%M",localtime($t));
 }
 
 # grun -q status
@@ -1659,16 +1712,20 @@ sub showjobs {
 	
 	{
 		local @ARGV = @_;
-		GetOptions(\%opt, "dump", "user=s");
+		GetOptions(\%opt, "dump", "user=s","job=i");
 		@_=@ARGV;
 	}
 
 	if (@_ == 1) {
 		my $user = shift @_;	
-		$opt{user}=$user if !($user eq '');
+		if ($user =~ /^\d+$/) {
+			$opt{job}=$user;
+		} else {
+			$opt{user}=$user if !($user eq '');
+		}
 	}
 
-	xlog("debug", "Show job for user: $opt{user}\n");
+	xlog("debug", "Show job for user: $opt{user}, $opt{job}\n");
 
         my $r;
 #        $r .= sprintf "%s\t%s\t%s\t%s\t%s\n", 'JobID','User','Host','Cwd','Command';
@@ -1681,6 +1738,7 @@ sub showjobs {
 		if (ref($job)) {
 			my %job=%{$job};
 			next if $opt{user} && ! ($opt{user} eq $job{user});
+			next if $opt{job} && ! ($opt{job} eq $jid);
 			my $stat = '(I)';
 			if ($jid =~ s/:([.\d]+?)\.run$//) {
 				my $ip = $1;
@@ -1945,5 +2003,19 @@ sub host2ip {
 
 sub packdump {
 	Data::Dumper->new(\@_)->Indent(0)->Terse(1)->Dump();
+}
+
+sub kill_job {
+	my ($killjob) = @_;
+        my ($err) = waitmsg($conf{master}, $conf{master_port}, 'jkill', $killjob);
+        if ($err =~ /Forward:?\s*([\d.]+):?(\d*)/) {
+                my ($ip, $port) = ($1, $2);
+                $port = $conf{port} if !$port;
+                # this is WRONG ... messages should all have trace bits... that would be nice
+                sendcmd($ip, $port, 'trace', 1) if ($conf{trace});
+                ($err) = waitmsg($ip, $port, 'xabort', $killjob);
+                sendcmd($ip, $port, 'trace', 0) if ($conf{trace});
+        }
+	return $err;
 }
 
