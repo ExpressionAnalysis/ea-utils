@@ -81,7 +81,7 @@ if ($help) {
 
 if (!$daemon) {
 	# -k <id> works as long as -d wasn't specified
-	GetOptions("kill=i"=>\$killjob, "trace"=>\$def{trace}, "edit"=>\$editjob) ||
+	GetOptions("kill"=>\$killjob, "trace"=>\$def{trace}, "edit"=>\$editjob) ||
 		die usage();
 }
 
@@ -96,7 +96,7 @@ if ($qinfo) {
 
 	Getopt::Long::Configure qw(no_require_order no_ignore_case passthrough);
 	my %opt;
-	GetOptions(\%opt, "count=i", "silent", "inplace", "hosts=s") || die usage();
+	GetOptions(\%opt, "silent", "inplace", "hosts=s") || die usage();
 	my $cmd = shift @ARGV;
 	die usage() if !$cmd;
 
@@ -152,7 +152,7 @@ if ($qinfo) {
 			print showjobs(@arg);
 		}	
 		if ($cmd eq 'hist') {
-			print showhist(%opt);
+			print showhist(@arg);
 		}	
 	}
 	}
@@ -173,15 +173,20 @@ if ($killjob) {
                 sendcmd($conf{master}, $conf{master_port}, 'trace', 1);
 	}
 
-	my $err = kill_job($killjob);
-	if (!defined($err) && $@) {
-		die $@,"\n";
+	my $exit = 0;
+	for my $job (@ARGV) {
+		my $err = kill_job($job);
+		if (!defined($err) && $@) {
+			warn $@,"\n";
+			$exit=-1;
+		} else {
+			my $ok = ($err =~ /^Job.*aborted/);
+			warn "$err\n" if $ok; 
+			$err = 'No response to jkill' if !$ok && !$err;
+			warn "Error: $err\n" if !$ok;
+			$exit=-1 if !$ok;
+		}
 	}
-
-	my $ok = ($err =~ /^Job.*aborted/);
-	warn "$err\n" if $ok; 
-	$err = 'No response to jkill' if !$ok && !$err;
-	die "Error: $err\n" if !$ok;
 	exit 0;
 }
 
@@ -377,7 +382,7 @@ sub readsocks {
 
     	my ($new_readable, $new_writable, $new_error) = IO::Select->select($read_set, $write_set, $read_set, 1);
 
-	# if the thing you're doing is slowing that forking... fork
+	# remember: if the thing you're doing is slower than forking... fork
 	foreach my $sock (@$new_readable) {
 		if ($sock == $listener) {
 			my $new_sock = $sock->accept();
@@ -565,6 +570,9 @@ sub process_message {
 			}
 			$nodes{$ip} = $args[0];
 			$nodes{$ip}->{ip} = $ip;
+			# save execution node ping time for diagnostic (times out of sync or very slow transmission, etc)
+			$nodes{$ip}->{ex_ping} = $nodes{$ip}->{ping};
+			$nodes{$ip}->{ping} = time();
 		} else {
 			return "Error: invalid node registration info";	
 		}
@@ -1030,6 +1038,10 @@ sub sockresp {
 
 # called at start, and kill -HUP
 sub init {
+	if (!$ENV{HOSTNAME}) {
+		$ENV{HOSTNAME} = `hostname`;
+		chomp $ENV{HOSTNAME};
+	}
 	readconf();
 	if ($daemon) {
 		mkdir $conf{spool};
@@ -1399,7 +1411,7 @@ sub waitio {
 #		print "DAT IS: ($dat)\n";
 
 		if (!$head{name}) {
-			warn "Didn't get name: header, issue with file transfer\n";
+			warn "Didn't get name: header, issue with file transfer ($dat)\n";
 		}
 		last if (!$head{name});
 
@@ -1642,7 +1654,17 @@ sub showconf {
 }
 
 sub showhist {
-	my %opt=@_;
+	my %opt;
+
+        {
+                local @ARGV = @_;
+                GetOptions(\%opt, "count=i", "user=s","job=i");
+                @_=@ARGV;
+        }
+	
+	if ($_[0] =~ /[a-z]/ && !$opt{user}) {
+		$opt{user} = $_[0]
+	}
 
         my $r;
 	
@@ -1656,13 +1678,13 @@ sub showhist {
 	closedir(D);
 
         opendir(D,"$conf{spool}/jhist/$mx");
-	my @D = sort {$a-$b} readdir(D);
+	my @D = sort {$b-$a} readdir(D);
 	closedir(D);
 
 	my $count = $opt{count}; 
 	$count = 50 if !$count;
 
-	splice @D, 0, @D-$count;
+	splice @D, 0, @D-($count*1.4) unless $opt{user};
 	
         for my $jid (@D) {
                 my $f = "$conf{spool}/jhist/$mx/$jid";
@@ -1671,6 +1693,8 @@ sub showhist {
                 my @job=unpackcmd(slurp($f), 1);
                 my ($job, @cmd) = @job;
                 if (ref($job)) {
+			next if $opt{user} && ! ($job->{user} eq $opt{user});
+			--$count;
                         my %job=%{$job};
 			$job{status} = 'OK' if $job{status} eq '0';
 			my $cmd = join(' ', @cmd);
@@ -1686,6 +1710,7 @@ sub showhist {
 			}
                         $r .= sprintf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",$jid,$job{user},$job{host},$job{status},$job{cwd},$cmd,fmtime($mtime);
                 }
+		last if $count == 0;
         }
         return $r;
 }
@@ -1988,7 +2013,7 @@ sub killgpid {
 }
 
 sub samehost {
-	my($h1, $h2);
+	my($h1, $h2) = @_;
 	$h1=host2ip($h1);
 	$h2=host2ip($h2);
 	# localhost = dig `hostname`
