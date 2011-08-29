@@ -49,6 +49,7 @@ $def{ping_secs} = 30;				# how often to tell about load/mem/stats
 $def{remove_secs} = '$ping_secs * 1000';	# don't even try kickstarting if the node is this old
 $def{idle_load} = .3;				# how often to tell about load/mem/stats
 $def{retry_secs} = 60;				# how often to retry notifications
+$def{expire_secs} = 7200;			# remove jobs whose execution nodes haven't reported back in this amount of time
 $def{io_keep} = 3600;				# keep io for this long after a job with i/o is finished in a detached session
 $def{sched_secs} = '1';				# how often to try scheduling
 $def{master} = 'localhost:5184';		# central scheduler
@@ -56,7 +57,7 @@ $def{services} = "queue exec";			# all can run
 $def{pid_file} = "/var/run/grun.pid";		# pid file
 $def{log_file} = "/var/log/grun.log";		# pid file
 $def{hostname} = $ENV{HOSTNAME} ? $ENV{HOSTNAME} : $ENV{COMPUTERNAME} ? $ENV{COMPUTERNAME} : `hostname`;
-$def{log_types} = "debug note error warn";	# log all
+$def{log_types} = "note error warn";	# log all
 chomp $def{hostname};
 
 my ($qinfo, $help, $config);
@@ -332,25 +333,29 @@ if ($info{error}) {
 }
 
 if ($opt{wait}) {
-	%info = waitmsg($conf{master}, $conf{master_port}, 'jinfo', $info{jid});
-	if ($info{error}) {
-		print STDERR $info{error}, "\n";
-		exit -1;
+	# wait for a job id
+	while (!defined($info{ip})) {
+		%info = waitmsg($conf{master}, $conf{master_port}, 'jinfo', $info{jid});
+		if ($info{error}) {
+			print STDERR $info{error}, "\n";
+			exit -1;
+		}
 	}
-
 	# look at all the work you can avoid if you don't wait
 	my ($stat, $err);
 	# connect to executing node directly and ask for stderr, stdout, and status based on job id
 	while (!defined $stat && !defined $err) {
 		# shadow watcher....
-		if ($opt{io}) {
-			($stat, $err) = waitio($info{ip}, $info{port}, 'xio', $info{jid});
-		} else {
-			($stat, $err) = waitmsg($info{ip}, $info{port}, 'xstat', $info{jid});
+		if ($info{ip}) {
+			if ($opt{io}) {
+				($stat, $err) = waitio($info{ip}, $info{port}, 'xio', $info{jid});
+			} else {
+				($stat, $err) = waitmsg($info{ip}, $info{port}, 'xstat', $info{jid});
+			}
+			if ($stat == 65280 && !$err) {
+				print STDERR "$cmd[0]: No such file or directory.\n";
+			} 
 		}
-		if ($stat == 65280 && !$err) {
-			print STDERR "$cmd[0]: No such file or directory.\n";
-		} 
 		sleep 5 if (!defined $stat && !defined $err);
 	}
 	if (defined $stat) {
@@ -499,6 +504,13 @@ sub close_sock {
 	close($sock);
 }
 
+sub selfcmd {
+	my $cmd = packcmd(@_);
+	substr($cmd,-2,2) = '';
+	# socket should be a dev-null connection or something, but whatever
+	process_message($cmd, $listener);
+}
+
 sub process_message {
 	my ($data, $sock) = @_;
 	xlog("note", "Received command $data from " . $sock->peerhost() . "\n") if $conf{trace};
@@ -583,8 +595,8 @@ sub process_message {
                 	return "Invalid edit request ($jid,$key,$val)\n";
 		} elsif (! -e "$conf{spool}/jobs/$jid") {
                         if (! -e "$conf{spool}/jobs/$jid.ip") {
-                                xlog("error", "Job $jid not found.");
-                                return "Job $jid not found.";
+                                xlog("error", "Job $jid not found");
+                                return "Job $jid not found";
                         } else {
                                 my $ip = slurp("$conf{spool}/jobs/$jid.ip");
                                 # tell client to send an 'xedit' to the running node
@@ -619,26 +631,47 @@ sub process_message {
 		if ($opts{id}) {
 			my $ip = $sock->peerhost();	# should match the ip from jmine (see above how dumb this is)
 			if (! -e "$conf{spool}/jobs/$opts{id}:$ip.run") {
-				my $should = slurp("$conf{spool}/jobs/$opts{id}.ip");
+                                my $should = slurp("$conf{spool}/jobs/$opts{id}.ip");
 				if (!$should) {
-					xlog("error", "Got a report for a job $opts{id} from $ip, which has no info???");
+					xlog("error", "Got a report for job $opts{id} from $ip, which has no $conf{spool}/jobs/$opts{id}.ip");
 				} else {
-					xlog("error", "Got a report for a job $opts{id} from $ip, should be $should");
+					if ($opts{pid}<0) {
+						xlog("error", "Orphaned job report $opts{id}");
+						$ip=$should if !$ip;
+					} else {
+						xlog("error", "Got a report for job $opts{id} from $ip, should be $should");
+					}
 				}
 			}
 			if ($opts{jrun}) {
 				# just a ping
-				xlog("debug", "I'm still alive ...$opts{id} from $ip") if $opts{trace} || $conf{trace};
+				xlog("error", "I'm still alive ...$opts{id} from $ip") if $opts{trace} || $conf{trace};
 				touch("$conf{spool}/jobs/$opts{id}:$ip.run");
 			} elsif (defined $opts{status}) {
 				# job is done
-				open(ST, ">" . jhistpath($opts{id}));
 				my $jhist = slurp("$conf{spool}/jobs/$opts{id}:$ip.run");
-				substr($jhist,0,2) = "[{host=>'" . $ip  . "', status=>" . (0+$opts{status}) . ", proc=>'" . $opts{proc} . "',";
-				print ST $jhist;
-				close ST;
+				my $status = 0+$opts{status};
+
+				xlog("debug", "Unlinking $conf{spool}/jobs/$opts{id}:$ip.run, $conf{spool}/jobs/$opts{id}.ip ($jhist)");
+
 				unlink("$conf{spool}/jobs/$opts{id}:$ip.run");
 				unlink("$conf{spool}/jobs/$opts{id}.ip");
+
+				my %stat = %opts;
+				delete $stat{status};	# don't repeat info in the history file
+				delete $stat{id};
+
+				xlog("debug", "Writing history for $opts{id} " . packref(\%stat));
+				open(ST, ">" . jhistpath($opts{id}));
+				my $extr = "host=>'$ip', status=>$status, usage=>" . packref(\%stat);
+				if ($jhist) {
+					substr($jhist,0,2) = "[{$extr,";
+				} else {
+					$jhist = "[{$extr},'<unknown>']";
+				}
+				xlog("debug", "Writing $jhist to " . jhistpath($opts{id}));
+				print ST $jhist;
+				close ST;
 			} else {
 				xlog("error", "Got a report for a job $opts{id} with no status info");
 			}
@@ -698,8 +731,6 @@ sub process_message {
 				# kill my parent.... i stay alive, and my IO is still ready to go
 				POSIX::setsid();
 	
-				my $noexec = "$conf{spool}/pids/$$.noexec";
-
 				if ($opts->{io}) {
 					open STDERR, ">$conf{spool}/stdio/$$.err";
 					open STDOUT, ">$conf{spool}/stdio/$$.out";
@@ -773,7 +804,7 @@ sub process_message {
 		close F;
 
 		$file = "$conf{spool}/jpids/$opts->{id}";
-		if (!open(F, ">>$file")) {
+		if (!open(F, ">$file")) {
 			xlog("error", "Can't create $file : $!");
 		}
 		print F $pid;
@@ -808,7 +839,7 @@ sub process_message {
 				return "Job $jid kill $sig failed : $!"; 
 			}
 		} else {
-			return "Job $jid not found"; 
+			return "Job $jid not found";
 		}
 	} elsif ($cmd eq 'xio') {
 		my ($jid) = @args;
@@ -837,7 +868,7 @@ sub process_message {
 				if (!$ip) {
 					xlog("error", "No ip for job $jid");
 				}
-                                # send xabort to correct node
+                                # route to correct node
 				return (jid=>$jid, ip=>$ip, port=>$nodes{$ip}->{port});
                         }
                 } else {
@@ -903,14 +934,16 @@ sub schedule {
 		return;
 	}
 
+	for my $n (values %nodes) {
+		$n->{a_cpus} = $n->{a_memory} = 0;
+	}
+
 	# no attempt here to prioritize jobs, just match and go
+	my %alloc;
 	while(my $jid=readdir(D)) {
 		my $jfil = "$conf{spool}/jobs/$jid";
-
-		# these are annoying... see jmine
-		if ($jfil =~ /\.ip$/) {
-			next;
-		}
+		# probably should have a folder per job to avoid this
+		next if ($jfil =~ /\.ip$/);
 
 		next unless -f $jfil;
 		my $ref = $safe->reval(slurp($jfil));
@@ -919,15 +952,25 @@ sub schedule {
 			unlink $jfil;
 		}
 
+		my $job = $ref->[0];
+
+		# this should be config, min requirements
+		$job->{cpus} = 1 if $job->{cpus} == 0;
+		$job->{memory} = 10000 if $job->{memory} == 0;
+
 		if ($jfil =~ /\.run$/) {
+			# job is running, make sure it's resources are somewhat locked
+			($jid) = $jid =~ m/^(\d+)/;
 			# check to see whether job has expired
 			if ($conf{expire_secs} && (fmodtime($jfil) < (time()-$conf{expire_secs}))) {
-				xlog("error", "TODO: Deal with job expiration of $jfil\n");
-				# rename back to active job?
-				# leave in queue as held (since it may have executed)
-				# config policy?
-				# coniig default?
-			} 
+			        selfcmd('jstat', pid=>-1, id=>$jid, status => -8, error=>"Orphaned job (" . (time()-fmodtime($jfil)) . "s)");
+			} else {
+				my $ip = slurp("$conf{spool}/jobs/$jid.ip");
+				if ($ip =~ /\d/) {
+					$nodes{$ip}->{a_cpus} += $job->{cpus};
+					$alloc{$ip}->{a_memory} += $job->{memory};
+				}	
+			}
 			next;
 		}
 
@@ -935,25 +978,31 @@ sub schedule {
 		my @n;
 		my ($max_av, $max_n);
 
-		# this should be config, min requirements
-		$ref->[0]->{cpus} = 1 if $ref->[0]->{cpus} == 0;
-		$ref->[0]->{memory} = 10000 if $ref->[0]->{memory} == 0;
-
 		for my $n (values %nodes) {
 			# jobs need enough memory, cpu availability and disk space... that's it
 			if (!$n->{ip}) {
 				xlog("error", "Node has no ip! " . packdump($n));
+				next;
 			}
+
+			my $cpus = $n->{cpus} - $n->{a_cpus};
+			$cpus = $n->{avail} if $n->{avail} < $cpus;
+
+			my $mem = $n->{tmem} - $n->{a_memory};
+			$mem = $n->{mem} if ($n->{tmem} == 0) || ($n->{mem} < $mem);
+
+			#xlog("debug", "Sched $n->{ip}: j:$job->{cpus}?$n->{avail}>c:$cpus , j:$job->{memory}?$n->{mem}>m:$mem");
+
 			if ($n->{ping} > (time()-$conf{ping_secs}*3)) {
-				if ( ($n->{mem} >= $ref->[0]->{memory}) &&
-				     (($n->{avail}+$conf{idle_load}) >= $ref->[0]->{cpus}) && 
-				     ($n->{disk} >= $ref->[0]->{disk}) 
+				if ( ($mem >= $job->{memory}) &&
+				     (($cpus+$conf{idle_load}) >= $job->{cpus}) && 
+				     ($n->{disk} >= $job->{disk}) 
 				   ) {
-					next if $ref->[0]->{hosts} && $ref->[0]->{hosts} !~ /$n->{hostname}/;
+					next if $job->{hosts} && $job->{hosts} !~ /$n->{hostname}/;
 
 					my $match = 1;
 					if ($conf{match}) {
-						$match = evalctx($conf{match}, node=>$n, job=>$ref->[0]);	# eval perl expression
+						$match = evalctx($conf{match}, node=>$n, job=>$job);	# eval perl expression
 						if ($@) {
 							$match = 1;						# permit all on error?
 						}
@@ -992,12 +1041,8 @@ sub schedule {
 					rename($jmine, $jfil);
 					$max_n->{avail} = 0;
 				} else {
-					$max_n->{rcpu} += $ref->[0]->{cpus};
-					$max_n->{rmem} += $ref->[0]->{memory};
-					$max_n->{rtime} = time();
-
-					$max_n->{avail} -= $ref->[0]->{cpus} ? $ref->[0]->{cpus} : 1;
-					$max_n->{memory} -= $ref->[0]->{memory} ? $ref->[0]->{memory} : 10000;
+					$max_n->{avail} -= $job->{cpus} ? $job->{cpus} : 1;
+					$max_n->{memory} -= $job->{memory} ? $job->{memory} : 10000;
 				}
 			}
 		} else {
@@ -1058,15 +1103,16 @@ sub init {
 }
 
 sub getmem {
-	my ($cache, $free);
+	my ($cache, $free, $tot);
 	open F, "/proc/meminfo";
 	while (<F>) {
+		$tot = $1 if /MemTotal:\s*(\d+)/i;
 		$free = $1 if /MemFree:\s*(\d+)/i;
 		$cache = $1 if /Cached:\s*(\d+)/i;
 		last if $cache & $free;
 	}
 	close F;
-	return $cache + $free;
+	return ($tot, $cache + $free);
 }
 
 sub getcpus {
@@ -1099,7 +1145,7 @@ sub srvexec {
 	if ($conf{services}->{exec} && (!$conf{node} || (time() > ($conf{node}->{ping}+$conf{ping_secs}-1)))) {
 		# ping master with stats
 		$conf{node}->{arch} = `arch`; chomp $conf{node}->{arch};
-		$conf{node}->{mem} = getmem();					# free mem
+		($conf{node}->{tmem},$conf{node}->{mem}) = getmem();					# free mem
 		$conf{node}->{load} = slurp("/proc/loadavg");			# load
 		$conf{node}->{cpus} = $conf{cpus} ? $conf{cpus} : getcpus();	# num cores
 		$conf{node}->{avail} = $conf{node}->{cpus} - $conf{node}->{load};	
@@ -1116,10 +1162,11 @@ sub srvexec {
 	}
 
 	# this needs to be wait3 for cpu/mem usage history, maybe use Inline::C
-	while ((my $kid = waitpid(-1, WNOHANG)) > 0) {
-		my $status = $?;
+	while (1) {
+		my ($kid, $status, @rd) = waitusage(-1, WNOHANG);
+		last if $kid <= 0;
 #		print "waitpid worked status is $?\n";
-		if (writestat($kid, $status)) {
+		if (writestat($kid, $status, undef, undef, \@rd)) {
 			$conf{node}->{ping}-=5;					# hurry up to let scheduler know I'm free
 			notifystat($kid);
 		} else {
@@ -1162,13 +1209,6 @@ sub srvexec {
 		while(my $kid = readdir(D)) {
 			# finished, notify submitter
 
-			if ($kid =~ /^(\d+)\.noexec$/) {
-				if (writestat($1, -2, 0, slurp($kid))) {
-					unlink "$conf{spool}/pids/$kid";
-				}
-				next;
-			}
-
 			if ($kid =~ /\.stat$/) {
 				if (fmodtime("$conf{spool}/pids/$kid") < (time()-$conf{ping_secs})) {
 					if (notifystat($kid)) {
@@ -1179,11 +1219,10 @@ sub srvexec {
 			}
 			# running, check status
 			if ($kid =~ /^\d+$/ ) {
-				my $ret = waitpid($kid, WNOHANG);
-				my $status = $?;
+				my ($ret, $status, @rd) = waitusage($kid, WNOHANG);
 				my $alive = kill(0, $kid);
 				#print "RET $ret STAT $status ALIVE $alive\n";
-				if (writestat($kid, $status, $alive)) {
+				if (writestat($kid, $status, $alive, undef, \@rd)) {
 					notifystat($kid);
 				}
 			}
@@ -1218,8 +1257,9 @@ sub notifystat {
 	my $info = funpack("$conf{spool}/pids/$kid");
 
 	if (!$info->{ip}) {
-		unlink "$conf{spool}/pids/$kid.stat";
-		xlog("error", "Orphaned job status file $kid");
+		if (unlink("$conf{spool}/pids/$kid.stat")) {
+			xlog("error", "Orphaned job status file $kid");
+		}
 		return;
 	}
 	
@@ -1227,21 +1267,22 @@ sub notifystat {
 
 	# tell scheduler the status
 
-	# this breaks multi-scheduling... but that isn't supported yet, and tunnels are acting odd
-	$info->{ip} = $conf{master};
-	$info->{port} = $conf{master_port};
-
+#	print STDERR "HERE I AM NOTIFYING MASTER: " . Dumper($info);
+	funpack("$conf{spool}/pids/$kid.stat", $info);
 	xlog("debug", "Notifying status " . Dumper($info) . ".\n") if ($conf{trace} || $info->{trace});
 
-	funpack("$conf{spool}/pids/$kid.stat", $info);
-	my $sock = _sendcmd($info->{ip}, $info->{port}, 'jstat', id=>$info->{id}, status=>$info->{status}, pid=>$kid, jrun=>$info->{jrun}, error=>$info->{error});
+	# for multi-master-scheduling, need to get the master ip & port from the INFO 
+
+	# info should contain id, status, pid, an i/o wait flag and other rusage stats
+	$info->{pid} = $kid;
+	my $sock = _sendcmd($conf{master}, $conf{master_port}, 'jstat', %$info);
+
 	$read_set->add($sock) if $sock;
 
-#	print STDERR "HERE I AM NOTIFYING: " . Dumper($info);
 	if (!$info->{jrun}) {
 		# ok, i'm not running
 		# release stdio/stat
-#		print STDERR "HERE I AM RELEASING STUFF $kid " . Dumper($info);
+#		print STDERR "HERE I AM RELEASING STUFF TO WAITERS $kid " . Dumper($info);
 		if ($io_wait{$jid}) {
 			$io_wait{$jid}->{pid} = $kid;
 			$io_wait{$jid}->{time} = time();		# how long you have to pickup i/o
@@ -1250,18 +1291,23 @@ sub notifystat {
 }
 
 sub writestat {
-	my ($kid, $stat, $jrun, $err) = @_;
+	my ($kid, $stat, $jrun, $err, $ru) = @_;
 	if ( -e "$conf{spool}/pids/$kid" ) {
-		if (!$err) {
-			if ( -e "$conf{spool}/pids/$kid.noexec" ) {
-				$err=slurp("$conf{spool}/pids/$kid.noexec");
-				unlink("$conf{spool}/pids/$kid.noexec");
-			}
-		}
 		open(ST, ">$conf{spool}/pids/$kid.stat") || return 0;
 		print(ST "status:$stat\n");
 		print(ST "jrun:1\n") if $jrun;
 		print(ST "error:$err\n") if $err;
+		if (@$ru) {
+			xlog("debug", "Stats $kid: @$ru");
+			print(ST "utime:$ru->[0]\n");
+			print(ST "stime:$ru->[1]\n");
+			print(ST "maxrss:$ru->[2]\n");
+			print(ST "majflt:$ru->[5]\n");
+			print(ST "inblock:$ru->[7]\n");
+			print(ST "outblock:$ru->[8]\n");
+			print(ST "msgsend:$ru->[9]\n");
+			print(ST "msgrecv:$ru->[10]\n");
+		}
 		return close ST;
 	}
 	return 1;
@@ -1506,6 +1552,10 @@ sub packcmd {
 	return Data::Dumper->new([\@_])->Indent(0)->Terse(1)->Dump().$EOT;
 }
 
+sub packref {
+	return Data::Dumper->new(\@_)->Indent(0)->Terse(1)->Dump();
+}
+
 sub unpackcmd {
 	my $ref = $safe->reval($_[0]);
 	if (ref($ref) eq 'ARRAY') {
@@ -1656,16 +1706,18 @@ sub showconf {
 sub showhist {
 	my %opt;
 
+	$opt{fmt} = '%jid\t%user\t%stat\t%cwd\t%cmd\t%mtime\n';
+
         {
                 local @ARGV = @_;
-                GetOptions(\%opt, "count=i", "user=s","job=i");
+                GetOptions(\%opt, "count=i", "user=s","job=i","resubmit","fmt|F=s","long");
                 @_=@ARGV;
         }
-	
 	if ($_[0] =~ /[a-z]/ && !$opt{user}) {
 		$opt{user} = $_[0]
-	}
-
+	} elsif ($_[0] =~ /^\d+$/) {
+                $opt{job} = $_[0]
+        }
         my $r;
 	
 	my $mx = -1;
@@ -1684,7 +1736,7 @@ sub showhist {
 	my $count = $opt{count}; 
 	$count = 50 if !$count;
 
-	splice @D, 0, @D-($count*1.4) unless $opt{user};
+	splice @D, $count*1.4 unless $opt{user};
 	
         for my $jid (@D) {
                 my $f = "$conf{spool}/jhist/$mx/$jid";
@@ -1696,7 +1748,12 @@ sub showhist {
 			next if $opt{user} && ! ($job->{user} eq $opt{user});
 			--$count;
                         my %job=%{$job};
-			$job{status} = 'OK' if $job{status} eq '0';
+
+			$job{status} = 'OK' 	if $job{status} eq '0';
+			$job{status} = 'INT' 	if $job{status} eq '2';
+			$job{status} = 'ORPHAN' if $job{status} eq '-8';
+			$job{stat} = $job{status};
+
 			my $cmd = join(' ', @cmd);
 			$cmd =~ s/\n\s+/\n/g;
 			$cmd =~ s/^\s+//;
@@ -1708,7 +1765,23 @@ sub showhist {
 				my @node=unpackcmd(slurp($n), 0);
 				$job{host}=$node[1]->{hostname};
 			}
-                        $r .= sprintf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",$jid,$job{user},$job{host},$job{status},$job{cwd},$cmd,fmtime($mtime);
+			$job{jid}=$jid;
+			$job{cmd}=$cmd;
+#			$job{env}=join ':' . map { $_.'='.$job{env}{$_} } keys %{$job{env}};
+			$job{mtime}=fmtime($mtime);
+			if (ref($job{usage})) {
+				for (keys(%{$job{usage}})) {
+					$job{$_}=$job{usage}{$_};
+				}
+			}
+			if ($opt{long}) {
+				$opt{fmt} = '----------\n';
+				for(sort(keys(%job))) {
+					$opt{fmt} .= "$_=" . '%' . $_. '\n';
+				}
+			}
+	
+			$r .= fmtstr($opt{fmt}, \%job);
                 }
 		last if $count == 0;
         }
@@ -1729,7 +1802,19 @@ sub shownodes {
                 if ($node->{ping} > time() - ($conf{ping_secs} * 2) ) {
                         $node->{hostname} = substr($node->{hostname},0,15);
                         chomp($node->{hostname});
-                        $r .= sprintf "%-15s %8dm %5.1f\n", $node->{hostname}, $node->{mem}/1000, $node->{avail};
+
+			my $cpus = $node->{cpus} - $node->{a_cpus};
+			$cpus = $node->{avail} if $node->{avail} < $cpus;
+
+			my $mem = $node->{tmem} - $node->{a_memory};
+			$mem = $node->{mem} if $node->{tmem} > 0 && $node->{mem} < $mem;
+
+			if ($node->{tmem} > 0) {
+	                        $r .= sprintf "%-15s %8dm/%d %5.1f/%d\n", $node->{hostname}, $node->{mem}/1000, $node->{tmem}/1000,$node->{avail},$node->{cpus};
+			} else {
+	                        $r .= sprintf "%-15s %8dm %5.1f/%d\n", $node->{hostname}, $node->{mem}/1000, $node->{avail},$node->{cpus};
+
+			}
                 }
         }
         return $r;
@@ -1739,9 +1824,10 @@ sub shownodes {
 sub showjobs {
 	my %opt;
 
+	$opt{fmt} = '%s:jid\t%s:user\t%s:stat\t%s:cwd\t%s:cmd\n';
 	{
 		local @ARGV = @_;
-		GetOptions(\%opt, "dump", "user=s","job=i");
+		GetOptions(\%opt, "dump", "user=s","job=i","fmt|F=s");
 		@_=@ARGV;
 	}
 
@@ -1758,6 +1844,8 @@ sub showjobs {
 
         my $r;
 #        $r .= sprintf "%s\t%s\t%s\t%s\t%s\n", 'JobID','User','Host','Cwd','Command';
+
+
         opendir(D,"$conf{spool}/jobs");
         while(my $jid=readdir(D)) {
 		next if $jid =~ /\.ip$/;
@@ -1782,15 +1870,29 @@ sub showjobs {
 				s/^\s+//g;
 				s/\n\s*/;/g;
 			}
+                        $job->{jid} = $jid;
+                        $job->{stat} = $stat;
+                        $job->{cmd} = join(' ', @cmd);
 			if ($opt{dump}) {
 				$r .= packdump($job) . "\n";
 			} else {
-				$r .= sprintf "%s\t%s\t%s\t%s\t%s\n", $jid,$job{user},$stat,$job{cwd},join(' ', @cmd);
+				$r .= fmtstr($opt{fmt}, $job);
 			}
 		}
         }
         closedir(D);
         return $r;
+}
+
+sub fmtstr {
+        my ($fmt, $hash) = @_;
+        my @fds = $fmt =~ m/%(?:[#0 +,I:-]*(?:\d+)?(?:\.\d+)?\w+:)?(\w+)/g;
+        my @vals = map $hash->{$_}, @fds;
+        $fmt =~ s/(%[#0 +,I:-]*(?:\d+)?(?:\.\d+)?\w{1,2}):\w+/$1/g;
+	my $fds=join '|', @fds;
+        $fmt =~ s/%($fds)/%s/g;
+        $fmt = $safe->reval('"' . $fmt . '"');
+        return sprintf($fmt, @vals);
 }
 
 sub bestunique {
@@ -2049,3 +2151,64 @@ sub kill_job {
 	return $err;
 }
 
+# if wait3 and a C compiler is available, it also returns 
+# the rusage stats in order of the structure (man getrusage)
+my $wait_loaded;
+sub waitusage {
+	if (!defined($wait_loaded)) {
+		eval {
+			require Inline;
+			my $code = <<EOF;
+#include <sys/wait.h>
+
+#define MORTPUSH(x) Inline_Stack_Push(sv_2mortal(x))
+
+void _waitru(int pid, int opts) {
+	int st=-9;
+	struct rusage r;
+	Inline_Stack_Vars;
+
+	if (pid == -1) {
+		pid=(int)wait3(&st, opts, &r);
+	} else {
+		pid=(int)wait4(pid, &st, opts, &r);
+	}
+
+	Inline_Stack_Reset;
+
+	MORTPUSH(newSViv(pid));
+	MORTPUSH(newSViv(st));
+	MORTPUSH(newSVnv((double) r.ru_utime.tv_sec + ((double) r.ru_utime.tv_usec)/1000000.0 ));
+	MORTPUSH(newSVnv((double) r.ru_stime.tv_sec + ((double) r.ru_stime.tv_usec)/1000000.0 ));
+	MORTPUSH(newSViv(r.ru_maxrss));
+	MORTPUSH(newSViv(r.ru_ixrss));
+	MORTPUSH(newSViv(r.ru_idrss));
+	MORTPUSH(newSViv(r.ru_isrss));
+	MORTPUSH(newSViv(r.ru_minflt));
+	MORTPUSH(newSViv(r.ru_majflt));
+	MORTPUSH(newSViv(r.ru_inblock));
+	MORTPUSH(newSViv(r.ru_oublock));
+	MORTPUSH(newSViv(r.ru_msgsnd));
+	MORTPUSH(newSViv(r.ru_msgrcv));
+	MORTPUSH(newSViv(r.ru_nsignals));
+	MORTPUSH(newSViv(r.ru_nvcsw));
+	MORTPUSH(newSViv(r.ru_nivcsw));
+	
+	Inline_Stack_Done;
+}
+EOF
+			Inline->bind(C => $code);
+		};
+		if ($@) {
+			warn "$@\n";
+		}
+		$wait_loaded = $@ ? 0 : 1;
+	}
+	if ($wait_loaded) {
+		return _waitru(@_);
+	} else {
+		my $pid = waitpid($_[0], $_[1]);
+		my $st = $?;
+		return ($pid, $st);
+	}
+}	
