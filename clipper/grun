@@ -44,7 +44,7 @@ $def{config} = "/etc/grun.conf";		# config file
 $def{spool} = "/var/spool/grun";		# dir to place jobs
 $def{port} = 5184;				# listen/connect port
 $def{bind} = '0.0.0.0';				# listen addr
-$def{env} = ['PATH'];				# list of environment vars to copy from submit through to exec
+$def{env} = ['PATH','USER'];			# list of environment vars to copy from submit through to exec
 $def{ping_secs} = 30;				# how often to tell about load/mem/stats
 $def{remove_secs} = '$ping_secs * 1000';	# don't even try kickstarting if the node is this old
 $def{idle_load} = .3;				# how often to tell about load/mem/stats
@@ -288,6 +288,9 @@ $opt{cwd} = cwd;
 for (@{$conf{env}}) {
 	$opt{env}->{$_} = $ENV{$_} if defined $ENV{$_};
 }
+for (qw(USER)) {
+	$opt{env}->{$_} = $ENV{$_};
+}
 
 $opt{user} = getpwuid($>);
 $opt{umask} = umask();
@@ -341,6 +344,9 @@ if ($opt{wait}) {
 		if ($info{error}) {
 			print STDERR $info{error}, "\n";
 			exit -1;
+		}
+		if (!defined($info{ip})) {
+			sleep(5);
 		}
 	}
 	# look at all the work you can avoid if you don't wait
