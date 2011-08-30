@@ -183,7 +183,7 @@ int main (int argc, char **argv) {
         }
 
 	FILE *fstat = stderr;
-	if (strcmp(ofil[0], "-") && !noclip) {
+	if (!noclip && strcmp(ofil[0], "-")) {
 		fstat = stdout;
 	}
 	if (noclip) {
@@ -265,7 +265,7 @@ int main (int argc, char **argv) {
 	}
 	// default to illumina 64 if you never saw a qual < 33
 	if (phred == 0) phred = 64;
-	if (debug) fprintf(stderr, "Phred used: %d\n", phred);
+	fprintf(stderr, "Phred: %d\n", phred);
 
 	for (i=0;i<i_n;++i) {
 		if (avgns[i] == 0) {
