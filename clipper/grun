@@ -168,20 +168,22 @@ if (open(IN, $conf{pid_file})) {
 
 if ($killjob) {
 	# grun -k code
-	my $sig = 2;
-        GetOptions("signal=i"=>\$sig) || die usage();
+	my $sig = 15;
+	Getopt::Long::Configure qw(no_require_order no_ignore_case);
+        GetOptions("signal|n=i"=>\$sig) || die usage();
+
 	if ($conf{trace}) {
                 sendcmd($conf{master}, $conf{master_port}, 'trace', 1);
 	}
 
 	my $exit = 0;
 	for my $job (@ARGV) {
-		my $err = kill_job($job);
+		my $err = kill_job($job, $sig);
 		if (!defined($err) && $@) {
 			warn $@,"\n";
 			$exit=-1;
 		} else {
-			my $ok = ($err =~ /^Job.*aborted/);
+			my $ok = ($err =~ /^Job.*(aborted|kill requested)/);
 			warn "$err\n" if $ok; 
 			$err = 'No response to jkill' if !$ok && !$err;
 			warn "Error: $err\n" if !$ok;
@@ -297,7 +299,7 @@ sub sigh {
 	my $signame = shift;
 	if ($info{jid}) {
 		print STDERR "Aborting command, sending jkill for $info{jid}\n";
-		my $err = kill_job($info{jid});
+		my $err = kill_job($info{jid}, 2);
 		if (!defined($err) && $@) {
 			die $@,"\n";
 		}
@@ -611,15 +613,32 @@ sub process_message {
                 }
         } elsif ($cmd eq 'jkill') {
 		# this is the 'job kill command'
-		my ($jid) = @args;
+		my ($jid, $force) = @args;
 		if (! -e "$conf{spool}/jobs/$jid") {
 			if (! -e "$conf{spool}/jobs/$jid.ip") {
 				xlog("error", "Job $jid not running, but kill requested");
+				unlink "$conf{spool}/jobs/$jid";
 				return "Job $jid not running.";
 			} else {
 				# send xabort to correct node
                                 my $ip = slurp("$conf{spool}/jobs/$jid.ip");
-				return "Forward $ip:" . $nodes{$ip}->{port};
+				if (!$ip) {
+					xlog("error", "Job $jid empty ip!");
+					unlink "$conf{spool}/jobs/$jid";
+					unlink "$conf{spool}/jobs/$jid.ip";
+				} else {
+					if ($force && ($force eq $ip)) {
+						unlink "$conf{spool}/jobs/$jid.ip";
+						unlink "$conf{spool}/jobs/$jid:$ip.run";
+						xlog("error", "Job $jid forced kill");
+						return "Job $jid forced kill\n";
+					} elsif ($force) {
+						xlog("error", "Job $jid force kill requested for ip $ip");
+						return "Job $jid ip mismatch, force failed\n";
+					} else {
+						return "Forward $ip:" . $nodes{$ip}->{port};
+					}
+				}
 			}
 		} else {
 			unlink "$conf{spool}/jobs/$jid";
@@ -829,10 +848,11 @@ sub process_message {
                 my ($jid, $sig) = @args;
                 my $pid = slurp("$conf{spool}/jpids/$jid");
 		if ($pid > 1) {
-			xlog("note", "Aborting jobs $jid ($pid) on request");
 			$sig = 2 if !$sig;
-			my $ok = kill $sig, -$pid;		# parent, and all kids
-			$ok |= kill $sig, $pid;		# parent if, for some reason, that didn't work
+			# perl kill didn't work!
+#			my $ok = system("kill", "-$sig", "-$pid");
+			my $ok = kill($sig, -$pid);
+			xlog("note", "Kill ($sig) job $jid (pgrp:$pid), return: $ok");
 			if ($ok) {
 				return "Job $jid aborted"; 
 			} else {
@@ -1041,8 +1061,10 @@ sub schedule {
 					rename($jmine, $jfil);
 					$max_n->{avail} = 0;
 				} else {
-					$max_n->{avail} -= $job->{cpus} ? $job->{cpus} : 1;
-					$max_n->{memory} -= $job->{memory} ? $job->{memory} : 10000;
+					$max_n->{avail} -= $job->{cpus};
+					$max_n->{memory} -= $job->{memory};
+					$max_n->{a_cpus} += $job->{cpus};
+					$max_n->{a_memory} += $job->{memory}; 
 				}
 			}
 		} else {
@@ -1427,8 +1449,9 @@ sub xlog {
 
 sub waitio {
     my $opts = shift @_ if ref $_[0];
+    my $tries;
     while (1) {
-
+	++$tries;
         my $sock = _sendcmd(@_);
         if (!$sock) {
                 xlog("error","Can't send command ", packcmd(@_));
@@ -1457,7 +1480,7 @@ sub waitio {
 #		print "DAT IS: ($dat)\n";
 
 		if (!$head{name}) {
-			warn "Didn't get name: header, issue with file transfer ($dat)\n";
+			xlog("error", "Didn't get name: header ($tries)");
 		}
 		last if (!$head{name});
 
@@ -1507,6 +1530,7 @@ sub waitio {
 		$stat = gunpack($stat);
 		return ($stat->{status}, $stat->{error});
 	} elsif ($err) {
+		xlog("warn", "Error returned: $err, reporting status -2 for (@_)");
 		return (-2, $err);
 	} elsif ($opts->{inplace}) {
 		return (0, '');
@@ -2138,14 +2162,17 @@ sub packdump {
 }
 
 sub kill_job {
-	my ($killjob) = @_;
+	my ($killjob, $sig) = @_;
         my ($err) = waitmsg($conf{master}, $conf{master_port}, 'jkill', $killjob);
         if ($err =~ /Forward:?\s*([\d.]+):?(\d*)/) {
                 my ($ip, $port) = ($1, $2);
                 $port = $conf{port} if !$port;
                 # this is WRONG ... messages should all have trace bits... that would be nice
                 sendcmd($ip, $port, 'trace', 1) if ($conf{trace});
-                ($err) = waitmsg($ip, $port, 'xabort', $killjob);
+                ($err) = waitmsg($ip, $port, 'xabort', $killjob, $sig);
+		if ($err =~ /Not Found/i) {
+        		waitmsg($conf{master}, $conf{master_port}, 'jkill', $killjob, $ip);
+		}
                 sendcmd($ip, $port, 'trace', 0) if ($conf{trace});
         }
 	return $err;
