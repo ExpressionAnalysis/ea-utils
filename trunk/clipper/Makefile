@@ -9,9 +9,6 @@ VER := $(shell grep '%define ver' ${PKG}.spex | perl -ne 'print $$1 if / (\S+) *
 SRC=fastq-clipper.c fastq-mcf.c fastq-multx.c fastq-join.c
 BIN=$(SRC:.c=)
 
-%: %.c
-	$(CC) $(CFLAGS) -o $@ $<
-
 all: $(BIN)
 
 install: $(BIN) $(PREFIX)/bin/fastq-clipper $(PREFIX)/bin/fastq-mcf $(PREFIX)/bin/fastq-multx $(PREFIX)/bin/fastq-join
@@ -40,3 +37,7 @@ $(PKG).tar.gz: Makefile $(SRC) $(PKG).spec README CHANGES
 
 $(PKG).${VER}-${REL}.tar.gz: $(PKG).tar.gz
 	cp $< $@
+
+%: %.c
+	$(CC) $(CFLAGS) -o $@ $<
+

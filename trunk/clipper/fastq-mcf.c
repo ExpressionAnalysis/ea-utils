@@ -937,7 +937,7 @@ void usage(FILE *f, char *msg) {
 "	-P N	phred-scale (64)\n"
 "	-x N	'N' (Bad read) percentage causing trimming (10)\n"
 "	-R      Don't remove N's from the fronts/ends of reads\n"
-"	-n	Don't clip, just output what would be done\ni"
+"	-n	Don't clip, just output what would be done\n"
 "	-C N	Number of reads to use for subsampling\n"
 "	-d	Output lots of random debugging stuff\n"
 "\n"
