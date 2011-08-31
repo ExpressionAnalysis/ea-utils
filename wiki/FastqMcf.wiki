@@ -8,6 +8,7 @@ fastq-mcf attempts to:
  * Detect limited skewing at the ends of reads and clip
  * Detect poor quality at the ends of reads and clip
  * Detect N's, and remove from ends
+ * Remove reads with CASAVA 'N' flag (purity filtering)
  * Discard sequences that are too short after all of the above
  * Keep multiple mate-reads in sync while doing all of the above
 
@@ -34,14 +35,19 @@ Options:
  -m N Minimum clip length, overrides scaled auto (1)
  -p N Maximum adapter difference percentage (20)
  -l N Minimum remaining sequence length (15)
+ -L N   Maximum sequence length (none)
  -k N sKew percentage causing trimming (2)
  -q N quality threshold causing trimming (10)
  -f force output, even if not much will be done
+ -0     Set all trimming parameters to zero
+ -U|u   Force disable/enable illumina PF filtering
  -P N phred-scale (64)
  -x N 'N' (Bad read) percentage causing trimming (10)
  -R      Don't remove N's from the fronts/ends of reads
  -n Don't clip, just output what would be done
-i
+ -C N   Number of reads to use for subsampling (200000)
+ -d     Output lots of random debugging stuff
+
 Increasing the scale makes recognition-lengths longer, a scale
 of 100 will force full-length recognition.
 
