@@ -22,9 +22,9 @@ trap err ERR
 set -o xtrace
 for v in $list; do
 	eval prog=\$$v
-	${prog} test.fa test1.fq > test1.$v.out 2> test1.$v.err
-	${prog} test.fa test2.fq > test2.$v.out 2> test2.$v.err
-	${prog} test.fa test1.fq -o test3.$v.out > test3.$v.err
+	${prog} test.fa test1.fq > test1.$v.out 2> test1.$v.err || echo err during $v
+	${prog} test.fa test2.fq > test2.$v.out 2> test2.$v.err || echo err during $v
+	${prog} test.fa test1.fq -o test3.$v.out > test3.$v.err || echo err during $v
 	${prog} -L 72 -f test.fa test4.fq1 test4.fq2 -o test4.$v.out -o test4.$v.out2
 done
 set +o xtrace	

@@ -100,6 +100,7 @@ int main (int argc, char **argv) {
 	int qthr = 10;				// remove end of-read with quality < qthr
 	char phred = 0;
 	bool force = 0;
+	int ilv3 = -1;
 
 	int i;
 	
@@ -110,7 +111,7 @@ int main (int argc, char **argv) {
 	int o_n = 0;
 	int e_n = 0;
 
-	while (	(c = getopt (argc, argv, "-nfVRdbehp:o:l:s:m:t:k:x:P:q:L:C:")) != -1) {
+	while (	(c = getopt (argc, argv, "-nf0uUVRdbehp:o:l:s:m:t:k:x:P:q:L:C:")) != -1) {
 		switch (c) {
 		case '\1': 
 			if (!afil) 
@@ -125,6 +126,9 @@ int main (int argc, char **argv) {
 		case 'm': nmin = atoi(optarg); break;
 		case 'l': nkeep = atoi(optarg); break;
 		case 'L': nmax = atoi(optarg); break;
+		case '0': nmax=0; skewpct=0; pctns=0; rmns=0; qthr=0; ilv3=-1;  break;
+		case 'u': ilv3=1; break;
+		case 'U': ilv3=0; break;
 		case 'f': force = true; break;
 		case 'k': skewpct = atof(optarg); break;
 		case 'q': qthr = atoi(optarg); break;
@@ -176,11 +180,14 @@ int main (int argc, char **argv) {
 		return 1;
 	}
 
-        FILE *ain = fopen(afil, "r");
-        if (!ain) {
-                fprintf(stderr, "Error opening file '%s': %s\n",afil, strerror(errno));
-                return 1;
-        }
+	FILE *ain = NULL;
+	if (strcasecmp(afil, "n/a") && strcasecmp(afil, "/dev/null") && strcasecmp(afil, "NUL")) {
+		ain = fopen(afil, "r");
+		if (!ain) {
+			fprintf(stderr, "Error opening file '%s': %s\n",afil, strerror(errno));
+			return 1;
+		}
+	}
 
 	FILE *fstat = stderr;
 	if (!noclip && strcmp(ofil[0], "-")) {
@@ -205,21 +212,29 @@ int main (int argc, char **argv) {
 	memset(ad, 0, sizeof(ad));
 
 	int acnt=0, ok=0, rno=0;	// adapter count, ok flag, record number
-	while (acnt < MAX_ADAPTER_NUM && (ok = read_fa(ain, rno, &ad[acnt]))) {
-		++rno;
-		if (ok < 0)
-			break;
-		// copy in truncated to max scan length
-		strncpy(ad[acnt].escan, ad[acnt].seq, SCANLEN);
-		ad[acnt].escan[SCANLEN] = '\0';
-		//fprintf(stderr, "escan: %s, %s\n", ad[acnt].id, ad[acnt].escan);
-		++acnt;
+
+	if (ain) {
+		while (acnt < MAX_ADAPTER_NUM && (ok = read_fa(ain, rno, &ad[acnt]))) {
+			++rno;
+			if (ok < 0)
+				break;
+			// copy in truncated to max scan length
+			strncpy(ad[acnt].escan, ad[acnt].seq, SCANLEN);
+			ad[acnt].escan[SCANLEN] = '\0';
+			//fprintf(stderr, "escan: %s, %s\n", ad[acnt].id, ad[acnt].escan);
+			++acnt;
+		}
+
+		if (acnt == 0 && !force) {
+			fprintf(stderr, "No adapters in file '%s'\n",afil);
+			exit(1);
+		}
 	}
 
-	if (acnt == 0 && !force) 
-		exit(1);
-
 	fprintf(fstat, "Scale used: %g\n", scale);
+	if (ilv3) {
+		fprintf(fstat, "Filtering Illumina reads on purity field\n");
+	}
 
 	int maxns = 0;						// max sequence length
 	int avgns[MAX_FILES]; meminit(avgns);			// average sequence length per file
@@ -232,8 +247,34 @@ int main (int argc, char **argv) {
             char *s = NULL; size_t na = 0; int nr = 0, ns = 0, totn[MAX_FILES]; meminit(totn);
 	    char *q = NULL; size_t naq = 0; int nq =0;
 	    int j;
+	    int ilv3det=2;
             while (getline(&s, &na, fin[i]) > 0) {
                 if (*s == '@')  {
+			if (ilv3det) {
+				ilv3det=0;
+				const char *p=strchr(s, ':');
+				if (p) {
+					++p;
+					if (isdigit(*p)) {
+						p=strchr(s, ' ');
+						if (p) {
+							++p;
+							if (isdigit(*p)) {
+								++p;
+								if (*p ==':') {
+									++p;
+									if (*p =='N') {
+										ilv3det=1;
+									} else if (*p =='Y') {
+										ilv3det=2;
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
                         if ((ns=getline(&s, &na, fin[i])) <=0)
                                 break;
 			if (phred == 0) {
@@ -245,6 +286,7 @@ int main (int argc, char **argv) {
 						if (debug) fprintf(stderr, "Using phred 33, because saw: %c\n", q[j]);
 						// default to sanger 33, if you see a qual < 64
 						phred = 33;
+						break;
 					}
 				}
 			}
@@ -253,10 +295,13 @@ int main (int argc, char **argv) {
 	                avgns[i] += ns;
 			if (ns > maxns) maxns = ns;
 
-			// just 1000 reads for readlength sampling
-			if (nr >= 1000)	
+			// just 10000 reads for readlength sampling
+			if (nr >= 10000)	
 				break;
 		}
+	    }
+	    if (ilv3det == 1) {
+			ilv3=1;
 	    }
 	    if (s) free(s);
 	    if (q) free(q);
@@ -388,7 +433,6 @@ int main (int argc, char **argv) {
 				needqtrim = 1;
 			}
 
-
 			int p;
 			for (p = 0; p < maxns/2; ++p) {
 				int b;
@@ -495,7 +539,7 @@ int main (int argc, char **argv) {
 	}
 	acnt=newc;
 
-	if (acnt == 0 && !someskew && !force && !needqtrim) {
+	if (acnt == 0 && !someskew && !force && !needqtrim && !ilv3) {
 		fprintf(fstat, "No adapters found");
 		if (skewpct > 0) fprintf(fstat, ", no skewing detected"); 
 		if (qthr > 0) fprintf(fstat, ", and no trimming needed");
@@ -534,8 +578,7 @@ int main (int argc, char **argv) {
 	double ssqtrim[MAX_FILES][2]; meminit(ssqtrim);
 	int trimql[MAX_FILES]; meminit(trimql);
 	int trimqb[MAX_FILES]; meminit(trimqb);
-
-	int nbtrim=0;
+	int nilv3pf=0;	// number of illumina version 3 purity filitered
 	int read_ok;
 
 	if (i_n > 0)
@@ -559,6 +602,20 @@ int main (int argc, char **argv) {
 			continue;
 		}
 
+		if (ilv3) {
+			char * p = strchr(fq[0].id, ' ');
+			if (p) {
+				p+=2;
+				if (*p==':') {
+					++p;
+					if (*p == 'N') {
+						++nilv3pf;
+						continue;
+					}
+				}
+			}
+		}
+
 		// chomp
 
 		int dotrim[MAX_FILES][2];
@@ -572,14 +629,14 @@ int main (int argc, char **argv) {
 				continue;
 
 		    if (rmns) {
-			    for (i=dotrim[f][0];i<(fq[f].nseq/2-1);++i) {
+			    for (i=dotrim[f][0];i<(fq[f].nseq);++i) {
 			    		// trim N's from the front
 					if (fq[f].seq[i] == 'N') 
 						dotrim[f][0] = i + 1;
 					else
 						break;
 			    }
-			    for (i=dotrim[f][1];i<(fq[f].nseq/2-1);++i) {
+			    for (i=dotrim[f][1];i<(fq[f].nseq);++i) {
 					// trim N's from the end
 					if (fq[f].seq[fq[f].nseq-i-1] == 'N')
 						dotrim[f][1] = i + 1;
@@ -592,7 +649,7 @@ int main (int argc, char **argv) {
 			    bool istrimq = false;
 
                             // trim qual from the begin
-			    for (i=dotrim[f][0];i<(fq[f].nseq/2-1);++i) {
+			    for (i=dotrim[f][0];i<(fq[f].nseq);++i) {
 				if ((fq[f].qual[i]-phred) < qthr) {
 					++trimqb[f];
 					istrimq = true;
@@ -601,7 +658,7 @@ int main (int argc, char **argv) {
 					break;
 			    }
 
-                            for (i=dotrim[f][1];i<(fq[f].nseq/2-1);++i) {
+                            for (i=dotrim[f][1];i<(fq[f].nseq);++i) {
 				if ((fq[f].qual[fq[f].nseq-i-1]-phred) < qthr) {
 					++trimqb[f];
 					istrimq = true;
@@ -690,8 +747,10 @@ int main (int argc, char **argv) {
 		    if (bestoff_e > dotrim[f][1])
 			dotrim[f][1]=bestoff_e;
 
-		    int totclip = dotrim[f][0] + dotrim[f][1];
+		    int totclip = min(fq[f].nseq,dotrim[f][0] + dotrim[f][1]);
 
+		    if (debug) printf("totclip %d\n", totclip);
+		    
 		    if (totclip > 0) {
 		    	if ( (fq[f].nseq-totclip) < nkeep) {
 					// skip all reads if one is severely truncated ??
@@ -722,6 +781,11 @@ int main (int argc, char **argv) {
 		if (!skip) {
 			int f;
 			for (f=0;f<o_n;++f) {
+				if (dotrim[f][1] > 0) {
+					if (debug) printf("trimming %d from end\n", dotrim[f][1]);
+					fq[f].seq [fq[f].nseq -=dotrim[f][1]]='\0';
+					fq[f].qual[fq[f].nqual-=dotrim[f][1]]='\0';
+				}
                                 if (dotrim[f][0] > 0) {
                                         if (debug) printf("trimming %d from begin\n", dotrim[f][0]);
                                         memmove(fq[f].seq ,fq[f].seq +dotrim[f][0],fq[f].nseq -=dotrim[f][0]);
@@ -729,11 +793,6 @@ int main (int argc, char **argv) {
                                         fq[f].seq[fq[f].nseq]='\0';
                                         fq[f].qual[fq[f].nqual]='\0';
                                 }
-				if (dotrim[f][1] > 0) {
-					if (debug) printf("trimming %d from end\n", dotrim[f][1]);
-					fq[f].seq [fq[f].nseq -dotrim[f][1]]='\0';
-					fq[f].qual[fq[f].nqual-dotrim[f][1]]='\0';
-				}
 				if (nmax > 0) {
 					fq[f].seq[nmax]='\0';
 					fq[f].qual[nmax]='\0';
@@ -772,6 +831,9 @@ int main (int argc, char **argv) {
 		if (trimql[f] > 0) {
 				fprintf(fstat, "Trimmed %d reads (%s) by an average of %.2f bases on quality < %d\n", trimql[f], ifil[f], (float) trimqb[f]/trimql[f], qthr);
 		}
+	}
+	if (nilv3pf > 0) {
+		fprintf(fstat, "Filtered %d reads on purity flag\n", nilv3pf);
 	}
 	if (nerr > 0) {
 		fprintf(fstat, "Errors (%s): %d\n", ifil[f], nerr);
@@ -870,6 +932,7 @@ void usage(FILE *f, char *msg) {
 "	-k N	sKew percentage causing trimming (2)\n"
 "	-q N	quality threshold causing trimming (10)\n"
 "	-f	force output, even if not much will be done\n"
+"	-0	Set all trimming parameters to zero\n"
 "	-P N	phred-scale (64)\n"
 "	-x N	'N' (Bad read) percentage causing trimming (10)\n"
 "	-R      Don't remove N's from the fronts/ends of reads\n"
