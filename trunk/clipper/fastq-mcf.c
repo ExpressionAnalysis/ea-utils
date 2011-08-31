@@ -263,7 +263,7 @@ int main (int argc, char **argv) {
 								++p;
 								if (*p ==':') {
 									++p;
-									if (*p =='N') {
+									if (*p =='Y') {
 										ilv3det=1;
 									} else if (*p =='Y') {
 										ilv3det=2;
@@ -608,7 +608,7 @@ int main (int argc, char **argv) {
 				p+=2;
 				if (*p==':') {
 					++p;
-					if (*p == 'N') {
+					if (*p == 'Y') {
 						++nilv3pf;
 						continue;
 					}
