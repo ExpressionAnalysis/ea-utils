@@ -670,8 +670,10 @@ sub process_message {
 			}
 			if ($opts{jrun}) {
 				# just a ping
-				xlog("error", "I'm still alive ...$opts{id} from $ip") if $opts{trace} || $conf{trace};
-				touch("$conf{spool}/jobs/$opts{id}:$ip.run");
+				xlog("error", "I'm still alive ...$opts{id} from $ip") 
+					if $opts{trace} || $conf{trace};
+				touch("$conf{spool}/jobs/$opts{id}:$ip.run") 
+					if -e "$conf{spool}/jobs/$opts{id}:$ip.run";
 			} elsif (defined $opts{status}) {
 				# job is done
 				my $jhist = slurp("$conf{spool}/jobs/$opts{id}:$ip.run");
@@ -869,19 +871,30 @@ sub process_message {
 		}
 	} elsif ($cmd eq 'xio') {
 		my ($jid) = @args;
+                my $pid = slurp("$conf{spool}/jpids/$jid");
 		$io_wait{$jid}->{type} = 'io';
 		$io_wait{$jid}->{sock} = $sock;
 		$io_wait{$jid}->{time} = time();		# toss this entry if it gets old
 #		print "IOWAIT: " . Dumper \%io_wait;
+		if ($pid <= 1) {
+			xlog("error", "Wait xio for job ($jid) which isn't running");
+			$io_wait{$jid}->{error} = "Job $jid not found";
+			$io_wait{$jid}->{status} = -102;
+			$io_wait{$jid}->{pid} = -1;
+		}
 		return ($SOCK_WAIT);				# leave socket open for response
         } elsif ($cmd eq 'xstat') {
                 my ($jid) = @args;
 		my $pid = slurp("$conf{spool}/jpids/$jid");
-		# xstat means you don't want i/o, just status... these shouldn't even exist
-		unlink  "$conf{spool}/stdio/$pid.out", "$conf{spool}/stdio/$pid.err";
+		# xstat means you don't want i/o, just status... 
+		unlink  "$conf{spool}/stdio/$pid.out";
 		$io_wait{$jid}->{type} = 'stat';
 		$io_wait{$jid}->{sock} = $sock;
 		$io_wait{$jid}->{time} = time();		# toss this entry if it gets old
+		if ($pid <= 1) {
+			xlog("error", "Wait xstat for job ($jid) which isn't running");
+			return (-102, "Job $jid not found")
+		}
 		return ($SOCK_WAIT);				# leave socket open for response
 	} elsif ($cmd eq 'jinfo') {				# tell me what host a job is on
                 my ($jid) = @args;
@@ -1212,13 +1225,25 @@ sub srvexec {
 				if ($io_wait{$jid}->{type} eq 'io') {
 					# need all IO
 #					print "SENDING FILES : " . Dumper $io_wait{$jid};
+					if ($io_wait{$jid}->{status}) {
+						burp("$conf{spool}/pids/$pid.err", $io_wait{$jid}->{error}) 
+							if ! -e "$conf{spool}/pids/$pid.err"; 
+						burp("$conf{spool}/pids/$pid.stat", $io_wait{$jid}->{status}) 
+							if ! -e "$conf{spool}/pids/$pid.stat"; 
+					}
 					*$sock{HASH}->{file} = ["$conf{spool}/pids/$pid.stat", "$conf{spool}/stdio/$pid.out", "$conf{spool}/stdio/$pid.err"];
 					$write_set->add($sock);
 				} elsif ($io_wait{$jid}->{type} eq 'stat') {
 					# only want a status code
 					my $stat = funpack("$conf{spool}/pids/$pid.stat");
-					sockresp($io_wait{$jid}->{sock}, $stat->{status});
+					my $err = slurp("$conf{spool}/pids/$pid.err");
+					if ($io_wait{$jid}->{status}) {
+						$err = $io_wait{$jid}->{error} if ! -e "$conf{spool}/pids/$pid.err"; 
+						$stat = $io_wait{$jid}->{status} if ! -e "$conf{spool}/pids/$pid.stat"; 
+					}
+					sockresp($io_wait{$jid}->{sock}, $stat->{status}, $err);
 					unlink "$conf{spool}/pids/$pid.stat";
+					unlink "$conf{spool}/pids/$pid.err";
 					unlink "$conf{spool}/jpids/$jid";
 				}
 				delete $io_wait{$jid};
@@ -1230,7 +1255,6 @@ sub srvexec {
 			}
 		}
 	}
-
 
 	if (time() > ($conf{lastpidtime}+$conf{ping_secs})) {
 		opendir(D,"$conf{spool}/pids");
@@ -1310,7 +1334,6 @@ sub notifystat {
 	if (!$info->{jrun}) {
 		# ok, i'm not running
 		# release stdio/stat
-#		print STDERR "HERE I AM RELEASING STUFF TO WAITERS $kid " . Dumper($info);
 		if ($io_wait{$jid}) {
 			$io_wait{$jid}->{pid} = $kid;
 			$io_wait{$jid}->{time} = time();		# how long you have to pickup i/o
@@ -1321,6 +1344,9 @@ sub notifystat {
 sub writestat {
 	my ($kid, $stat, $jrun, $err, $ru) = @_;
 	if ( -e "$conf{spool}/pids/$kid" ) {
+		if ($err && ! -e "$conf{spool}/stdio/$$.err") {
+			burp("$conf{spool}/stdio/$$.err", $err);
+		}
 		open(ST, ">$conf{spool}/pids/$kid.stat") || return 0;
 		print(ST "status:$stat\n");
 		print(ST "jrun:1\n") if $jrun;
@@ -1740,7 +1766,7 @@ sub showhist {
 
         {
                 local @ARGV = @_;
-                GetOptions(\%opt, "count=i", "user=s","job=i","resubmit","fmt|F=s","long");
+                GetOptions(\%opt, "count|c=i", "user=s","job=i","resubmit","fmt|F=s","long","grep|g=s");
                 @_=@ARGV;
         }
 	if ($_[0] =~ /[a-z]/ && !$opt{user}) {
@@ -1766,7 +1792,7 @@ sub showhist {
 	my $count = $opt{count}; 
 	$count = 50 if !$count;
 
-	splice @D, $count*1.4 unless $opt{user};
+	splice @D, $count*1.4 unless $opt{user}||$opt{grep};
 	
         for my $jid (@D) {
                 my $f = "$conf{spool}/jhist/$mx/$jid";
@@ -1776,6 +1802,7 @@ sub showhist {
                 my ($job, @cmd) = @job;
                 if (ref($job)) {
 			next if $opt{user} && ! ($job->{user} eq $opt{user});
+			next if $opt{grep} && "$job->{user}\t@cmd\t$job->{cwd}" !~ $opt{grep};
 			--$count;
                         my %job=%{$job};
 
