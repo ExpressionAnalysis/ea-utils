@@ -8,7 +8,7 @@ fastq-mcf attempts to:
  * Detect limited skewing at the ends of reads and clip
  * Detect poor quality at the ends of reads and clip
  * Detect N's, and remove from ends
- * Remove reads with CASAVA 'N' flag (purity filtering)
+ * Remove reads with CASAVA 'Y' flag (purity filtering)
  * Discard sequences that are too short after all of the above
  * Keep multiple mate-reads in sync while doing all of the above
 
