@@ -933,6 +933,7 @@ void usage(FILE *f, char *msg) {
 "	-q N	quality threshold causing trimming (10)\n"
 "	-f	force output, even if not much will be done\n"
 "	-0	Set all trimming parameters to zero\n"
+"	-U|u	Force disable/enable illumina PF filtering\n"
 "	-P N	phred-scale (64)\n"
 "	-x N	'N' (Bad read) percentage causing trimming (10)\n"
 "	-R      Don't remove N's from the fronts/ends of reads\n"
