@@ -1,5 +1,5 @@
 %define name ea-utils
-%define ver 1.0.5
+%define ver 1.1.0
 %define rel %RELEASE%
 
 Summary: 	fastq-processing utilities
