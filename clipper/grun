@@ -49,9 +49,11 @@ $def{ping_secs} = 30;				# how often to tell about load/mem/stats
 $def{remove_secs} = '$ping_secs * 1000';	# don't even try kickstarting if the node is this old
 $def{idle_load} = .3;				# how often to tell about load/mem/stats
 $def{retry_secs} = 60;				# how often to retry notifications
-$def{expire_secs} = 86400;			# remove jobs whose execution nodes haven't reported back in this amount of time
+$def{max_buf} = 1000000;			# how often to retry notifications
+$def{expire_secs} = 14400;			# remove jobs whose execution nodes haven't reported back in this amount of time
 $def{io_keep} = 3600;				# keep io for this long after a job with i/o is finished in a detached session
 $def{sched_secs} = '1';				# how often to try scheduling
+$def{max_sched} = 50;				# how many different jobs to try and match before giving up on the rest (queue busy)
 $def{master} = 'localhost:5184';		# central scheduler
 $def{services} = "queue exec";			# all can run
 $def{pid_file} = "/var/run/grun.pid";		# pid file
@@ -342,6 +344,11 @@ if ($info{error}) {
 	exit -1;
 }
 
+if (!$info{jid}) {
+	print STDERR "Failed to submit job", "\n";
+	exit -1;
+}
+
 if ($opt{wait}) {
 	# wait for a job id
 	while (!defined($info{ip})) {
@@ -397,6 +404,7 @@ END {
 
 sub readsocks {
 	# based on ppcgid, nonforking socket code
+	my $ret=0;
 
     	my ($new_readable, $new_writable, $new_error) = IO::Select->select($read_set, $write_set, $read_set, 1);
 
@@ -448,6 +456,7 @@ sub readsocks {
 				}
 			}
 		}
+		$ret = 1;
 	}
 
     	foreach my $sock ($write_set->can_write(0)) {
@@ -507,7 +516,10 @@ sub readsocks {
 			xlog("debug", "Closing $sock after nothing to do\n") if $conf{trace};
 			close_sock($sock);
 		}
+		$ret = 1;
 	}
+
+	return $ret;
 }
 
 sub close_sock {
@@ -575,8 +587,10 @@ sub process_message {
 		}
 	} elsif ($cmd eq 'trace') {
 		# turn tracing on... should be 'session' oriented but too lazy for now
-		$conf{trace} = 0+$args[0];
-		return '';
+		if ($conf{trace} <= 1) {
+			$conf{trace} = 0+$args[0];
+		}
+		return ();
 	} elsif ($cmd eq 'node') {
 		# this is the 'node ping'
 		if (ref($args[0]) eq 'HASH') {		# bit of validation
@@ -601,6 +615,7 @@ sub process_message {
 		} else {
 			return "Error: invalid node registration info";	
 		}
+		return ();
         } elsif ($cmd eq 'jedit') {
 		my ($jid, $key, $val) = @args;
 		if (!$key || !defined($val)) {
@@ -689,7 +704,7 @@ sub process_message {
 			}
 			if ($opts{jrun}) {
 				# just a ping
-				xlog("error", "I'm still alive ...$opts{id} from $ip") 
+				xlog("error", "Oh, i'm still alive $opts{id} from $ip") 
 					if $opts{trace} || $conf{trace};
 				touch("$conf{spool}/jobs/$opts{id}:$ip.run")
 					if -e "$conf{spool}/jobs/$opts{id}:$ip.run";
@@ -722,7 +737,7 @@ sub process_message {
 				xlog("error", "Got a report for a job $opts{id} with no status info");
 			}
 			# return ack even if not exists
-			return ('dack', %opts);	
+			return ('dack', pid=>$opts{pid}, jrun=>$opts{jrun});	
 		}
         } elsif ($cmd eq 'dack') {
 		# ackknowledge receipt of status signal, so you don't have to do it again
@@ -901,10 +916,7 @@ sub process_message {
 		$io_wait{$jid}->{time} = time();		# toss this entry if it gets old
 #		print "IOWAIT: " . Dumper \%io_wait;
 		if ($pid <= 1) {
-			xlog("error", "Wait xio for job ($jid) which isn't running");
-			$io_wait{$jid}->{error} = "Job $jid not found";
-			$io_wait{$jid}->{status} = -102;
-			$io_wait{$jid}->{pid} = -1;
+			return "name:fake.err\nlen:13\n\nJob not foundname:fake.out\nlen:0\n\nname:fake.stat\nlen:4\n\n-102";
 		}
 		return ($SOCK_WAIT);				# leave socket open for response
         } elsif ($cmd eq 'xstat') {
@@ -922,10 +934,11 @@ sub process_message {
 		return ($SOCK_WAIT);				# leave socket open for response
 	} elsif ($cmd eq 'jinfo') {				# tell me what host a job is on
                 my ($jid) = @args;
-                if (! -e "$conf{spool}/jobs/$jid") {
+                if (!$jid || ! -e "$conf{spool}/jobs/$jid") {
                         if (! -e "$conf{spool}/jobs/$jid.ip") {
-                                xlog("error", "Job $jid does not exist");
-                                return "Job $jid does not exist.";
+				my $ip = $sock->peerhost();
+                                xlog("error", "Job '$jid' does not exist from $ip");
+                                return (error=>"Job $jid does not exist.", jid=>-1, ip=>$conf{master}, port=>$conf{master_port});
                         } else {
                                 my $ip = slurp("$conf{spool}/jobs/$jid.ip");
 				if (!$ip) {
@@ -964,7 +977,7 @@ sub process_message {
 			my $ip = $sock->peerhost();
 			substr($data,0,2) = "[{time=>" . $time . "," . "from=>'" . $ip . "',";
 
-			open(F, ">$file") || return('', "Can't create $file : $!");
+			open(F, ">$file") || return('error'=>"Can't create $file : $!");
 			print F $data;
 			close F;
 
@@ -974,7 +987,7 @@ sub process_message {
 		return ('error'=>"Unknown command $cmd ($data)");
 	}
 
-	return ('');
+	return ();
 }
 
 sub jhistpath {
@@ -1005,6 +1018,7 @@ sub schedule {
 
 	# no attempt here to prioritize jobs, just match and go
 	my %alloc;
+	my $cnt;
 	while(my $jid=readdir(D)) {
 		my $jfil = "$conf{spool}/jobs/$jid";
 		# probably should have a folder per job to avoid this
@@ -1027,9 +1041,9 @@ sub schedule {
 			# job is running, make sure it's resources are somewhat locked
 			($jid) = $jid =~ m/^(\d+)/;
 			# check to see whether job has expired
-			if ($conf{expire_secs} && (fmodtime($jfil) < (time()-$conf{expire_secs}))) {
+			if (!$conf{loop_num}>2 && $conf{expire_secs} && (fmodtime($jfil) < (time()-$conf{expire_secs}))) {
 				xlog("error", "Not expiring job $jid, but I should");
-#			        selfcmd('jstat', pid=>-1, id=>$jid, status => -8, error=>"Orphaned job (" . (time()-fmodtime($jfil)) . "s)");
+			        selfcmd('jstat', pid=>-1, id=>$jid, status => -8, error=>"Orphaned job (" . (time()-fmodtime($jfil)) . "s)");
 			} else {
 				my $ip = slurp("$conf{spool}/jobs/$jid.ip");
 				if ($ip =~ /\d/ && $nodes{$ip} && $nodes{$ip}->{ip}) {
@@ -1044,6 +1058,10 @@ sub schedule {
 		my @n;
 		my ($max_av, $max_n);
 
+		if ($cnt >= $conf{max_sched}) {
+			last;
+		}
+		++$cnt;
 		for my $n (values %nodes) {
 			# jobs need enough memory, cpu availability and disk space... that's it
 			if (!$n->{ip}) {
@@ -1109,15 +1127,15 @@ sub schedule {
 				} else {
 					$max_n->{avail} -= $job->{cpus};
 					$max_n->{memory} -= $job->{memory};
-					$max_n->{a_cpus} += $job->{cpus};
+					$max_n->{a_cpus} += $job->{cpus} + 1;
 					$max_n->{a_memory} += $job->{memory}; 
 				}
 			}
 		} else {
-			if ($conf{full_cmd}) {
+			if ($conf{backup_grid}) {
 				# TODO: fork exec to backup grid, and add to list of pids to track... as if you're an exec node
 			}
-			xlog("debug", "Can't find node for $jfil " . Dumper(%nodes) . "\n") if $conf{trace};
+			# xlog("debug", "Can't find node for $jfil " . Dumper(%nodes) . "\n") if $conf{trace};
 		}
 	}
 
@@ -1283,6 +1301,8 @@ sub srvexec {
 		}
 	}
 
+	# assure we can't flood on misconfig
+	$conf{ping_secs} = 5 if $conf{ping_secs} == 0;
 	if (time() > ($conf{lastpidtime}+$conf{ping_secs})) {
 		opendir(D,"$conf{spool}/pids");
 		while(my $kid = readdir(D)) {
@@ -1323,8 +1343,8 @@ sub srvexec {
 }
 
 sub touch {
-	open(T,">>$_[0]");
-	close T;
+	my $nowisthe=time();
+	return utime($nowisthe, $nowisthe, @_);
 }
 
 sub fmodtime {
@@ -1514,8 +1534,9 @@ sub waitio {
 	++$tries;
         my $sock = _sendcmd(@_);
         if (!$sock) {
-                xlog("error","Can't send command ", packcmd(@_));
-                return undef;
+                xlog("error","Can't send command", packcmd(@_));
+                sleep(5);
+		next;
         }
         my ($dat, $stat, $got) = ('', '', 0);
 	my $err;
@@ -2031,7 +2052,7 @@ sub evalctx {
 	}
 	$msafe->share(qw(%conf %ENV));
 	if ($conf{trace}) {
-		xlog("debug", "Evaluating {$expr}\n");
+#		xlog("debug", "Evaluating {$expr}\n");
 	}
 	my ($res, @res);
 	if (wantarray) {
@@ -2171,7 +2192,9 @@ sub startdaemon {
 		$write_set = new IO::Select();
 		$read_set->add($listener);
 		$quit = 0;
+		$conf{loop_num} = 0;
 		while (!$quit) {
+			++$conf{loop_num};
 			eval {readsocks()};
 			last if $quit;
 			xlog("error", "Daemon readsocks exception: $@") if $@;
@@ -2186,6 +2209,7 @@ sub startdaemon {
 				xlog("error", "Daemon srvexec exception: $@") if $@;
 			};
 		}
+		select(undef, undef, undef, 0.1);
 		xlog("note", "Shutdown");
 		unlink $conf{pid_file};
 	}
