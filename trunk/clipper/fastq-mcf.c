@@ -126,7 +126,7 @@ int main (int argc, char **argv) {
 		case 'm': nmin = atoi(optarg); break;
 		case 'l': nkeep = atoi(optarg); break;
 		case 'L': nmax = atoi(optarg); break;
-		case '0': nmax=0; skewpct=0; pctns=0; rmns=0; qthr=0; ilv3=-1;  break;
+		case '0': nmax=0; skewpct=0; pctns=0; rmns=0; qthr=0; nkeep=0; ilv3=-1;  break;
 		case 'u': ilv3=1; break;
 		case 'U': ilv3=0; break;
 		case 'f': force = true; break;
@@ -351,7 +351,7 @@ int main (int argc, char **argv) {
 				continue;
 			}
 
-			if (avgns[i] < 11) 			// reads of avg length < 11 ? barcode lane, skip it
+			if (i > 0 && avgns[i] < 11) 			// reads of avg length < 11 ? barcode lane, skip it
 				continue;
 
 			++nr;
@@ -405,7 +405,7 @@ int main (int argc, char **argv) {
             }
 	    if (s) free(s);
 	    if (q) free(q);
-	    if (avgns[i] >= 11) {
+	    if (i == 0 || avgns[i] >= 11) {
 		    if (nsampcnt == 0 || nr < nsampcnt)			// fewer than max, set for thresholds
 			nsampcnt=nr;
 	    }
@@ -586,7 +586,6 @@ int main (int argc, char **argv) {
 
 	for (i=0;i<i_n;++i)
 		fseek(fin[i], 0, 0);
-
 
 	while (read_ok=read_fq(fin[0], nrec, &fq[0])) {
 		for (i=1;i<i_n;++i) {

@@ -49,7 +49,7 @@ $def{ping_secs} = 30;				# how often to tell about load/mem/stats
 $def{remove_secs} = '$ping_secs * 1000';	# don't even try kickstarting if the node is this old
 $def{idle_load} = .3;				# how often to tell about load/mem/stats
 $def{retry_secs} = 60;				# how often to retry notifications
-$def{expire_secs} = 7200;			# remove jobs whose execution nodes haven't reported back in this amount of time
+$def{expire_secs} = 86400;			# remove jobs whose execution nodes haven't reported back in this amount of time
 $def{io_keep} = 3600;				# keep io for this long after a job with i/o is finished in a detached session
 $def{sched_secs} = '1';				# how often to try scheduling
 $def{master} = 'localhost:5184';		# central scheduler
@@ -89,6 +89,11 @@ if (!$daemon) {
 my $safe = new Safe;
 
 init();
+
+if ($conf{debug_memory}) {
+	eval {require Devel::Gladiator;};
+	die $@ if $@;
+}
 
 my $gjobid = slurp("$conf{spool}/nextid");
 
@@ -656,15 +661,29 @@ sub process_message {
 		if ($opts{id}) {
 			my $ip = $sock->peerhost();	# should match the ip from jmine (see above how dumb this is)
 			if (! -e "$conf{spool}/jobs/$opts{id}:$ip.run") {
+				if (-e "$conf{spool}/jhist/0/$opts{id}") {
+					burp("$conf{spool}/jobs/$opts{id}:$ip.run", slurp("$conf{spool}/jhist/0/$opts{id}"));
+				}
+                                if (! -e "$conf{spool}/jobs/$opts{id}.ip" ) {
+					burp("$conf{spool}/jobs/$opts{id}.ip",$ip);
+				}
+			}
+			if (! -e "$conf{spool}/jobs/$opts{id}:$ip.run") {
                                 my $should = slurp("$conf{spool}/jobs/$opts{id}.ip");
+				
 				if (!$should) {
-					xlog("error", "Got a report for job $opts{id} from $ip, which has no $conf{spool}/jobs/$opts{id}.ip");
+					xlog("error", "Got a report ($opts{status},$opts{jrun}) for job $opts{id} from $ip, which has no $conf{spool}/jobs/$opts{id}.ip");
 				} else {
 					if ($opts{pid}<0) {
 						xlog("error", "Orphaned job report $opts{id}");
 						$ip=$should if !$ip;
 					} else {
-						xlog("error", "Got a report for job $opts{id} from $ip, should be $should");
+						if (!($ip eq $should)) {
+							xlog("error", "Got a report ($opts{status},$opts{jrun}) for job $opts{id} from $ip, should be $should");
+						} else {
+							xlog("error", "Got a report ($opts{status},$opts{jrun}) for job $opts{id}, but there's no $opts{id}:$ip.run file");
+							burp("$conf{spool}/jobs/$opts{id}:$ip.run","[{},'<unknown>']");
+						}
 					}
 				}
 			}
@@ -672,7 +691,7 @@ sub process_message {
 				# just a ping
 				xlog("error", "I'm still alive ...$opts{id} from $ip") 
 					if $opts{trace} || $conf{trace};
-				touch("$conf{spool}/jobs/$opts{id}:$ip.run") 
+				touch("$conf{spool}/jobs/$opts{id}:$ip.run")
 					if -e "$conf{spool}/jobs/$opts{id}:$ip.run";
 			} elsif (defined $opts{status}) {
 				# job is done
@@ -779,6 +798,7 @@ sub process_message {
 				}
 				$ENV{"_GRUN"} = 1;
 				my $err;
+				my $ret;
 
 				xlog("debug", "Setting uid to $uid, gid to $gid.\n") if ($conf{trace} || $opts->{trace});
 
@@ -792,18 +812,22 @@ sub process_message {
 					if ($opts->{cwd}) {
 						if (!chdir($opts->{cwd})) {
 							$err = "Can't cd to $opts->{cwd} : $!";
+							$ret = 103;
 						}
 					}
 				};
 
-				$err = "Error setting uid to $uid: $@\n" if !$err && $@;
+				if (!$err && $@) {
+					$ret = 102;
+					$err = "Error setting uid to $uid: $@\n";
+				}
 				if (!$err) {
 					exec(@cmd);
 					printf STDERR "Can't exec $cmd[0] : $!\n";	
 					exit 101;
 				} else {
 					printf STDERR "$err\n";	
-					exit -1;
+					exit $ret;
 				}
 				# special exit code 101 means couldn't run the command
 			}
@@ -974,7 +998,9 @@ sub schedule {
 	}
 
 	for my $n (values %nodes) {
-		$n->{a_cpus} = $n->{a_memory} = 0;
+		if ($n->{ip}) {
+			$n->{a_cpus} = $n->{a_memory} = 0;
+		}
 	}
 
 	# no attempt here to prioritize jobs, just match and go
@@ -1002,10 +1028,11 @@ sub schedule {
 			($jid) = $jid =~ m/^(\d+)/;
 			# check to see whether job has expired
 			if ($conf{expire_secs} && (fmodtime($jfil) < (time()-$conf{expire_secs}))) {
-			        selfcmd('jstat', pid=>-1, id=>$jid, status => -8, error=>"Orphaned job (" . (time()-fmodtime($jfil)) . "s)");
+				xlog("error", "Not expiring job $jid, but I should");
+#			        selfcmd('jstat', pid=>-1, id=>$jid, status => -8, error=>"Orphaned job (" . (time()-fmodtime($jfil)) . "s)");
 			} else {
 				my $ip = slurp("$conf{spool}/jobs/$jid.ip");
-				if ($ip =~ /\d/) {
+				if ($ip =~ /\d/ && $nodes{$ip} && $nodes{$ip}->{ip}) {
 					$nodes{$ip}->{a_cpus} += $job->{cpus};
 					$alloc{$ip}->{a_memory} += $job->{memory};
 				}	
@@ -1272,6 +1299,7 @@ sub srvexec {
 			# running, check status
 			if ($kid =~ /^\d+$/ ) {
 				my ($ret, $status, @rd) = waitusage($kid, WNOHANG);
+				$status = undef if !$ret;
 				my $alive = kill(0, $kid);
 				#print "RET $ret STAT $status ALIVE $alive\n";
 				if (writestat($kid, $status, $alive, undef, \@rd)) {
@@ -1779,6 +1807,7 @@ sub showhist {
 	my $mx = -1;
         opendir(D,"$conf{spool}/jhist");
 	while(defined ($_=readdir(D))) {
+		next unless /^\d+$/;
 		if ($_ > $mx) {
 			$mx = $_;
 		}
