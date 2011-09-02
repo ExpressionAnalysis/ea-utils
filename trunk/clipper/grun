@@ -1042,7 +1042,7 @@ sub schedule {
 			($jid) = $jid =~ m/^(\d+)/;
 			# check to see whether job has expired
 			if (!$conf{loop_num}>2 && $conf{expire_secs} && (fmodtime($jfil) < (time()-$conf{expire_secs}))) {
-				xlog("error", "Not expiring job $jid, but I should");
+#				xlog("error", "Not expiring job $jid, but I should");
 			        selfcmd('jstat', pid=>-1, id=>$jid, status => -8, error=>"Orphaned job (" . (time()-fmodtime($jfil)) . "s)");
 			} else {
 				my $ip = slurp("$conf{spool}/jobs/$jid.ip");
