@@ -79,7 +79,7 @@ int read_fq(FILE *in, int rno, struct fq *fq);		// 0=done, 1=ok, -1=err+continue
 int char2bp(char c);
 char bp2char(int b);
 
-void usage(FILE *f, char *msg=NULL);
+void usage(FILE *f, const char *msg=NULL);
 int hd(char *a, char *b, int n);
 int debug=0;
 int warncount = 0;
@@ -106,7 +106,7 @@ int main (int argc, char **argv) {
 	
 	char *afil = NULL;
 	char *ifil[MAX_FILES]; meminit(ifil);
-	char *ofil[MAX_FILES]; meminit(ofil);
+	const char *ofil[MAX_FILES]; meminit(ofil);
 	int i_n = 0;
 	int o_n = 0;
 	int e_n = 0;
@@ -201,9 +201,13 @@ int main (int argc, char **argv) {
 	FILE *fout[MAX_FILES]; meminit(fout);
 
 	for (i=0;i<i_n;++i) {
-		if (!(fin[i]=fopen(ifil[i], "r"))) {
-			fprintf(stderr, "Error opening file '%s': %s\n",ifil[i], strerror(errno));
-			return 1;
+		if (!strcmp(ifil[i],"-")) {
+			fin[i]=stdin;
+		} else {
+			if (!(fin[i]=fopen(ifil[i], "r"))) {
+				fprintf(stderr, "Error opening file '%s': %s\n",ifil[i], strerror(errno));
+				return 1;
+			}
 		}
 	}
 
@@ -232,10 +236,6 @@ int main (int argc, char **argv) {
 	}
 
 	fprintf(fstat, "Scale used: %g\n", scale);
-	if (ilv3) {
-		fprintf(fstat, "Filtering Illumina reads on purity field\n");
-	}
-
 	int maxns = 0;						// max sequence length
 	int avgns[MAX_FILES]; meminit(avgns);			// average sequence length per file
 	// read length
@@ -248,9 +248,25 @@ int main (int argc, char **argv) {
 	    char *q = NULL; size_t naq = 0; int nq =0;
 	    int j;
 	    int ilv3det=2;
+
             while (getline(&s, &na, fin[i]) > 0) {
                 if (*s == '@')  {
-			if (ilv3det) {
+			j=getline(&s, &na, fin[i]);
+                	if (j && (*s == '@'))  {
+				j=getline(&s, &na, fin[i]);
+				j=getline(&s, &na, fin[i]);
+				j=getline(&s, &na, fin[i]);
+			} else {
+				j=getline(&s, &na, fin[i]);
+				j=getline(&s, &na, fin[i]);
+			}
+			break;
+		}
+	    }
+
+            while (getline(&s, &na, fin[i]) > 0) {
+                if (*s == '@')  {
+			if (ilv3det==2) {
 				ilv3det=0;
 				const char *p=strchr(s, ':');
 				if (p) {
@@ -265,7 +281,7 @@ int main (int argc, char **argv) {
 									++p;
 									if (*p =='Y') {
 										ilv3det=1;
-									} else if (*p =='Y') {
+									} else if (*p =='N') {
 										ilv3det=2;
 									}
 								}
@@ -275,11 +291,13 @@ int main (int argc, char **argv) {
 				}
 			}
 
-                        if ((ns=getline(&s, &na, fin[i])) <=0)
+                        if ((ns=getline(&s, &na, fin[i])) <=0) {
+				if (debug) fprintf(stderr, "Dropping out of sampling loop\n");
                                 break;
+			}
+			nq=getline(&q, &naq, fin[i]);
+			nq=getline(&q, &naq, fin[i]);		// qual is 2 lines down
 			if (phred == 0) {
-				nq=getline(&q, &naq, fin[i]);
-				nq=getline(&q, &naq, fin[i]);		// qual is 2 lines down
 				--nq;
 				for (j=0;j<nq;++j) {
 					if (q[j] < 64) {
@@ -296,21 +314,36 @@ int main (int argc, char **argv) {
 			if (ns > maxns) maxns = ns;
 
 			// just 10000 reads for readlength sampling
-			if (nr >= 10000)	
+			if (nr >= 10000) {	
+				if (debug) fprintf(stderr, "Read 10000\n");
 				break;
+			}
+		} else {
+			fprintf(stderr, "Invalid FASTQ format : %s\n", ifil[i]);
+			break;
 		}
 	    }
 	    if (ilv3det == 1) {
-			ilv3=1;
+		ilv3=1;
 	    }
+            if (debug) fprintf(stderr,"Ilv3det: %d\n", ilv3det);
 	    if (s) free(s);
 	    if (q) free(q);
 	    if (nr)
 		    avgns[i] = avgns[i]/nr;
 	}
+
+	if (ilv3 == -1) {
+		ilv3 = 0;
+	}
+
+	if (ilv3) {
+		fprintf(fstat, "Filtering Illumina reads on purity field\n");
+	}
+
 	// default to illumina 64 if you never saw a qual < 33
 	if (phred == 0) phred = 64;
-	fprintf(stderr, "Phred: %d\n", phred);
+	fprintf(fstat, "Phred: %d\n", phred);
 
 	for (i=0;i<i_n;++i) {
 		if (avgns[i] == 0) {
@@ -375,7 +408,7 @@ int main (int argc, char **argv) {
 				char *p;
 				// search whole seq for 15 char "end" of adap string
 				if (p = strstr(s+1, ad[a].escan)) { 
-					if (debug > 1) fprintf(stderr, "  END S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", s, ad[a].id, ad[a].escan, p-s, ns, (p-s) == ns-SCANLEN);
+					if (debug > 1) fprintf(stderr, "  END S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", s, ad[a].id, ad[a].escan, (int) (p-s), ns, (p-s) == ns-SCANLEN);
 					if ((p-s) == ns-SCANLEN) 
 						++ad[a].ecntz[i];
 					++ad[a].ecnt[i];
@@ -393,7 +426,7 @@ int main (int argc, char **argv) {
 						p=NULL;
 				}
 				if (p) { 
-					if (debug > 1) fprintf(stderr, "BEGIN S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", buf, ad[a].id, ad[a].seq, p-ad[a].seq, ns, (p-ad[a].seq )  == ad[a].nseq-slen);
+					if (debug > 1) fprintf(stderr, "BEGIN S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", buf, ad[a].id, ad[a].seq, (int) (p-ad[a].seq), ns, (p-ad[a].seq )  == ad[a].nseq-slen);
 					if (p-ad[a].seq == ad[a].nseq-slen) 
 						++ad[a].bcntz[i];
 					++ad[a].bcnt[i];
@@ -548,6 +581,12 @@ int main (int argc, char **argv) {
 		exit(0);				// not really an error, check size of output files
 	} else {
 		if (debug) fprintf(stderr, "acnt: %d, ssk: %d, force: %d, needq: %d\n", acnt, someskew, force, needqtrim);
+		if (noclip) {
+			if (acnt == 0) fprintf(fstat, "No adapters found. ");
+			if (someskew) fprintf(fstat, "Skewing detected. "); 
+			if (needqtrim) fprintf(fstat, "Quality trimming is needed. ");
+			fprintf(fstat, "\n");
+		}
 	}
 
 	if (noclip)
@@ -904,7 +943,7 @@ int read_fq(FILE *in, int rno, struct fq *fq) {
         return 1;
 }
 
-void usage(FILE *f, char *msg) {
+void usage(FILE *f, const char *msg) {
 	if(msg)
 		fprintf(f, "%s\n", msg);
 
