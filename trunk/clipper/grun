@@ -716,7 +716,7 @@ sub process_message {
 			}
 		} else {
 			unlink "$conf{spool}/jobs/$jid";
-			return "Job $jid aborted\n";
+			return "Job $jid aborted";
 		}
 	} elsif ($cmd eq 'jstat') {
 		# sent by the execution node to say what the status of a job is
