@@ -483,7 +483,7 @@ int main (int argc, char **argv) {
 		exit(0);
 	}
 
-	bc[bcnt].id.s="unmatched";
+	bc[bcnt].id.s=(char *)"unmatched";
 
 	int b;
         for (b=0;b<=bcnt;++b) {
