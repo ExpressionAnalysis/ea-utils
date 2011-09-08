@@ -35,7 +35,8 @@ my $WIN32 = ($^O =~ /Win32/);
 my $EOT = pack("cc",0,4);
 my $SOCK_WAIT = -1;				# wait for resp
 my $SOCK_FILE = -2;				# send files over socket
- 
+my $DEFAULT_MEM = 10000;
+
 my ($daemon, $killjob, $editjob);
 my (%conf, %def);
 
@@ -185,6 +186,14 @@ if ($killjob) {
 
 	my $exit = 0;
 	for my $job (@ARGV) {
+		if ($job !~ /^\d/) {
+			my $tmp = slurp("$ENV{HOME}/.grun/jobx/$job");
+			if (!$tmp) {
+				warn "External job id '$job' not found on this machine\n";
+				exit -1;
+			}
+			$job = $tmp;
+		}
 		my $err = kill_job($job, $sig);
 		if (!defined($err) && $@) {
 			warn $@,"\n";
@@ -195,6 +204,9 @@ if ($killjob) {
 			$err = 'No response to jkill' if !$ok && !$err;
 			warn "Error: $err\n" if !$ok;
 			$exit=-1 if !$ok;
+		}
+		if ($job !~ /^\d/) {
+			unlink "$ENV{HOME}/.grun/jobx/$job";
 		}
 	}
 	exit 0;
@@ -227,7 +239,14 @@ $opt{wait} = 1;				# keep socket open until job is finished
 $opt{io} = 1;				# copy io back on the socket, implies wait
 
 Getopt::Long::Configure qw(require_order no_ignore_case passthrough);
-GetOptions(\%opt, "file=s", "memory=i", "hosts=s", "cpus=i", "io!", "wait!", "ferr=s", "fout=s", "kill=i");
+GetOptions(\%opt, "file=s", "memory|m=i", "hosts|h=s", "cpus|c=i", "io!", "wait!", "err=s", "out=s", "jobx|jobid|j=s", "verbose", "debug|D");
+
+my $verbose = $opt{verbose}; delete $opt{verbose};
+
+if ($opt{err} && $opt{out}) {
+	$opt{wait} = $opt{wait} || $opt{io};
+	$opt{io} = 0;
+}
 
 while ($ARGV[0] =~ /^--([\w-]+)=([\w=]+)/) {
 	# allow arbitrary job options, that jan later be referred to in match expressions
@@ -254,10 +273,14 @@ if ($opt{file}) {
 			@cmd = ('bash', '-c', $opt{cmd});
 		} else {
 			# simple: split, pass as is to exec
-			@cmd = split / /, $opt{cmd};
+			$opt{cmd} =~ s/^\s+//;
+			$opt{cmd} =~ s/\s+$//;
+			@cmd = split /\s+/, $opt{cmd};
 		}
 	}
 }
+
+#die Dumper \@cmd  if $opt{debug};
 
 if ($opt{memory}) {
 	$opt{memory} *= 1000;
@@ -349,6 +372,24 @@ if (!$info{jid}) {
 	exit -1;
 }
 
+if ($verbose) {
+	printf STDERR "Job_ID:	$info{jid}\n";
+	printf STDERR "Memory:	%d\n", $opt{memory} ? $opt{memory} : $DEFAULT_MEM/1000;
+	printf STDERR "CPU:	%d\n", $opt{cpu} ? $opt{cpu} : 1;
+}
+
+if ($opt{jobx}) {
+	# this is crappy... should be a totally separate set of id's... and should be on the central server
+	# but too much code and not worth it for me right now
+	# with sqlite would be easier
+	if ($opt{jobx} =~ /^\d/) {
+		die "External job id's should start with a non-numeric\n";
+	}
+	mkdir("$ENV{HOME}/.grun") if ! -d "$ENV{HOME}/.grun";
+	mkdir("$ENV{HOME}/.grun/jobx") if ! -d "$ENV{HOME}/.grun/jobx";
+	burp("$ENV{HOME}/.grun/jobx/$opt{jobx}", $info{jid});
+}
+
 if ($opt{wait}) {
 	# wait for a job id
 	while (!defined($info{ip})) {
@@ -361,19 +402,24 @@ if ($opt{wait}) {
 			sleep(5);
 		}
 	}
+
+	if ($verbose) {
+		printf STDERR "Host:	%s\n", $info{ip};
+	}
+
 	# look at all the work you can avoid if you don't wait
 	my ($stat, $err);
 	# connect to executing node directly and ask for stderr, stdout, and status based on job id
 	while (!defined $stat && !defined $err) {
 		# shadow watcher....
 		if ($info{ip}) {
-			if ($opt{io}) {
+			if ($opt{io} && !($opt{err} && $opt{out}) ) {
 				($stat, $err) = waitio($info{ip}, $info{port}, 'xio', $info{jid});
 			} else {
 				($stat, $err) = waitmsg($info{ip}, $info{port}, 'xstat', $info{jid});
 			}
 			if ($stat == 65280 && !$err) {
-				print STDERR "$cmd[0]: No such file or directory.\n";
+				print STDERR "Error: Command returned -1\n";
 			} 
 		}
 		sleep 5 if (!defined $stat && !defined $err);
@@ -390,6 +436,7 @@ if ($opt{wait}) {
 	if ($err) {
 		print STDERR $err, "\n";
 	}
+	unlink("$ENV{HOME}/.grun/jobx/$opt{jobx}") if $opt{jobx};
 	exit $stat>>8;
 } else {
 	# aah... nicer
@@ -640,11 +687,12 @@ sub process_message {
         } elsif ($cmd eq 'jkill') {
 		# this is the 'job kill command'
 		my ($jid, $force) = @args;
+
 		if (! -e "$conf{spool}/jobs/$jid") {
 			if (! -e "$conf{spool}/jobs/$jid.ip") {
 				xlog("error", "Job $jid not running, but kill requested");
 				unlink "$conf{spool}/jobs/$jid";
-				return "Job $jid not running.";
+				return "Job $jid not running";
 			} else {
 				# send xabort to correct node
                                 my $ip = slurp("$conf{spool}/jobs/$jid.ip");
@@ -675,14 +723,18 @@ sub process_message {
 		my %opts = @args;
 		if ($opts{id}) {
 			my $ip = $sock->peerhost();	# should match the ip from jmine (see above how dumb this is)
-			if (! -e "$conf{spool}/jobs/$opts{id}:$ip.run") {
-				if (-e "$conf{spool}/jhist/0/$opts{id}") {
-					burp("$conf{spool}/jobs/$opts{id}:$ip.run", slurp("$conf{spool}/jhist/0/$opts{id}"));
-				}
-                                if (! -e "$conf{spool}/jobs/$opts{id}.ip" ) {
-					burp("$conf{spool}/jobs/$opts{id}.ip",$ip);
-				}
-			}
+			# temporarily added to recover from errors, but maybe make this allowed for real?
+			# any harm in trying to recover from false orphans?
+			#
+			#if (! -e "$conf{spool}/jobs/$opts{id}:$ip.run") {
+			#	
+			#	if (-e "$conf{spool}/jhist/0/$opts{id}") {
+			#		burp("$conf{spool}/jobs/$opts{id}:$ip.run", slurp("$conf{spool}/jhist/0/$opts{id}"));
+			#	}
+                        #       if (! -e "$conf{spool}/jobs/$opts{id}.ip" ) {
+			#		burp("$conf{spool}/jobs/$opts{id}.ip",$ip);
+			#	}
+			#}
 			if (! -e "$conf{spool}/jobs/$opts{id}:$ip.run") {
                                 my $should = slurp("$conf{spool}/jobs/$opts{id}.ip");
 				
@@ -791,16 +843,39 @@ sub process_message {
 				# kill me with a negative number, all kids die too
 				# kill my parent.... i stay alive, and my IO is still ready to go
 				POSIX::setsid();
-	
+
+				my $ok=1;	
+				if ($opts->{err}) {
+					$ok&&=open(STDERR, ">", $opts->{err});
+				}
+				if ($opts->{out}) {
+					if ($opts->{out} eq $opts->{err}) {
+						$ok&&=open(STDOUT, ">>", $opts->{out});
+					} else {
+						$ok&&=open(STDOUT, ">", $opts->{out});
+					}
+				}
 				if ($opts->{io}) {
-					open STDERR, ">$conf{spool}/stdio/$$.err";
-					open STDOUT, ">$conf{spool}/stdio/$$.out";
+					if (!$opts->{err}) {
+						$ok&&=open(STDERR, ">$conf{spool}/stdio/$$.err");
+					}
+					if (!$opts->{out}) {
+						$ok&&=open(STDOUT, ">$conf{spool}/stdio/$$.out");
+					}
 				} else {
 					# save disk and time, i never want i/o
-					open STDERR, ">/dev/null";
-					open STDOUT, ">/dev/null";
+					if (!$opts->{err}) {
+						$ok&&=open(STDERR, ">/dev/null");
+					}
+					if (!$opts->{out}) {
+						$ok&&=open(STDOUT, ">/dev/null");
+					}
 				}
-				
+			
+				if (!$ok) {
+					xlog("error", "Error opening i/o files : $!\n");
+				}	
+
 				# copy in the umask & the environment
 				umask $opts->{umask};
 				for (keys(%{$opts->{env}})) {
@@ -911,6 +986,8 @@ sub process_message {
 	} elsif ($cmd eq 'xio') {
 		my ($jid) = @args;
                 my $pid = slurp("$conf{spool}/jpids/$jid");
+		# someone has showed recent interest in this one
+		touch("$conf{spool}/jpids/$jid");
 		$io_wait{$jid}->{type} = 'io';
 		$io_wait{$jid}->{sock} = $sock;
 		$io_wait{$jid}->{time} = time();		# toss this entry if it gets old
@@ -1018,7 +1095,7 @@ sub schedule {
 
 	# no attempt here to prioritize jobs, just match and go
 	my %alloc;
-	my $cnt;
+	my $cnt=0;
 	while(my $jid=readdir(D)) {
 		my $jfil = "$conf{spool}/jobs/$jid";
 		# probably should have a folder per job to avoid this
@@ -1035,7 +1112,7 @@ sub schedule {
 
 		# this should be config, min requirements
 		$job->{cpus} = 1 if $job->{cpus} == 0;
-		$job->{memory} = 10000 if $job->{memory} == 0;
+		$job->{memory} = $DEFAULT_MEM if $job->{memory} == 0;
 
 		if ($jfil =~ /\.run$/) {
 			# job is running, make sure it's resources are somewhat locked
@@ -1292,11 +1369,6 @@ sub srvexec {
 					unlink "$conf{spool}/jpids/$jid";
 				}
 				delete $io_wait{$jid};
-			} elsif (time() > ($io_wait{$jid}->{time}+$conf{io_keep})) {
-				xlog("error", "Orphaned I/O getting deleted for job $jid after $conf{io_keep} secs\n");
-				unlink "$conf{spool}/pids/$pid", "$conf{spool}/jpids/$jid", 
-					"$conf{spool}/pids/$pid.stat", "$conf{spool}/pids/$pid.out", "$conf{spool}/pids/$pid.err";
-				delete $io_wait{$jid};
 			}
 		}
 	}
@@ -1306,6 +1378,8 @@ sub srvexec {
 	if (time() > ($conf{lastpidtime}+$conf{ping_secs})) {
 		opendir(D,"$conf{spool}/pids");
 		while(my $kid = readdir(D)) {
+			next unless /^\d/;
+
 			# finished, notify submitter
 
 			if ($kid =~ /\.stat$/) {
@@ -1329,11 +1403,32 @@ sub srvexec {
 		}
 		closedir D;
 
-		# remove associated
+                opendir(D,"$conf{spool}/jpids");
+                while(my $jid = readdir(D)) {
+			next unless /^\d/;
+
+			# no xio requests, and no stats in a long time...
+			if ($conf{expire_secs} && ($conf{loop_num} > 2) && (stat("$conf{spool}/jpids/$jid"))[9] < time()-$conf{expire_secs}) {
+				# and not running
+				my $pid = slurp("$conf{spool}/jpids/$jid");
+				if (! -e "$conf{spool}/pids/$pid") {
+					xlog("error", "Expiring i/o for $jid ($pid)");
+					unlink "$conf{spool}/jpids/$jid";
+					unlink "$conf{spool}/stdio/$pid.err";
+					unlink "$conf{spool}/stdio/$pid.out";
+				}
+			}
+		}
+
+		# cleanup any leftovers
 		opendir(D,"$conf{spool}/stdio");
 		while(my $kid = readdir(D)) {
+			next unless /^(\d+)/;
+			$kid = $1;
 			if (! -e "$conf{spool}/pids/$kid.stat") {
-				unlink "$conf{spool}/stdio/$kid";
+				xlog("error", "Cleanup leftover err/out for $kid");
+				unlink "$conf{spool}/stdio/$kid.err";
+				unlink "$conf{spool}/stdio/$kid.out";
 			}
 		}
 		closedir(D);
@@ -1717,6 +1812,8 @@ Execution Options:
     -m|em INT       memory minimum in MB
     -c|pu CPUS	    minimum number of cpus 
     -host N1,N2     specify certain hosts
+    -j|obid TEXT    secondary job ID
+    -v|erbose       send job id, execution node and stats to STDERR
 
     -noio           disable io-processing, but wait for completion
     -nowait         no io and don't wait, just start the command
@@ -1805,13 +1902,13 @@ EOF
 }
 
 sub showconf {
-	return Data::Dumper->new([\%conf])->Indent(1)->Terse(1)->Dump().$EOT;
+	return Data::Dumper->new([\%conf])->Sortkeys(1)->Indent(1)->Terse(1)->Dump().$EOT;
 }
 
 sub showhist {
 	my %opt;
 
-	$opt{fmt} = '%jid\t%user\t%stat\t%cwd\t%cmd\t%mtime\n';
+	$opt{fmt} = '%jid\t%user\t%stat\t%cwd\t%cmd\t%host\t%mtime\n';
 
         {
                 local @ARGV = @_;
@@ -1856,9 +1953,11 @@ sub showhist {
 			--$count;
                         my %job=%{$job};
 
-			$job{status} = 'OK' 	if $job{status} eq '0';
-			$job{status} = 'INT' 	if $job{status} eq '2';
-			$job{status} = 'ORPHAN' if $job{status} eq '-8';
+			$job{status} = 'OK' 		if $job{status} eq 0;
+			$job{status} = 'INT' 		if $job{status} eq 2;
+			$job{status} = 'ORPHAN' 	if $job{status} eq -8;
+			$job{status} = 'NOTFOUND' 	if $job{status} eq 32512;
+			$job{status} = 'TERM' 		if $job{status} eq 15;
 			$job{stat} = $job{status};
 
 			my $cmd = join(' ', @cmd);
@@ -2051,9 +2150,9 @@ sub evalctx {
 		}
 	}
 	$msafe->share(qw(%conf %ENV));
-	if ($conf{trace}) {
+#	if ($conf{trace}) {
 #		xlog("debug", "Evaluating {$expr}\n");
-	}
+#	}
 	my ($res, @res);
 	if (wantarray) {
 		@res = $msafe->reval($expr);
@@ -2244,7 +2343,7 @@ sub host2ip {
 }
 
 sub packdump {
-	Data::Dumper->new(\@_)->Indent(0)->Terse(1)->Dump();
+	Data::Dumper->new(\@_)->Indent(0)->Sortkeys(1)->Terse(1)->Dump();
 }
 
 sub kill_job {
@@ -2256,7 +2355,7 @@ sub kill_job {
                 # this is WRONG ... messages should all have trace bits... that would be nice
                 sendcmd($ip, $port, 'trace', 1) if ($conf{trace});
                 ($err) = waitmsg($ip, $port, 'xabort', $killjob, $sig);
-		if ($err =~ /Not Found/i) {
+		if ($err =~ /(Not Found)|(Inappropriate ioctl for device)/i) {
         		waitmsg($conf{master}, $conf{master_port}, 'jkill', $killjob, $ip);
 		}
                 sendcmd($ip, $port, 'trace', 0) if ($conf{trace});
