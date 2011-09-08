@@ -201,13 +201,9 @@ int main (int argc, char **argv) {
 	FILE *fout[MAX_FILES]; meminit(fout);
 
 	for (i=0;i<i_n;++i) {
-		if (!strcmp(ifil[i],"-")) {
-			fin[i]=stdin;
-		} else {
-			if (!(fin[i]=fopen(ifil[i], "r"))) {
-				fprintf(stderr, "Error opening file '%s': %s\n",ifil[i], strerror(errno));
-				return 1;
-			}
+		if (!(fin[i]=fopen(ifil[i], "r"))) {
+			fprintf(stderr, "Error opening file '%s': %s\n",ifil[i], strerror(errno));
+			return 1;
 		}
 	}
 
