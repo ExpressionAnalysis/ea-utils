@@ -85,7 +85,7 @@ if ($help) {
 
 if (!$daemon) {
 	# -k <id> works as long as -d wasn't specified
-	GetOptions("kill"=>\$killjob, "trace"=>\$def{trace}, "edit"=>\$editjob) ||
+	GetOptions("kill"=>\$killjob, "trace"=>\$def{trace}, "edit|e"=>\$editjob) ||
 		die usage();
 }
 
@@ -239,9 +239,11 @@ $opt{wait} = 1;				# keep socket open until job is finished
 $opt{io} = 1;				# copy io back on the socket, implies wait
 
 Getopt::Long::Configure qw(require_order no_ignore_case passthrough);
-GetOptions(\%opt, "file=s", "memory|m=i", "hosts|h=s", "cpus|c=i", "io!", "wait!", "err=s", "out=s", "jobx|jobid|j=s", "verbose", "debug|D");
+GetOptions(\%opt, "file=s", "memory|m=i", "hosts|h=s", "cpus|c=i", "io!", "wait!", "err=s", "out=s", "jobx|jobid|j=s", "verbose", "make|M", "debug|D", "env|E=s");
 
 my $verbose = $opt{verbose}; delete $opt{verbose};
+my $make = $opt{make}; delete $opt{make};
+my $env = $opt{env}; delete $opt{env};
 
 if ($opt{err} && $opt{out}) {
 	$opt{wait} = $opt{wait} || $opt{io};
@@ -277,6 +279,41 @@ if ($opt{file}) {
 			$opt{cmd} =~ s/\s+$//;
 			@cmd = split /\s+/, $opt{cmd};
 		}
+	}
+}
+if ($make) {
+	my (@i, @o);
+	for (@cmd) {
+		my @t = m/[#%]([io]):(\S+)/g;
+		if (@t) {
+			for (my $i=0;$i<@t;++$i) {
+				push @o, $t[$i+1] if $t[$i] eq 'o';
+				push @i, $t[$i+1] if $t[$i] eq 'i';
+			}
+			s/%[io]:(\S+)/$1/g;
+			s/#[io]:\S+//g;
+		}
+		my @t = m/([<>])>\s*(\S+)/g;
+		if (@t) {
+                        for (my $i=0;$i<@t;++$i) {
+                                push @o, $t[$i+1] if $t[$i] eq '<';
+                                push @i, $t[$i+1] if $t[$i] eq '>';
+                        }
+		}
+	}
+	die "Unable to determine i/o for -M (make) semantics\n"
+		if !@i || !@o;
+
+	my $need=0;
+	for my $i (@i) {
+		for my $o (@o) {
+			if (! (-s $o) || (fmodtime($i) > fmodtime($o))) {
+				$need=1;
+			}
+		}
+	}
+	if (!$need) {
+		exit 0;
 	}
 }
 
@@ -315,11 +352,22 @@ if (!$opt{wait}) {
 $opt{cwd} = cwd;
 
 # copy env
-for (@{$conf{env}}) {
-	$opt{env}->{$_} = $ENV{$_} if defined $ENV{$_};
-}
-for (qw(USER)) {
-	$opt{env}->{$_} = $ENV{$_};
+if ($env eq '*' || ($conf{env} && ($conf{env}->[0] eq '*')) ) {
+	for (keys %ENV) {
+		if (! /^_/) {
+			$opt{env}->{$_} = $ENV{$_};
+		}
+	}
+} else {
+	for (@{$conf{env}}) {
+		$opt{env}->{$_} = $ENV{$_} if defined $ENV{$_};
+	}
+	for (split /\s+/, $env) {
+		$opt{env}->{$_} = $ENV{$_} if defined $ENV{$_};
+	}
+	for (qw(USER)) {
+		$opt{env}->{$_} = $ENV{$_};
+	}
 }
 
 $opt{user} = getpwuid($>);
