@@ -78,6 +78,7 @@ int read_fq(FILE *in, int rno, struct fq *fq);		// 0=done, 1=ok, -1=err+continue
 
 int char2bp(char c);
 char bp2char(int b);
+void saveskip(FILE **fout, int fo_n, struct fq *fq);
 
 void usage(FILE *f, const char *msg=NULL);
 int hd(char *a, char *b, int n);
@@ -110,8 +111,9 @@ int main (int argc, char **argv) {
 	int i_n = 0;
 	int o_n = 0;
 	int e_n = 0;
-
-	while (	(c = getopt (argc, argv, "-nf0uUVRdbehp:o:l:s:m:t:k:x:P:q:L:C:")) != -1) {
+	bool skipb = 0;
+	
+	while (	(c = getopt (argc, argv, "-nf0uUVSRdbehp:o:l:s:m:t:k:x:P:q:L:C:")) != -1) {
 		switch (c) {
 		case '\1': 
 			if (!afil) 
@@ -143,6 +145,7 @@ int main (int argc, char **argv) {
 				ofil[o_n++] = optarg;
 			  break;
 		case 's': scale = atof(optarg); break;
+		case 'S': skipb = 1; break;
 		case 'i': if (i_n<MAX_FILES)
 				ifil[i_n++] = optarg; 
 			  else
@@ -238,30 +241,35 @@ int main (int argc, char **argv) {
         for (i=0;i<i_n;++i) {
             struct stat st;
             stat(ifil[i], &st);
-            fseek(fin[i], st.st_size > sampcnt ? (st.st_size-sampcnt)/3 : 0, 0);
 
             char *s = NULL; size_t na = 0; int nr = 0, ns = 0, totn[MAX_FILES]; meminit(totn);
 	    char *q = NULL; size_t naq = 0; int nq =0;
 	    int j;
 	    int ilv3det=2;
 
-            while (getline(&s, &na, fin[i]) > 0) {
-                if (*s == '@')  {
-			j=getline(&s, &na, fin[i]);
-                	if (j && (*s == '@'))  {
+	    if (st.st_size > (sampcnt*100)) {
+		    // jump a third of the way in
+	            fseek(fin[i], (st.st_size-(sampcnt*100))/3, 0);
+		    while (getline(&s, &na, fin[i]) > 0) {
+			if (*s == '@')  {
 				j=getline(&s, &na, fin[i]);
-				j=getline(&s, &na, fin[i]);
-				j=getline(&s, &na, fin[i]);
-			} else {
-				j=getline(&s, &na, fin[i]);
-				j=getline(&s, &na, fin[i]);
+				if (j && (*s == '@'))  {
+					j=getline(&s, &na, fin[i]);
+					j=getline(&s, &na, fin[i]);
+					j=getline(&s, &na, fin[i]);
+				} else {
+					j=getline(&s, &na, fin[i]);
+					j=getline(&s, &na, fin[i]);
+				}
+				break;
 			}
-			break;
-		}
+		    }
 	    }
 
             while (getline(&s, &na, fin[i]) > 0) {
                 if (*s == '@')  {
+
+			// look for illumina purity filtering flags
 			if (ilv3det==2) {
 				ilv3det=0;
 				const char *p=strchr(s, ':');
@@ -276,8 +284,10 @@ int main (int argc, char **argv) {
 								if (*p ==':') {
 									++p;
 									if (*p =='Y') {
+										// filtering found
 										ilv3det=1;
 									} else if (*p =='N') {
+										// still illumina
 										ilv3det=2;
 									}
 								}
@@ -288,9 +298,11 @@ int main (int argc, char **argv) {
 			}
 
                         if ((ns=getline(&s, &na, fin[i])) <=0) {
+				// reached EOF
 				if (debug) fprintf(stderr, "Dropping out of sampling loop\n");
                                 break;
 			}
+
 			nq=getline(&q, &naq, fin[i]);
 			nq=getline(&q, &naq, fin[i]);		// qual is 2 lines down
 			if (phred == 0) {
@@ -597,6 +609,23 @@ int main (int argc, char **argv) {
                 }
 	}
 
+	FILE *fskip[MAX_FILES]; memset(&fskip, 0, sizeof(FILE*));
+	if (skipb) {
+		for (i=0;i<o_n;++i) {
+			if (!strcmp(ofil[i],"-")) {
+				fskip[i]=stderr;
+			} else {
+				char *skipfil = (char *) malloc(strlen(ofil[i])+10);
+				sprintf(skipfil, "%s.skip", ofil[i]);
+				if (!(fskip[i]=fopen(skipfil, "w"))) {
+					fprintf(stderr, "Error opening skip file '%s': %s\n",skipfil, strerror(errno));
+					return 1;
+				}
+				free(skipfil);
+			}
+		}
+	}
+
 	struct fq fq[MAX_FILES];	
         memset(&fq, 0, sizeof(fq));
 
@@ -644,6 +673,7 @@ int main (int argc, char **argv) {
 					++p;
 					if (*p == 'Y') {
 						++nilv3pf;
+						if (skipb) saveskip(fskip, i_n, fq);
 						continue;
 					}
 				}
@@ -838,8 +868,10 @@ int main (int argc, char **argv) {
 				fputs(fq[f].qual,fout[f]);
 				fputc('\n',fout[f]);
 			}
-		} else 
+		} else {
+			if (skipb) saveskip(fskip, i_n, fq);
 			++ntooshort;
+		}
 	}
 	fprintf(fstat, "Total reads: %d\n", nrec);
 	fprintf(fstat, "Too short after clip: %d\n", ntooshort);
@@ -996,5 +1028,17 @@ inline char bp2char(int b) {
         if (b == B_G) return 'G';
         if (b == B_T) return 'T';
         return 'N';
+}
+
+void saveskip(FILE **fout, int fo_n, struct fq *fq)  {
+	int f;
+	for (f=0;f<fo_n;++f) {
+		fputs(fq[f].id,fout[f]);
+		fputs(fq[f].seq,fout[f]);
+		fputc('\n',fout[f]);
+		fputs(fq[f].com,fout[f]);
+		fputs(fq[f].qual,fout[f]);
+		fputc('\n',fout[f]);
+	}
 }
 
