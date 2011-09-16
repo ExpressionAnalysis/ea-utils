@@ -32,7 +32,7 @@ getrel:
 $(PKG).spec: $(PKG).spex
 	perl -pe 's/%RELEASE%/${REL}/' $(PKG).spex > $(PKG).spec
 
-$(PKG).tar.gz: Makefile $(SRC) $(PKG).spec README CHANGES
+$(PKG).tar.gz: Makefile $(SRC) $(PKG).spec sam-stats fastq-stats README CHANGES
 	tar -cvzf $(PKG).tar.gz $^
 
 $(PKG).${VER}-${REL}.tar.gz: $(PKG).tar.gz
