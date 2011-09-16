@@ -213,7 +213,12 @@ if ($killjob) {
 }
 
 if ($editjob) {
-        my ($err) = waitmsg($conf{master}, $conf{master_port}, 'jedit', @ARGV);
+	my ($jid, $key, $val) = @ARGV;
+	if ($key eq 'status') {
+		$val = substr bestunique($val, qw(hold status)), 0, 2;
+		die "Status must be one of: h(old) r(esume)\n" unless $val;
+	}
+        my ($err) = waitmsg($conf{master}, $conf{master_port}, 'jedit', $jid, $key, $val);
         my $ok = ($err =~ /^Job.*edited/);
         warn "$err\n" if $ok;
 	$err = 'No response to jedit' if !$ok && !$err;
@@ -239,7 +244,7 @@ $opt{wait} = 1;				# keep socket open until job is finished
 $opt{io} = 1;				# copy io back on the socket, implies wait
 
 Getopt::Long::Configure qw(require_order no_ignore_case passthrough);
-GetOptions(\%opt, "file=s", "memory|m=i", "hosts|h=s", "cpus|c=i", "io!", "wait!", "err=s", "out=s", "jobx|jobid|j=s", "verbose", "make|M", "debug|D", "env|E=s");
+GetOptions(\%opt, "file=s", "memory|m=i", "hosts|h=s", "cpus|c=i", "io!", "wait!", "err|e=s", "out|o=s", "jobx|jobid|j=s", "verbose", "make|M", "debug|D", "env|E=s", "noexec|N");
 
 my $verbose = $opt{verbose}; delete $opt{verbose};
 my $make = $opt{make}; delete $opt{make};
@@ -282,6 +287,7 @@ if ($opt{file}) {
 	}
 }
 if ($make) {
+	GetOptions(\%opt, "noexec");
 	my (@i, @o);
 	for (@cmd) {
 		my @t = m/[#%]([io]):(\S+)/g;
@@ -293,11 +299,11 @@ if ($make) {
 			s/%[io]:(\S+)/$1/g;
 			s/#[io]:\S+//g;
 		}
-		my @t = m/([<>])>\s*(\S+)/g;
+		my @t = m/([<>])\s*(\S+)/g;
 		if (@t) {
                         for (my $i=0;$i<@t;++$i) {
-                                push @o, $t[$i+1] if $t[$i] eq '<';
-                                push @i, $t[$i+1] if $t[$i] eq '>';
+                                push @i, $t[$i+1] if $t[$i] eq '<';
+                                push @o, $t[$i+1] if $t[$i] eq '>';
                         }
 		}
 	}
@@ -313,6 +319,13 @@ if ($make) {
 		}
 	}
 	if (!$need) {
+		warn "Skipping: @cmd\n";
+		exit 0;
+	}
+
+	warn "+@cmd\n" if $opt{noexec} || $verbose;
+
+	if ($opt{noexec}) {
 		exit 0;
 	}
 }
@@ -1141,13 +1154,45 @@ sub schedule {
 		}
 	}
 
-	# no attempt here to prioritize jobs, just match and go
+	# pass 1 : deduct resources for running jobs
 	my %alloc;
+        while(my $jid=readdir(D)) {
+                my $jfil = "$conf{spool}/jobs/$jid";
+                next unless ($jfil =~ /\.run$/);
+
+		next unless -f $jfil;
+		my $ref = $safe->reval(slurp($jfil));
+		if (!(ref($ref) eq 'ARRAY')) {
+			xlog("error", "Invalid job file format: $jfil\n");
+			unlink $jfil;
+		}
+		my $job = $ref->[0];
+
+		# this should be config, min requirements
+		$job->{cpus} = 1 if $job->{cpus} == 0;
+		$job->{memory} = $DEFAULT_MEM if $job->{memory} == 0;
+
+		# job is running, make sure it's resources are somewhat locked
+		($jid) = $jid =~ m/^(\d+)/;
+		# check to see whether job has expired
+		if (!$conf{loop_num}>2 && $conf{expire_secs} && (fmodtime($jfil) < (time()-$conf{expire_secs}))) {
+			selfcmd('jstat', pid=>-1, id=>$jid, status => -8, error=>"Orphaned job (" . (time()-fmodtime($jfil)) . "s)");
+		} else {
+			my $ip = slurp("$conf{spool}/jobs/$jid.ip");
+			if ($ip =~ /\d/ && $nodes{$ip} && $nodes{$ip}->{ip}) {
+				$nodes{$ip}->{a_cpus} += $job->{cpus};
+				$alloc{$ip}->{a_memory} += $job->{memory};
+			}
+		}
+	}
+
+	# no attempt here to prioritize jobs, just match and go
 	my $cnt=0;
 	while(my $jid=readdir(D)) {
 		my $jfil = "$conf{spool}/jobs/$jid";
 		# probably should have a folder per job to avoid this
 		next if ($jfil =~ /\.ip$/);
+                next if ($jfil =~ /\.run$/);
 
 		next unless -f $jfil;
 		my $ref = $safe->reval(slurp($jfil));
@@ -1161,23 +1206,6 @@ sub schedule {
 		# this should be config, min requirements
 		$job->{cpus} = 1 if $job->{cpus} == 0;
 		$job->{memory} = $DEFAULT_MEM if $job->{memory} == 0;
-
-		if ($jfil =~ /\.run$/) {
-			# job is running, make sure it's resources are somewhat locked
-			($jid) = $jid =~ m/^(\d+)/;
-			# check to see whether job has expired
-			if (!$conf{loop_num}>2 && $conf{expire_secs} && (fmodtime($jfil) < (time()-$conf{expire_secs}))) {
-#				xlog("error", "Not expiring job $jid, but I should");
-			        selfcmd('jstat', pid=>-1, id=>$jid, status => -8, error=>"Orphaned job (" . (time()-fmodtime($jfil)) . "s)");
-			} else {
-				my $ip = slurp("$conf{spool}/jobs/$jid.ip");
-				if ($ip =~ /\d/ && $nodes{$ip} && $nodes{$ip}->{ip}) {
-					$nodes{$ip}->{a_cpus} += $job->{cpus};
-					$alloc{$ip}->{a_memory} += $job->{memory};
-				}	
-			}
-			next;
-		}
 
 		my @dereg;
 		my @n;
@@ -1432,9 +1460,7 @@ sub srvexec {
 
 			if ($kid =~ /\.stat$/) {
 				if (fmodtime("$conf{spool}/pids/$kid") < (time()-$conf{ping_secs})) {
-					if (notifystat($kid)) {
-						touch("$conf{spool}/pids/$kid");
-					}
+					notifystat($kid);
 				}
 				next;
 			}
@@ -1503,7 +1529,7 @@ sub notifystat {
 		if (unlink("$conf{spool}/pids/$kid.stat")) {
 			xlog("error", "Orphaned job status file $kid");
 		}
-		return;
+		return 0;
 	}
 	
 	my $jid = $info->{id};
@@ -1530,6 +1556,9 @@ sub notifystat {
 			$io_wait{$jid}->{time} = time();		# how long you have to pickup i/o
 		}
 	}
+	# last ping time
+	touch("$conf{spool}/pids/$kid");
+	return 1;
 }
 
 sub writestat {
@@ -1854,14 +1883,12 @@ EOF
 	$u .= <<'EOF' unless $daemon || $qinfo;
 
 Execution Options:
-    -f|ile FILE     Read FILE for job options
-    -t|race         Trace mode (verbose logging)
-
+    -f|ile FILE     Read FILE for job options (mem, cpu, cmd, etc)
     -m|em INT       memory minimum in MB
     -c|pu CPUS	    minimum number of cpus 
     -host N1,N2     specify certain hosts
-    -j|obid TEXT    secondary job ID
-    -v|erbose       send job id, execution node and stats to STDERR
+    -j|obid TEXT    user-supplied job ID
+    -v|erbose       print job id, execution node and stats to STDERR
 
     -noio           disable io-processing, but wait for completion
     -nowait         no io and don't wait, just start the command
@@ -2117,6 +2144,7 @@ sub showjobs {
 				my @node = unpackcmd(slurp("$conf{spool}/nodes/$ip.reg"));
 				if (ref($node[1])) {
 					$stat = $node[1]->{hostname}; chomp $stat;
+                        		$job->{host} = $stat;
 				}
 			}
 			# trim for display
