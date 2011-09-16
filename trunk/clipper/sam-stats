@@ -1,0 +1,231 @@
+#!/usr/bin/perl
+
+# Copyright (c) 2011 Expression Analysis / Erik Aronesty
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+use strict;
+use Getopt::Long;
+use Data::Dumper;
+
+my (%mapb, $mapb);	# already, dups
+
+my $n = 0;	# numreads
+my $d = 0;	# numdups
+my ($cq);
+my ($lenmin, $lenmax, $lensum, $lenssq, $mapsum, $mapssq);
+my ($nbase, $qualmax, $qualmin, $qualsum, $qualssq, @basecnt);
+my ($rev, $for);
+
+my %opt;
+GetOptions(\%opt, "help", "samp") || die usage();
+if ($opt{help}) { print usage(); exit 1;}
+
+die "For now, please, only one file at a time\n" if $ARGV[1];
+
+$qualmin = 100000;
+$lenmin = 100000;
+my $cycmax = 35;
+my $SHOW_MAX=10;
+my $errs = 0;
+my $in = shift @ARGV;
+if ($in && !($in eq '-')) {
+	open(IN, ($in =~ /\.gz$/ ? "/bin/gunzip -c $in|" : $in)) || die "Can't open $in: $!\n";
+} else {
+	*IN=*STDIN;
+}
+
+my $SAMPSIZE=$opt{samp} ? $opt{samp} : 5000;	# number of reads to track per-base quality stats (all other stats are for all reads)
+
+my ($mapc, @mapq);
+my ($id, $bits, $nmo, $mapq, $cig, $l, $q, $r, @fdx);
+if ($in =~ /\.bam$/) {
+	close IN;
+	require Bio::DB::Sam;
+	my $bam = Bio::DB::Bam->open($in);
+	my $header = $bam->header;
+	++$n;
+	while (my $a = $bam->read1()) {
+		++$n;
+		$nmo=$a->tid;
+		next if ($nmo eq '*');
+		$mapq = $a->qual;
+		$bits = $a->flag;
+		$l = $a->query->length;
+		if ($mapc < $SAMPSIZE) {
+			$r = $a->query->dna;
+			$q = join '', map {chr($_+33)} unpack('C*',$a->_qscore);
+		}
+		stats();
+	}
+} else {
+	while (my $i = <IN>) {
+		++$n;
+		next if /^\@/;
+		($id, $bits, $nmo, undef, $mapq, $cig, undef, undef, undef, $r, $q, undef) = split /\t/, $i;
+		$l = length($r);
+		next if ($nmo eq '*');
+		stats();
+	}
+}
+
+$SAMPSIZE=$mapc if $mapc < $SAMPSIZE;
+
+@mapq = sort {$a <=> $b} @mapq;
+
+# autodetect phred
+my $phred = 64;
+$phred = 33 if ($qualmin < 64);
+
+printf "reads\t%d\n", $n;
+printf "phred\t%d\n", $phred if $nbase > 0;
+printf "mapped reads\t%d\n", $mapc;
+printf "mapped bases\t%d\n", $mapb;
+
+if ($mapc > 0) {
+	printf "foward\t%d\n", $for;
+	printf "reverse\t%d\n", $rev;
+
+	if ($lenmax != $lenmin) {
+		printf "len max\t%.4f\n", $lenmax;
+		if ($n > 0 ) {
+			printf "len mean\t%.4f\n", $lensum/$mapc;
+			if ($n > 1 ) {
+				printf "len stdev\t%.4f\n", stdev($mapc, $lensum, $lenssq);
+			}
+		}
+	} else {
+		printf "len max\t%d\n", $lenmax;
+	} 
+
+	printf "mapq mean\t%.4f\n", ($mapsum/$mapc);
+	printf "mapq stdev\t%.4f\n", stdev($mapc, $mapsum, $mapssq);
+	printf "mapq Q1\t%.4f\n", quantile(\@mapq, .25);
+	printf "mapq median\t%.4f\n", quantile(\@mapq, .50);
+	printf "mapq Q3\t%.4f\n", quantile(\@mapq, .75);
+	printf "base qual mean\t%.4f\n", ($qualsum/$nbase)-$phred;
+	printf "base qual stdev\t%.4f\n", stdev($nbase, $qualsum, $qualssq);
+
+	if (%mapb > 1) {
+		for my $k (keys(%mapb)) {
+			my $v = $mapb{$k};
+			my ($n) = $k =~ m/([\w.]+)/;
+			printf "%%$n\t%.2f\n", 100*$v/$mapb;
+		}
+	}
+}
+
+if ($nbase) {
+	printf "%%A\t%.4f\n", 100*$basecnt[0]/$nbase;
+	printf "%%C\t%.4f\n", 100*$basecnt[1]/$nbase;
+	printf "%%G\t%.4f\n", 100*$basecnt[2]/$nbase;
+	printf "%%T\t%.4f\n", 100*$basecnt[3]/$nbase;
+	printf "%%N\t%.4f\n", 100*$basecnt[4]/$nbase if $basecnt[4] > 0;
+}
+
+sub stats
+{
+	my $strand = 1 - 2 * ($bits & 16);
+
+	++$mapc;
+
+	$lenmax = $l if $l > $lenmax;
+	$lenmin = $l if $l < $lenmax;
+
+	$lensum += $l;
+	$lenssq += $l*$l;
+
+	if ($bits & 16) {
+		$rev += 1;
+	} else {
+		$for += 1;
+	}
+
+	$mapsum += $mapq;
+	$mapssq += $mapq*$mapq;
+
+	push @mapq, $mapq;
+
+	$mapb{$nmo}+=$l;
+	$mapb+=$l;
+
+	if ($mapc < $SAMPSIZE) {
+		# shorter length
+		for (my $i = 0; $i < $l; ++$i) {
+			$cq = ord(substr($q, $i, 1));
+			++$nbase;
+			$qualmax=$cq if $cq > $qualmax;
+			$qualmin=$cq if $cq < $qualmin;
+			$qualsum+=$cq;
+			$qualssq+=$cq*$cq;
+			my $cb = substr($r, $i, 1);
+			$cb =~ tr/ACGTN/01234/;
+			++$basecnt[$cb];
+		}
+	}
+}
+
+# copied from EA.pm
+
+sub stdev($ $ $) {
+        my ($cnt, $sum, $ssq) = @_;
+        sqrt(($cnt*$ssq-($sum*$sum)) / ($cnt*($cnt-1)));
+}
+
+sub quantile {
+        my ($a,$p) = @_;
+        my $l = scalar(@{$a});
+        my $t = ($l-1)*$p;
+        my $v=$a->[int($t)];
+        if ($t > int($t)) {
+                return $v + $p * ($a->[int($t)+1] - $v);
+        } else {
+                return $v;
+        }
+}
+
+sub usage {
+return <<EOF
+sam-stats [options] <sam or bam file>
+
+Options: 
+  -h                : this help
+  -s                : sample size (5000)
+
+OUTPUT:
+
+Complete Stats:
+
+  <STATS>           : mean, max, stdev, median, Q1 (25 percentile), Q3
+  reads             : # of entries in the file
+  phred             : phred scale used
+  mapped reads      : number of aligned reads
+  mapped bases      : total of the lengths of the aligned reads
+  forward           : number of forward-aligned reads
+  reverse           : number of reverse-aligned reads
+  len <STATS>       : read length stats, ignored if fixed-length
+  mapq <STATS>      : stats for mapping qualities
+  chr%              : percentage of mapped bases per chromosome (use to compute coverage) 
+
+Subsampled stats:
+  base qual <STATS> : stats for base qualities
+  %A,%T,%C,%G	    : aa percentages
+EOF
+}
+
