@@ -1,0 +1,181 @@
+#!/usr/bin/perl
+
+use strict;
+use Getopt::Long;
+
+# Copyright (c) 2011 Expression Analysis / Erik Aronesty
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+my (%a, @d, @l);	# already, dups
+
+my $n = 0;	# numreads
+my $fl = 0;	# fixed-length?
+my $d = 0;	# numdups
+my ($cq, @qc, @qs, @qsq);
+my ($lenmax, $lenmin, $lensum, $lenssq);
+my ($nbase, $qualmax, $qualmin, $qualsum, $qualssq, @basecnt);
+
+die "One at a time\n" if $ARGV[1];
+my $win = 2000000;
+$qualmin = 100000;
+$lenmin = 100000;
+my $cycmax = 35;
+my $SHOW_MAX=10;
+my $errs = 0;
+my $in = shift @ARGV;
+if ($in && !($in eq '-')) {
+	open(IN, ($in =~ /\.gz$/ ? "/bin/gunzip -c $in|" : $in)) || die "Can't open $in: $!\n";
+} else {
+	*IN=*STDIN;
+}
+
+while (my $i = <IN>) {
+	++$n;
+
+	my $r = <IN>; chomp $r;
+	my $c = <IN>;
+	my $q = <IN>; chomp $q;
+
+	my $l = length($r);
+
+	if ($l != length($q)) {
+		++$errs;
+		next;
+	}
+	
+	if (!$fl) {
+		$lenmax = $l if $l > $lenmax;
+		$lenmin = $l if $l < $lenmin;
+		$lensum += $l;
+		$lenssq += $l*$l;
+	}
+
+	if ($n == 5000) {
+		if (!stdev($n, $lensum, $lenssq)) {
+			$fl = 1;
+		}
+	}
+
+	# truncate to cycmax
+	$r = substr($r, 0, $cycmax);
+	if ($a{$r}) {
+		# this is a dup
+		++$d;
+		# this is a new dup
+		push @d, $r if $a{$r} == 1;
+	}
+
+	# shorter length
+	$l = length($r);
+	for ($i = 0; $i < $l; ++$i) {
+		$cq = ord(substr($q, $i, 1));
+		$qc[$i]+=1;
+		$qs[$i]+=$cq;
+		$qsq[$i]+=$cq*$cq;
+		++$nbase;
+		$qualmax=$cq if $cq > $qualmax;
+		$qualmin=$cq if $cq < $qualmin;
+		$qualsum+=$cq;
+		$qualssq+=$cq*$cq;
+		my $cb = substr($r, $i, 1);
+		$cb =~ tr/ACGTN/01234/;
+		++$basecnt[$cb];
+		#++$cycbasecnt[$i][$cb];
+	}
+
+	if ($n < $win) {
+		++$a{$r};
+	} else {
+		# prevent additional duplication discovery after initial window, so all sample-sizes operate the same
+		if ($n == $win) {
+			for (keys(%a)) {
+				delete $a{$_} if $a{$_} == 1;
+			}
+		}
+		# but continue compiling distribution info for existing duplicates
+		++$a{$r} if $a{$r};
+	}
+}
+
+# autodetect phred
+my $phred = 64;
+$phred = 33 if ($qualmin < 64);
+
+if (!$fl) {
+	printf "len\t%.4f\n", $lenmax;
+	if ($n > 0 ) {
+		printf "len mean\t%.4f\n", $lensum/$n;
+		if ($n > 1 ) {
+			printf "len stdev\t%.4f\n", stdev($n, $lensum, $lenssq);
+		}
+	}
+} else {
+	printf "len\t%d\n", $lenmax;
+} 
+
+printf "reads\t%d\n", $n;
+
+my ($dsum, $dssq);
+my $dnum = scalar @d;
+@d = sort {$a{$b} - $a{$a}} (@d);
+for (@d) {
+	my $dc = $a{$_};
+	$dsum += $dc;
+	$dssq += $dc*$dc;
+}
+$win = $n if $n < $win;
+
+if ($n > 0) {
+	printf "phred\t%d\n", $phred;
+	printf "errors\t%d\n", $errs if $errs > 0;
+	printf "window-size\t%d\n", $win;
+	printf "cycle-max\t%d\n", $cycmax;
+	printf "dups\t%d\n", $d;
+	printf "%%dup\t%.4f\n", 100*$d/$n;
+	printf "unique-dups\t%d\n", $dnum;
+	printf "dup min\t%d\n", $a{$d[$#d]};
+	for (my $i = 0; $i < $SHOW_MAX; ++ $i) {
+		printf("dup seq %d\t%d\t%s\n", $i+1, $a{$d[$i]}, $d[$i])
+	}
+	if ($dnum > 0) {
+		printf "dup mean\t%.4f\n", $dsum/$dnum;
+		if ($dnum > 1) {
+			printf "dup stdev\t%.4f\n", stdev($dnum, $dsum, $dssq);
+		}
+	}
+	printf "qual min\t%d\n", $qualmin-$phred;
+	printf "qual max\t%d\n", $qualmax-$phred;
+	printf "qual mean\t%.4f\n", ($qualsum/$nbase)-$phred;
+	printf "qual stdev\t%.4f\n", stdev($nbase, $qualsum, $qualssq);
+}
+
+if ($nbase) {
+	printf "%%A\t%.4f\n", 100*$basecnt[0]/$nbase;
+	printf "%%C\t%.4f\n", 100*$basecnt[1]/$nbase;
+	printf "%%G\t%.4f\n", 100*$basecnt[2]/$nbase;
+	printf "%%T\t%.4f\n", 100*$basecnt[3]/$nbase;
+	printf "%%N\t%.4f\n", 100*$basecnt[4]/$nbase;
+}
+
+sub stdev($ $ $) {
+        my ($cnt, $sum, $ssq) = @_;
+        sqrt(($cnt*$ssq-($sum*$sum)) / ($cnt*($cnt-1)));
+}
+
