@@ -1138,7 +1138,6 @@ sub jhistpath {
 }
 
 sub schedule {
-	opendir(D,"$conf{spool}/jobs");
 
 	return unless %nodes;
 
@@ -1156,6 +1155,7 @@ sub schedule {
 
 	# pass 1 : deduct resources for running jobs
 	my %alloc;
+	opendir(D,"$conf{spool}/jobs");
         while(my $jid=readdir(D)) {
                 my $jfil = "$conf{spool}/jobs/$jid";
                 next unless ($jfil =~ /\.run$/);
@@ -1188,6 +1188,7 @@ sub schedule {
 
 	# no attempt here to prioritize jobs, just match and go
 	my $cnt=0;
+	opendir(D,"$conf{spool}/jobs");
 	while(my $jid=readdir(D)) {
 		my $jfil = "$conf{spool}/jobs/$jid";
 		# probably should have a folder per job to avoid this
