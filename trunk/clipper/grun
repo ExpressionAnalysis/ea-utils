@@ -55,6 +55,7 @@ $def{expire_secs} = 14400;			# remove jobs whose execution nodes haven't reporte
 $def{io_keep} = 3600;				# keep io for this long after a job with i/o is finished in a detached session
 $def{sched_secs} = '1';				# how often to try scheduling
 $def{max_sched} = 50;				# how many different jobs to try and match before giving up on the rest (queue busy)
+$def{spread_pct} = .25;				# how often to "distribute jobs", versus "clump" them
 $def{master} = 'localhost:5184';		# central scheduler
 $def{services} = "queue exec";			# all can run
 $def{pid_file} = "/var/run/grun.pid";		# pid file
@@ -741,7 +742,7 @@ sub process_message {
                 } else {
 			my $ref = $safe->reval(slurp("$conf{spool}/jobs/$jid"));
 			$ref->[0]->{$key} = $val;
-			burp("$conf{spool}/jobs/$jid.jedit");
+			burp("$conf{spool}/jobs/$jid.jedit", packref($ref));
 			rename("$conf{spool}/jobs/$jid.jedit", "$conf{spool}/jobs/$jid");
                         return "Job $jid edited\n";
                 }
@@ -1155,8 +1156,11 @@ sub schedule {
 
 	# pass 1 : deduct resources for running jobs
 	my %alloc;
-	opendir(D,"$conf{spool}/jobs");
-        while(my $jid=readdir(D)) {
+        opendir(D,"$conf{spool}/jobs");
+        my @D = sort {(.5-rand()) cmp (.5-rand())} readdir(D);
+        closedir(D);
+
+        for my $jid (@D) {
                 my $jfil = "$conf{spool}/jobs/$jid";
                 next unless ($jfil =~ /\.run$/);
 
@@ -1164,7 +1168,7 @@ sub schedule {
 		my $ref = $safe->reval(slurp($jfil));
 		if (!(ref($ref) eq 'ARRAY')) {
 			xlog("error", "Invalid job file format: $jfil\n");
-			unlink $jfil;
+			rename($jfil, "$conf{spool}/trash/$jid");
 		}
 		my $job = $ref->[0];
 
@@ -1188,8 +1192,7 @@ sub schedule {
 
 	# no attempt here to prioritize jobs, just match and go
 	my $cnt=0;
-	opendir(D,"$conf{spool}/jobs");
-	while(my $jid=readdir(D)) {
+        for my $jid (@D) {
 		my $jfil = "$conf{spool}/jobs/$jid";
 		# probably should have a folder per job to avoid this
 		next if ($jfil =~ /\.ip$/);
@@ -1199,7 +1202,7 @@ sub schedule {
 		my $ref = $safe->reval(slurp($jfil));
 		if (!(ref($ref) eq 'ARRAY')) {
 			xlog("error", "Invalid job file format: $jfil\n");
-			unlink $jfil;
+			rename($jfil, "$conf{spool}/trash/$jid");
 		}
 
 		my $job = $ref->[0];
@@ -1216,6 +1219,7 @@ sub schedule {
 			last;
 		}
 		++$cnt;
+		my $spread = rand() > $conf{spread_pct};
 		for my $n (values %nodes) {
 			# jobs need enough memory, cpu availability and disk space... that's it
 			if (!$n->{ip}) {
@@ -1247,15 +1251,23 @@ sub schedule {
 					}
 					next unless $match;
 
-					if ($n->{load} < $conf{idle_load}) {
-						# don't bother checking further, this node is bored
-						$max_n = $n;
-						last;
-					} else {
-						if ($n->{avail} > $max_av) {
+					if ($spread) {
+						# use *least* busy node
+						if ($n->{load} < $conf{idle_load}) {
+							# don't bother checking further, this node is bored
 							$max_n = $n;
-							$max_av = $n->{avail};
+							last;
+						} else {
+							if ($n->{avail} > $max_av) {
+								$max_n = $n;
+								$max_av = $n->{avail};
+							}
 						}
+					} else {
+						# use *first* node
+						$max_n = $n;
+						$max_av = $n->{avail};
+						last;
 					}
 				}
 			} else {
@@ -1336,6 +1348,7 @@ sub init {
 		mkdir "$conf{spool}/nodes";
 		mkdir "$conf{spool}/pids";
 		mkdir "$conf{spool}/jpids";
+		mkdir "$conf{spool}/trash";
 		# reregister on reread
 		delete $conf{node};
 	}
