@@ -45,7 +45,7 @@ $def{config} = "/etc/grun.conf";		# config file
 $def{spool} = "/var/spool/grun";		# dir to place jobs
 $def{port} = 5184;				# listen/connect port
 $def{bind} = '0.0.0.0';				# listen addr
-$def{env} = ['PATH','USER'];			# list of environment vars to copy from submit through to exec
+$def{env} = ['PATH'];			# list of environment vars to copy from submit through to exec
 $def{ping_secs} = 30;				# how often to tell about load/mem/stats
 $def{remove_secs} = '$ping_secs * 1000';	# don't even try kickstarting if the node is this old
 $def{idle_load} = .3;				# how often to tell about load/mem/stats
@@ -378,9 +378,6 @@ if ($env eq '*' || ($conf{env} && ($conf{env}->[0] eq '*')) ) {
 	}
 	for (split /\s+/, $env) {
 		$opt{env}->{$_} = $ENV{$_} if defined $ENV{$_};
-	}
-	for (qw(USER)) {
-		$opt{env}->{$_} = $ENV{$_};
 	}
 }
 
@@ -901,6 +898,7 @@ sub process_message {
 				# restore signal to default ... regular kill
 				$SIG{INT} = undef;
 				$SIG{TERM} = undef;
+				$ENV{USER} = $opts->{user};
 
 				# kill me with a negative number, all kids die too
 				# kill my parent.... i stay alive, and my IO is still ready to go
