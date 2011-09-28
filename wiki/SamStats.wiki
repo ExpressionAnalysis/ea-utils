@@ -27,6 +27,8 @@ Complete Stats:
   forward           : number of forward-aligned reads
   reverse           : number of reverse-aligned reads
   snp rate          : mismatched bases / total bases
+  ins rate          : inserted bases / total bases
+  del rate          : deleted bases / total bases
   pct mismatch      : percent of reads that have mismatches
   len <STATS>       : read length stats, ignored if fixed-length
   mapq <STATS>      : stats for mapping qualities
