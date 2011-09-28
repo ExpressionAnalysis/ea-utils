@@ -1,0 +1,39 @@
+#summary sam-stats
+
+= Introduction =
+
+Tool for computing statistics from (possibly compressed) SAM or BAM files.
+
+
+= Details =
+
+{{{
+sam-stats [options] <sam or bam file>
+
+Options:
+  -h                : this help
+  -b                : base sample size (5000)
+  -c                : read sample count (0)
+
+OUTPUT:
+
+Complete Stats:
+
+  <STATS>           : mean, max, stdev, median, Q1 (25 percentile), Q3
+  reads             : # of entries in the file
+  phred             : phred scale used
+  mapped reads      : number of aligned reads
+  mapped bases      : total of the lengths of the aligned reads
+  forward           : number of forward-aligned reads
+  reverse           : number of reverse-aligned reads
+  snp rate          : mismatched bases / total bases
+  pct mismatch      : percent of reads that have mismatches
+  len <STATS>       : read length stats, ignored if fixed-length
+  mapq <STATS>      : stats for mapping qualities
+  insert <STATS>    : stats for insert sizes
+  %<CHR>            : percentage of mapped bases per chromosome (use to compute coverage)
+
+Subsampled stats:
+  base qual <STATS> : stats for base qualities
+  %A,%T,%C,%G       : base percentages
+}}}
