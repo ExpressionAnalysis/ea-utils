@@ -29,21 +29,19 @@ my (%mapb, $mapb);	# already, dups
 my $n = 0;	# numreads
 my $d = 0;	# numdups
 my ($cq);
-my ($lenmin, $lenmax, $lensum, $lenssq, $mapsum, $mapssq);
+my ($lenmin, $lenmax, $lensum, $lenssq, $mapsum, $mapssq, $nmlen, $nmc, $nmsum, $nmnz);
 my ($nbase, $qualmax, $qualmin, $qualsum, $qualssq, @basecnt);
 my ($rev, $for);
 
 my %opt;
-GetOptions(\%opt, "help", "samp") || die usage();
+GetOptions(\%opt, "help", "bases=i", "count=i") || die usage();
 if ($opt{help}) { print usage(); exit 1;}
 
 die "For now, please, only one file at a time\n" if $ARGV[1];
 
 $qualmin = 100000;
 $lenmin = 100000;
-my $cycmax = 35;
-my $SHOW_MAX=10;
-my $errs = 0;
+
 my $in = shift @ARGV;
 if ($in && !($in eq '-')) {
 	open(IN, ($in =~ /\.gz$/ ? "/bin/gunzip -c $in|" : $in)) || die "Can't open $in: $!\n";
@@ -51,10 +49,11 @@ if ($in && !($in eq '-')) {
 	*IN=*STDIN;
 }
 
-my $SAMPSIZE=$opt{samp} ? $opt{samp} : 5000;	# number of reads to track per-base quality stats (all other stats are for all reads)
+my $QSAMP=$opt{bases} ? $opt{bases} : 5000;	# number of reads to track per-base quality stats (all other stats are for all reads)
+my $MAXN=$opt{count} ? $opt{count} : 2000000000;	# number of reads to track per-base quality stats (all other stats are for all reads)
 
-my ($mapc, @mapq);
-my ($id, $bits, $nmo, $mapq, $cig, $l, $q, $r, $mat, @mat);
+my ($mapc, @mapq, @mat);
+my ($id, $bits, $nmo, $mapq, $cig, $l, $q, $r, $mat, $nm, @fdx);
 if ($in =~ /\.bam$/) {
 	close IN;
 	require Bio::DB::Sam;
@@ -68,34 +67,39 @@ if ($in =~ /\.bam$/) {
 		$mapq = $a->qual;
 		$bits = $a->flag;
 		$l = $a->query->length;
-		if ($a->isize > 0) {
-			push @mat, $a->isize;
-		}
-		if ($mapc < $SAMPSIZE) {
+		$mat = $a->isize;
+		($nm) = $a->get_tag_values("NM");
+		if ($mapc < $QSAMP) {
 			$r = $a->query->dna;
 			$q = join '', map {chr($_+33)} unpack('C*',$a->_qscore);
 		}
 		stats();
-		last if $n > 10000;
+		last if $n > $MAXN;
 	}
 } else {
 	while (my $i = <IN>) {
 		++$n;
 		next if $i =~ /^\@/;
-		($id, $bits, $nmo, undef, $mapq, $cig, undef, undef, $mat, $r, $q, undef) = split /\t/, $i;
-		if ($mat > 0) {
-			push @mat, $mat;
+		($id, $bits, $nmo, undef, $mapq, $cig, undef, undef, $mat, $r, $q, @fdx) = split /\t/, $i;
+		$nm = '';
+		for (@fdx) {
+			if (s/^NM:i://) {
+				$nm = $_;
+				last;
+			}
 		}
 		$l = length($r);
 		next if ($nmo eq '*');
 		next unless $nmo;
 		stats();
+		last if $n > $MAXN;
 	}
 }
 
-$SAMPSIZE=$mapc if $mapc < $SAMPSIZE;
+$QSAMP=$mapc if $mapc < $QSAMP;
 
 @mapq = sort {$a <=> $b} @mapq;
+@mat = sort {$a <=> $b} @mat;
 
 # autodetect phred
 my $phred = 64;
@@ -128,8 +132,12 @@ if ($mapc > 0) {
 	printf "mapq median\t%.4f\n", quantile(\@mapq, .50);
 	printf "mapq Q3\t%.4f\n", quantile(\@mapq, .75);
 
+	if ($nmc > 0) {
+		printf "snp rate\t%.6f\n", ($nmsum/$nmlen);
+		printf "pct mismatch\t%.4f\n", 100*($nmnz/$nmc);
+	}
+
 	if (@mat > 0) {
-		@mat = sort {$a <=> $b} @mat;	
 		my $p10=quantile(\@mat,.10);
 		my $p90=quantile(\@mat,.90);
 		my ($matc, $matsum, $matssq);
@@ -191,11 +199,21 @@ sub stats
 	$mapssq += $mapq*$mapq;
 
 	push @mapq, $mapq;
+	if (!($nm eq '')) {
+		$nmsum += $nm;
+		$nmnz += 1 if $nm > 0;
+		++$nmc;
+		$nmlen += $l;
+	}
 
 	$mapb{$nmo}+=$l;
 	$mapb+=$l;
 
-	if ($mapc < $SAMPSIZE) {
+	if ($mat > 0) {
+		push @mat, $mat;
+	}
+
+	if ($mapc < $QSAMP) {
 		# shorter length
 		for (my $i = 0; $i < $l; ++$i) {
 			$cq = ord(substr($q, $i, 1));
@@ -236,7 +254,8 @@ sam-stats [options] <sam or bam file>
 
 Options: 
   -h                : this help
-  -s                : sample size (5000)
+  -b                : base sample size (5000)
+  -c                : read sample count (0)
 
 OUTPUT:
 
@@ -249,13 +268,16 @@ Complete Stats:
   mapped bases      : total of the lengths of the aligned reads
   forward           : number of forward-aligned reads
   reverse           : number of reverse-aligned reads
+  snp rate          : mismatched bases / total bases
+  pct mismatch      : percent of reads that have mismatches
   len <STATS>       : read length stats, ignored if fixed-length
   mapq <STATS>      : stats for mapping qualities
-  chr%              : percentage of mapped bases per chromosome (use to compute coverage) 
+  insert <STATS>    : stats for insert sizes
+  %<CHR>            : percentage of mapped bases per chromosome (use to compute coverage) 
 
 Subsampled stats:
   base qual <STATS> : stats for base qualities
-  %A,%T,%C,%G	    : aa percentages
+  %A,%T,%C,%G	    : base percentages
 EOF
 }
 
