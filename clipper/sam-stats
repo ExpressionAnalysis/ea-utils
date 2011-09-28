@@ -54,7 +54,7 @@ if ($in && !($in eq '-')) {
 my $SAMPSIZE=$opt{samp} ? $opt{samp} : 5000;	# number of reads to track per-base quality stats (all other stats are for all reads)
 
 my ($mapc, @mapq);
-my ($id, $bits, $nmo, $mapq, $cig, $l, $q, $r, @fdx);
+my ($id, $bits, $nmo, $mapq, $cig, $l, $q, $r, $mat, @mat);
 if ($in =~ /\.bam$/) {
 	close IN;
 	require Bio::DB::Sam;
@@ -68,19 +68,27 @@ if ($in =~ /\.bam$/) {
 		$mapq = $a->qual;
 		$bits = $a->flag;
 		$l = $a->query->length;
+		if ($a->isize > 0) {
+			push @mat, $a->isize;
+		}
 		if ($mapc < $SAMPSIZE) {
 			$r = $a->query->dna;
 			$q = join '', map {chr($_+33)} unpack('C*',$a->_qscore);
 		}
 		stats();
+		last if $n > 10000;
 	}
 } else {
 	while (my $i = <IN>) {
 		++$n;
-		next if /^\@/;
-		($id, $bits, $nmo, undef, $mapq, $cig, undef, undef, undef, $r, $q, undef) = split /\t/, $i;
+		next if $i =~ /^\@/;
+		($id, $bits, $nmo, undef, $mapq, $cig, undef, undef, $mat, $r, $q, undef) = split /\t/, $i;
+		if ($mat > 0) {
+			push @mat, $mat;
+		}
 		$l = length($r);
 		next if ($nmo eq '*');
+		next unless $nmo;
 		stats();
 	}
 }
@@ -119,16 +127,29 @@ if ($mapc > 0) {
 	printf "mapq Q1\t%.4f\n", quantile(\@mapq, .25);
 	printf "mapq median\t%.4f\n", quantile(\@mapq, .50);
 	printf "mapq Q3\t%.4f\n", quantile(\@mapq, .75);
+
+	if (@mat > 0) {
+		@mat = sort {$a <=> $b} @mat;	
+		my $p10=quantile(\@mat,.10);
+		my $p90=quantile(\@mat,.90);
+		my ($matc, $matsum, $matssq);
+		for (@mat) {
+			if ($_ >= $p10 && $_ <= $p90) {
+				++$matc;
+				$matsum+=$_;
+				$matssq+=$_*$_;
+			}
+		}
+		printf "insert mean\t%.4f\n", ($matsum/$matc);
+		printf "insert stdev\t%.4f\n", stdev($matc, $matsum, $matssq);
+		printf "insert Q1\t%.4f\n", quantile(\@mat, .25);
+		printf "insert median\t%.4f\n", quantile(\@mat, .50);
+		printf "insert Q3\t%.4f\n", quantile(\@mat, .75);
+	}
+
 	printf "base qual mean\t%.4f\n", ($qualsum/$nbase)-$phred;
 	printf "base qual stdev\t%.4f\n", stdev($nbase, $qualsum, $qualssq);
 
-	if (%mapb > 1) {
-		for my $k (keys(%mapb)) {
-			my $v = $mapb{$k};
-			my ($n) = $k =~ m/([\w.]+)/;
-			printf "%%$n\t%.2f\n", 100*$v/$mapb;
-		}
-	}
 }
 
 if ($nbase) {
@@ -136,9 +157,18 @@ if ($nbase) {
 	printf "%%C\t%.4f\n", 100*$basecnt[1]/$nbase;
 	printf "%%G\t%.4f\n", 100*$basecnt[2]/$nbase;
 	printf "%%T\t%.4f\n", 100*$basecnt[3]/$nbase;
-	printf "%%N\t%.4f\n", 100*$basecnt[4]/$nbase if $basecnt[4] > 0;
+	if ($basecnt[4] > 0) {
+		printf("%%N\t%.4f\n", 100*$basecnt[4]/$nbase) 
+	}
 }
 
+if (%mapb > 1) {
+	for my $k (keys(%mapb)) {
+		my $v = $mapb{$k};
+		my ($n) = $k =~ m/([\w.]+)/;
+		printf "%%$n\t%.2f\n", 100*$v/$mapb;
+	}
+}
 sub stats
 {
 	my $strand = 1 - 2 * ($bits & 16);
