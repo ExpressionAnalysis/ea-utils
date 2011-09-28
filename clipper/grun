@@ -383,6 +383,7 @@ if ($env eq '*' || ($conf{env} && ($conf{env}->[0] eq '*')) ) {
 
 $opt{user} = getpwuid($>);
 $opt{umask} = umask();
+$opt{env}->{USER} = $opt{user};
 
 my %info;
 my $interrupt;
