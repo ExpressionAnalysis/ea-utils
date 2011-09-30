@@ -40,7 +40,7 @@ Subsampled stats:
   %A,%T,%C,%G       : base percentages
 }}}
 
-Example:
+Example  (Single-end RNA w/bowtie, hence the odd distribution & no indels or mate info):
 
 {{{
 
