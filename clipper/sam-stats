@@ -39,11 +39,12 @@ my ($mapc, @mapq, @mat);
 my ($id, $bits, $nmo, $mapq, $cig, $l, $q, $r, $mat, $nm, @fdx);
 
 my %opt;
-$opt{ext}='stats';
 GetOptions(\%opt, "help", "bases=i", "count=i", "ext|x") || die usage();
 if ($opt{help}) { print usage(); exit 1;}
 
 my $multi = 1 if @ARGV > 0;
+$opt{ext}='stats' if $multi && ! $opt{ext};
+$multi = 1 if $opt{ext};
 
 $qualmin = 100000;
 $lenmin = 100000;
@@ -72,7 +73,7 @@ if ($multi) {
 	open(OUT, ">$out") || die "Can't open $out\n";
 }
 
-	(%mapb, @basecnt, $lenmin, $lenmax, $lensum, $lenssq, $mapsum, $mapssq, $nmlen, $nmc, $insum, $dlsum, $nmsum, $nmnz, $nbase, $qualmax, $qualmin, $qualsum, $qualssq, $rev, $for, $mapc, @mapq, @mat, $n) = (undef) x 100;
+	(%mapb, $mapb, @basecnt, $lenmin, $lenmax, $lensum, $lenssq, $mapsum, $mapssq, $nmlen, $nmc, $insum, $dlsum, $nmsum, $nmnz, $nbase, $qualmax, $qualmin, $qualsum, $qualssq, $rev, $for, $mapc, @mapq, @mat, $n) = (undef) x 100;
 
 if ($in =~ /\.bam$/) {
 	close IN;
