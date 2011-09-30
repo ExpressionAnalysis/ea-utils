@@ -24,15 +24,18 @@ use strict;
 use Getopt::Long;
 use Data::Dumper;
 
-my (%mapb, $mapb);	# already, dups
 
-my $n = 0;	# numreads
-my $d = 0;	# numdups
 my ($cq);
+
+# summary stats
+my $n = 0;		# numreads
+my (%mapb, $mapb);	# mapped bases
 my ($lenmin, $lenmax, $lensum, $lenssq, $mapsum, $mapssq, $nmlen, $nmc, $insum, $dlsum, $nmsum, $nmnz);
 my ($nbase, $qualmax, $qualmin, $qualsum, $qualssq, @basecnt);
 my ($rev, $for);
 my ($mapc, @mapq, @mat);
+
+# per-read
 my ($id, $bits, $nmo, $mapq, $cig, $l, $q, $r, $mat, $nm, @fdx);
 
 my %opt;
@@ -69,6 +72,8 @@ if ($multi) {
 	open(OUT, ">$out") || die "Can't open $out\n";
 }
 
+	(%mapb, @basecnt, $lenmin, $lenmax, $lensum, $lenssq, $mapsum, $mapssq, $nmlen, $nmc, $insum, $dlsum, $nmsum, $nmnz, $nbase, $qualmax, $qualmin, $qualsum, $qualssq, $rev, $for, $mapc, @mapq, @mat, $n) = (undef) x 100;
+
 if ($in =~ /\.bam$/) {
 	close IN;
 	require Bio::DB::Sam;
@@ -76,11 +81,6 @@ if ($in =~ /\.bam$/) {
 	my $header = $bam->header;
 	++$n;
 	# reset stats
-	@mapq=();
-	@mat=();
-	%mapb=();
-	@basecnt=();
-
 	while (my $a = $bam->read1()) {
 		++$n;
 		$nmo=$a->tid;
@@ -230,7 +230,7 @@ sub stats
 	$mapsum += $mapq;
 	$mapssq += $mapq*$mapq;
 
-	push @mapq, $mapq;
+	push @mapq, $mapq+0;
 	if (!($nm eq '')) {
 		$nmsum += $nm;
 		$nmnz += 1 if $nm > 0;
@@ -248,7 +248,7 @@ sub stats
 	$mapb+=$l;
 
 	if ($mat > 0) {
-		push @mat, $mat;
+		push @mat, $mat+0;
 	}
 
 	if ($mapc < $QSAMP) {
