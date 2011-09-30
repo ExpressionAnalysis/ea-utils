@@ -39,7 +39,7 @@ my ($mapc, @mapq, @mat);
 my ($id, $bits, $nmo, $mapq, $cig, $l, $q, $r, $mat, $nm, @fdx);
 
 my %opt;
-GetOptions(\%opt, "help", "bases=i", "count=i", "ext|x") || die usage();
+GetOptions(\%opt, "help", "bases=i", "count=i", "ext|x=s") || die usage();
 if ($opt{help}) { print usage(); exit 1;}
 
 my $multi = 1 if @ARGV > 0;
