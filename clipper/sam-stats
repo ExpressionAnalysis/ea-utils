@@ -74,6 +74,12 @@ if ($in =~ /\.bam$/) {
 	my $bam = Bio::DB::Bam->open($in);
 	my $header = $bam->header;
 	++$n;
+	# reset stats
+	@mapq=();
+	@mat=();
+	%mapb=();
+	@basecnt=();
+
 	while (my $a = $bam->read1()) {
 		++$n;
 		$nmo=$a->tid;
