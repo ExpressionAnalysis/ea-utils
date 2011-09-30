@@ -29,31 +29,45 @@ my (%mapb, $mapb);	# already, dups
 my $n = 0;	# numreads
 my $d = 0;	# numdups
 my ($cq);
-my ($lenmin, $lenmax, $lensum, $lenssq, $mapsum, $mapssq, $nmlen, $nmc, $nmsum, $nmnz);
+my ($lenmin, $lenmax, $lensum, $lenssq, $mapsum, $mapssq, $nmlen, $nmc, $insum, $dlsum, $nmsum, $nmnz);
 my ($nbase, $qualmax, $qualmin, $qualsum, $qualssq, @basecnt);
 my ($rev, $for);
+my ($mapc, @mapq, @mat);
+my ($id, $bits, $nmo, $mapq, $cig, $l, $q, $r, $mat, $nm, @fdx);
 
 my %opt;
-GetOptions(\%opt, "help", "bases=i", "count=i") || die usage();
+GetOptions(\%opt, "help", "bases=i", "count=i", "ext|x") || die usage();
 if ($opt{help}) { print usage(); exit 1;}
 
-die "For now, please, only one file at a time\n" if $ARGV[1];
+my $multi = 1 if @ARGV > 0;
 
 $qualmin = 100000;
 $lenmin = 100000;
 
+my $QSAMP=$opt{bases} ? $opt{bases} : 5000;	# number of reads to track per-base quality stats (all other stats are for all reads)
+my $MAXN=$opt{count} ? $opt{count} : 2000000000;	# number of reads to track per-base quality stats (all other stats are for all reads)
+
+if (!@ARGV) {
+	$ARGV[0] = '-';
+}
+
+while (@ARGV) {
 my $in = shift @ARGV;
 if ($in && !($in eq '-')) {
 	open(IN, ($in =~ /\.gz$/ ? "/bin/gunzip -c $in|" : $in)) || die "Can't open $in: $!\n";
 } else {
+	die "Can't read from stdin in multiple mode\n" if ($multi);
 	*IN=*STDIN;
 }
 
-my $QSAMP=$opt{bases} ? $opt{bases} : 5000;	# number of reads to track per-base quality stats (all other stats are for all reads)
-my $MAXN=$opt{count} ? $opt{count} : 2000000000;	# number of reads to track per-base quality stats (all other stats are for all reads)
+*OUT=*STDOUT;
+if ($multi) {
+	my $out = $in;
+	$out =~ s/\.gz$//;
+	$out .= ".$opt{ext}";
+	open(OUT, ">$out") || die "Can't open $out\n";
+}
 
-my ($mapc, @mapq, @mat);
-my ($id, $bits, $nmo, $mapq, $cig, $l, $q, $r, $mat, $nm, @fdx);
 if ($in =~ /\.bam$/) {
 	close IN;
 	require Bio::DB::Sam;
@@ -68,6 +82,7 @@ if ($in =~ /\.bam$/) {
 		$bits = $a->flag;
 		$l = $a->query->length;
 		$mat = $a->isize;
+		$cig = $a->cigar_str;
 		($nm) = $a->get_tag_values("NM");
 		if ($mapc < $QSAMP) {
 			$r = $a->query->dna;
@@ -78,8 +93,8 @@ if ($in =~ /\.bam$/) {
 	}
 } else {
 	while (my $i = <IN>) {
-		++$n;
 		next if $i =~ /^\@/;
+		++$n;
 		($id, $bits, $nmo, undef, $mapq, $cig, undef, undef, $mat, $r, $q, @fdx) = split /\t/, $i;
 		$nm = '';
 		for (@fdx) {
@@ -105,36 +120,43 @@ $QSAMP=$mapc if $mapc < $QSAMP;
 my $phred = 64;
 $phred = 33 if ($qualmin < 64);
 
-printf "reads\t%d\n", $n;
-printf "phred\t%d\n", $phred if $nbase > 0;
-printf "mapped reads\t%d\n", $mapc;
-printf "mapped bases\t%d\n", $mapb;
+printf OUT "reads\t%d\n", $n;
+printf OUT "phred\t%d\n", $phred if $nbase > 0;
+printf OUT "mapped reads\t%d\n", $mapc;
+printf OUT "mapped bases\t%d\n", $mapb;
 
 if ($mapc > 0) {
-	printf "foward\t%d\n", $for;
-	printf "reverse\t%d\n", $rev;
+	printf OUT "foward\t%d\n", $for;
+	printf OUT "reverse\t%d\n", $rev;
 
 	if ($lenmax != $lenmin) {
-		printf "len max\t%.4f\n", $lenmax;
+		printf OUT "len max\t%.4f\n", $lenmax;
 		if ($n > 0 ) {
-			printf "len mean\t%.4f\n", $lensum/$mapc;
+			printf OUT "len mean\t%.4f\n", $lensum/$mapc;
 			if ($n > 1 ) {
-				printf "len stdev\t%.4f\n", stdev($mapc, $lensum, $lenssq);
+				printf OUT "len stdev\t%.4f\n", stdev($mapc, $lensum, $lenssq);
 			}
 		}
 	} else {
-		printf "len max\t%d\n", $lenmax;
+		printf OUT "len max\t%d\n", $lenmax;
 	} 
 
-	printf "mapq mean\t%.4f\n", ($mapsum/$mapc);
-	printf "mapq stdev\t%.4f\n", stdev($mapc, $mapsum, $mapssq);
-	printf "mapq Q1\t%.4f\n", quantile(\@mapq, .25);
-	printf "mapq median\t%.4f\n", quantile(\@mapq, .50);
-	printf "mapq Q3\t%.4f\n", quantile(\@mapq, .75);
+	printf OUT "mapq mean\t%.4f\n", ($mapsum/$mapc);
+	printf OUT "mapq stdev\t%.4f\n", stdev($mapc, $mapsum, $mapssq);
+	printf OUT "mapq Q1\t%.4f\n", quantile(\@mapq, .25);
+	printf OUT "mapq median\t%.4f\n", quantile(\@mapq, .50);
+	printf OUT "mapq Q3\t%.4f\n", quantile(\@mapq, .75);
 
-	if ($nmc > 0) {
-		printf "snp rate\t%.6f\n", ($nmsum/$nmlen);
-		printf "pct mismatch\t%.4f\n", 100*($nmnz/$nmc);
+	if ($nmlen > 0) {
+		printf OUT "snp rate\t%.6f\n", ($nmsum/$nmlen);
+		if ($insum > 0) {
+			printf OUT "ins rate\t%.6f\n", ($insum/$nmlen);
+		}
+
+		if ($dlsum > 0) {
+			printf OUT "del rate\t%.6f\n", ($dlsum/$nmlen);
+		}
+		printf OUT "pct mismatch\t%.4f\n", 100*($nmnz/$nmc);
 	}
 
 	if (@mat > 0) {
@@ -148,35 +170,38 @@ if ($mapc > 0) {
 				$matssq+=$_*$_;
 			}
 		}
-		printf "insert mean\t%.4f\n", ($matsum/$matc);
-		printf "insert stdev\t%.4f\n", stdev($matc, $matsum, $matssq);
-		printf "insert Q1\t%.4f\n", quantile(\@mat, .25);
-		printf "insert median\t%.4f\n", quantile(\@mat, .50);
-		printf "insert Q3\t%.4f\n", quantile(\@mat, .75);
+		printf OUT "insert mean\t%.4f\n", ($matsum/$matc);
+		printf OUT "insert stdev\t%.4f\n", stdev($matc, $matsum, $matssq);
+		printf OUT "insert Q1\t%.4f\n", quantile(\@mat, .25);
+		printf OUT "insert median\t%.4f\n", quantile(\@mat, .50);
+		printf OUT "insert Q3\t%.4f\n", quantile(\@mat, .75);
 	}
 
-	printf "base qual mean\t%.4f\n", ($qualsum/$nbase)-$phred;
-	printf "base qual stdev\t%.4f\n", stdev($nbase, $qualsum, $qualssq);
+	printf OUT "base qual mean\t%.4f\n", ($qualsum/$nbase)-$phred;
+	printf OUT "base qual stdev\t%.4f\n", stdev($nbase, $qualsum, $qualssq);
 
 }
 
 if ($nbase) {
-	printf "%%A\t%.4f\n", 100*$basecnt[0]/$nbase;
-	printf "%%C\t%.4f\n", 100*$basecnt[1]/$nbase;
-	printf "%%G\t%.4f\n", 100*$basecnt[2]/$nbase;
-	printf "%%T\t%.4f\n", 100*$basecnt[3]/$nbase;
+	printf OUT "%%A\t%.4f\n", 100*$basecnt[0]/$nbase;
+	printf OUT "%%C\t%.4f\n", 100*$basecnt[1]/$nbase;
+	printf OUT "%%G\t%.4f\n", 100*$basecnt[2]/$nbase;
+	printf OUT "%%T\t%.4f\n", 100*$basecnt[3]/$nbase;
 	if ($basecnt[4] > 0) {
-		printf("%%N\t%.4f\n", 100*$basecnt[4]/$nbase) 
+		printf OUT "%%N\t%.4f\n", 100*$basecnt[4]/$nbase 
 	}
 }
 
 if (%mapb > 1) {
-	for my $k (keys(%mapb)) {
+	for my $k (sort(keys(%mapb))) {
 		my $v = $mapb{$k};
 		my ($n) = $k =~ m/([\w.]+)/;
-		printf "%%$n\t%.2f\n", 100*$v/$mapb;
+		printf OUT "%%$n\t%.2f\n", 100*$v/$mapb;
 	}
 }
+
+}
+
 sub stats
 {
 	my $strand = 1 - 2 * ($bits & 16);
@@ -204,6 +229,12 @@ sub stats
 		$nmnz += 1 if $nm > 0;
 		++$nmc;
 		$nmlen += $l;
+		for ($cig =~ /D(\d+)/g) {
+			$dlsum+=$_;
+		}
+		for ($cig =~ /I(\d+)/g) {
+			$insum+=$_;
+		}
 	}
 
 	$mapb{$nmo}+=$l;
@@ -250,14 +281,19 @@ sub quantile {
 
 sub usage {
 return <<EOF
-sam-stats [options] <sam or bam file>
+sam-stats [options] <sam or bam file> [<multiple files]
 
 Options: 
   -h                : this help
   -b                : base sample size (5000)
   -c                : read sample count (0)
+  -x		    : extension (stats)
 
 OUTPUT:
+
+If one file is specified, then the output is to standard out.  If
+multiple files are specified, or if the -x option is supplied,
+the output file is <filename>.<ext>.  Default extension is 'stats'.
 
 Complete Stats:
 
@@ -269,6 +305,8 @@ Complete Stats:
   forward           : number of forward-aligned reads
   reverse           : number of reverse-aligned reads
   snp rate          : mismatched bases / total bases
+  ins rate          : insert bases / total bases
+  del rate          : deleted bases / total bases
   pct mismatch      : percent of reads that have mismatches
   len <STATS>       : read length stats, ignored if fixed-length
   mapq <STATS>      : stats for mapping qualities
