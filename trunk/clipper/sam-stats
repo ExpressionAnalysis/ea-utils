@@ -36,6 +36,7 @@ my ($mapc, @mapq, @mat);
 my ($id, $bits, $nmo, $mapq, $cig, $l, $q, $r, $mat, $nm, @fdx);
 
 my %opt;
+$opt{ext}='stats';
 GetOptions(\%opt, "help", "bases=i", "count=i", "ext|x") || die usage();
 if ($opt{help}) { print usage(); exit 1;}
 
