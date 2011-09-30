@@ -55,7 +55,7 @@ $def{expire_secs} = 14400;			# remove jobs whose execution nodes haven't reporte
 $def{io_keep} = 3600;				# keep io for this long after a job with i/o is finished in a detached session
 $def{sched_secs} = '1';				# how often to try scheduling
 $def{max_sched} = 50;				# how many different jobs to try and match before giving up on the rest (queue busy)
-$def{spread_pct} = .25;				# how often to "distribute jobs", versus "clump" them
+$def{spread_pct} = .10;				# how often to "distribute jobs", versus "clump" them
 $def{master} = 'localhost:5184';		# central scheduler
 $def{services} = "queue exec";			# all can run
 $def{pid_file} = "/var/run/grun.pid";		# pid file
@@ -2041,11 +2041,20 @@ sub showhist {
 			--$count;
                         my %job=%{$job};
 
+			$job{status} = ($job{status} >> 8) if 0 == ($job{status} & 0xFF);
+			# standard
 			$job{status} = 'OK' 		if $job{status} eq 0;
 			$job{status} = 'INT' 		if $job{status} eq 2;
 			$job{status} = 'ORPHAN' 	if $job{status} eq -8;
-			$job{status} = 'NOTFOUND' 	if $job{status} eq 32512;
-			$job{status} = 'TERM' 		if $job{status} eq 15;
+			$job{status} = 'SIGSEGV'	if $job{status} eq 11;
+			$job{status} = 'SIGPIPE'	if $job{status} eq 13;
+			$job{status} = 'SIGFPE'		if $job{status} eq 8;
+
+			# linux specific
+			$job{status} = 'NOTFOUND' 	if $job{status} eq 127;
+			$job{status} = 'ASSERT'		if $job{status} eq 134;
+			$job{status} = 'OUTOFMEM'	if $job{status} eq 137;
+			$job{status} = 'ALTSEGV' 	if $job{status} eq 139;
 			$job{stat} = $job{status};
 
 			my $cmd = join(' ', @cmd);
