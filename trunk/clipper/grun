@@ -1041,7 +1041,8 @@ sub process_message {
 			} else {
 				return "Job $jid kill $sig failed : $!"; 
 			}
-			delete $io_wait{$jid};
+			$io_wait{$jid}->{status}=127+$sig;
+			$io_wait{$jid}->{error}="Job $jid aborted";
 			unlink "$conf{spool}/stdio/$pid.err";
 			unlink "$conf{spool}/stdio/$pid.log";
 		} else {
@@ -1066,6 +1067,7 @@ sub process_message {
 		# xstat means you don't want i/o, just status... 
 		unlink  "$conf{spool}/stdio/$pid.out";
 		$io_wait{$jid}->{type} = 'stat';
+
 		$io_wait{$jid}->{sock} = $sock;
 		$io_wait{$jid}->{time} = time();		# toss this entry if it gets old
 		if ($pid <= 1) {
