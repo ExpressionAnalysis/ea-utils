@@ -84,13 +84,13 @@ if ($in =~ /\.bam$/) {
 	# reset stats
 	while (my $a = $bam->read1()) {
 		++$n;
+		$cig = $a->cigar_str;
+		next if ($cig eq '');
 		$nmo=$a->tid;
-		next if ($nmo eq '*');
 		$mapq = $a->qual;
 		$bits = $a->flag;
 		$l = $a->query->length;
 		$mat = $a->isize;
-		$cig = $a->cigar_str;
 		($nm) = $a->get_tag_values("NM");
 		if ($mapc < $QSAMP) {
 			$r = $a->query->dna;
@@ -104,6 +104,7 @@ if ($in =~ /\.bam$/) {
 		next if $i =~ /^\@/;
 		++$n;
 		($id, $bits, $nmo, undef, $mapq, $cig, undef, undef, $mat, $r, $q, @fdx) = split /\t/, $i;
+		next if ($cig eq '*');
 		$nm = '';
 		for (@fdx) {
 			if (s/^NM:i://) {
@@ -112,7 +113,6 @@ if ($in =~ /\.bam$/) {
 			}
 		}
 		$l = length($r);
-		next if ($nmo eq '*');
 		next unless $nmo;
 		stats();
 		last if $n > $MAXN;
