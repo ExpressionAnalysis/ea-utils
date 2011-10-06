@@ -75,6 +75,7 @@ struct ad {
 
 int read_fa(FILE *in, int rno, struct ad *ad);		// 0=done, 1=ok, -1=err+continue
 int read_fq(FILE *in, int rno, struct fq *fq);		// 0=done, 1=ok, -1=err+continue
+int meanq(const char *q, int qn, int i, int w);
 
 int char2bp(char c);
 char bp2char(int b);
@@ -99,6 +100,7 @@ int main (int argc, char **argv) {
 	float pctns = 5;			// any base that is more than 5% n's
 	bool rmns = 1;				// remove n's at the end of the read
 	int qthr = 10;				// remove end of-read with quality < qthr
+	int qwin = 1;				// remove end of read with mean quality < qthr
 	char phred = 0;
 	bool force = 0;
 	int ilv3 = -1;
@@ -113,7 +115,7 @@ int main (int argc, char **argv) {
 	int e_n = 0;
 	bool skipb = 0;
 	
-	while (	(c = getopt (argc, argv, "-nf0uUVSRdbehp:o:l:s:m:t:k:x:P:q:L:C:")) != -1) {
+	while (	(c = getopt (argc, argv, "-nf0uUVSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:")) != -1) {
 		switch (c) {
 		case '\1': 
 			if (!afil) 
@@ -134,6 +136,7 @@ int main (int argc, char **argv) {
 		case 'f': force = true; break;
 		case 'k': skewpct = atof(optarg); break;
 		case 'q': qthr = atoi(optarg); break;
+		case 'w': qwin = atoi(optarg); break;
 		case 'C': sampcnt = atoi(optarg); break;
 		case 'x': pctns = atof(optarg); break;
 		case 'R': rmns = false; break;
@@ -463,7 +466,7 @@ int main (int argc, char **argv) {
 	// look for severe base skew, and auto-trim ends based on it
 	int sktrim[i_n][2]; meminit(sktrim);
 	int needqtrim=0;
-	if (sampcnt > 0) {
+	if (sampcnt > 0 && skewpct > 0) {
 	for (i=0;i<i_n;++i) {
 		if (avgns[i] < 11) 			// reads of avg length < 11 ? barcode lane, skip it
 			continue;
@@ -714,7 +717,11 @@ int main (int argc, char **argv) {
 
                             // trim qual from the begin
 			    for (i=dotrim[f][0];i<(fq[f].nseq);++i) {
-				if ((fq[f].qual[i]-phred) < qthr) {
+				if (qwin > 1 && (meanq(fq[f].qual,fq[f].nseq,i,qwin)-phred) < qthr) {
+					++trimqb[f];
+					istrimq = true;
+					dotrim[f][0] = i + 1;
+				} else if ((fq[f].qual[i]-phred) < qthr) {
 					++trimqb[f];
 					istrimq = true;
 					dotrim[f][0] = i + 1;
@@ -723,7 +730,11 @@ int main (int argc, char **argv) {
 			    }
 
                             for (i=dotrim[f][1];i<(fq[f].nseq);++i) {
-				if ((fq[f].qual[fq[f].nseq-i-1]-phred) < qthr) {
+                                if (qwin > 1 && (meanq(fq[f].qual,fq[f].nseq,fq[f].nseq-i-1,qwin)-phred) < qthr) {
+                                        ++trimqb[f];
+                                        istrimq = true;
+                                        dotrim[f][1] = i + 1;
+				} else if ((fq[f].qual[fq[f].nseq-i-1]-phred) < qthr) {
 					++trimqb[f];
 					istrimq = true;
 					dotrim[f][1] = i + 1;
@@ -959,7 +970,7 @@ int read_fq(FILE *in, int rno, struct fq *fq) {
                 return 0;
         if (fq->id[0] != '@' || fq->com[0] != '+' || fq->nseq != fq->nqual) {
 		if (warncount < MAXWARN) {
-                	fprintf(stderr, "Malformed fastq record at line %d\n", rno*2+1);
+                	fprintf(stderr, "Malformed fastq record at line %d, probe: %s, nsq: %d, nql: %d\n", rno*2, fq->id, fq->nseq, fq->nqual);
 			++warncount;
 		}
                 return -1;
@@ -997,6 +1008,7 @@ void usage(FILE *f, const char *msg) {
 "	-L N	Maximum sequence length (none)\n"
 "	-k N	sKew percentage causing trimming (2)\n"
 "	-q N	quality threshold causing trimming (10)\n"
+"	-w N	window-size for quality trimming (1)\n"
 "	-f	force output, even if not much will be done\n"
 "	-0	Set all trimming parameters to zero\n"
 "	-U|u	Force disable/enable illumina PF filtering\n"
@@ -1040,5 +1052,18 @@ void saveskip(FILE **fout, int fo_n, struct fq *fq)  {
 		fputs(fq[f].qual,fout[f]);
 		fputc('\n',fout[f]);
 	}
+}
+
+int meanq(const char *q, int qn, int i, int w) {
+	if (w > qn) w=qn/4;
+	int s = i-w/2;
+	int e = i+w/2;
+	if (s < 0) {e-=s;s=0;}
+	if (e >= qn) {s-=((e-qn)+1);e=qn-1;}
+	int t = 0;
+	for (i=s;i<=e;++i) {
+		t+=q[i];	
+	}
+	return t / (e-s+1);
 }
 
