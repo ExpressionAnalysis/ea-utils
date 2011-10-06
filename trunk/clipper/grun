@@ -1041,6 +1041,9 @@ sub process_message {
 			} else {
 				return "Job $jid kill $sig failed : $!"; 
 			}
+			delete $io_wait{$jid};
+			unlink "$conf{spool}/stdio/$pid.err";
+			unlink "$conf{spool}/stdio/$pid.log";
 		} else {
 			return "Job $jid not found";
 		}
