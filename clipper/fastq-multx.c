@@ -162,7 +162,7 @@ int main (int argc, char **argv) {
 		case 'm': mismatch = atoi(optarg); break;
 		case 'd': ++debug; break;
 		case '?': 
-		     if (strchr("om", optopt))
+		     if (strchr("vmBglG", optopt))
 		       fprintf (stderr, "Option -%c requires an argument.\n", optopt);
 		     else if (isprint(optopt))
 		       fprintf (stderr, "Unknown option `-%c'.\n", optopt);
@@ -779,7 +779,7 @@ void usage(FILE *f) {
 "-x		Don't trim barcodes before writing\n"
 "-n		Don't execute, just print likely barcode list\n"
 "-v C		Verify that mated id's match up to character C ('/' for illumina)\n"
-"-m N		Allow up to N mismatches, as long as they are unique\n"
+"-m N		Allow up to N mismatches, as long as they are unique (1)\n"
 	,f);
 }
 
