@@ -132,8 +132,9 @@ int main(int argc, char **argv) {
 	google::sparse_hash_map<std::string,int>::iterator it; 
 	BamAlignment al;
 	if (debug) fprintf(stderr, "Filtering\n");
-	int na=0, gt=0, eq=0, lt=0;
+	int na=0, gt=0, eq=0, lt=0, to=0;
 	while ( inbam.GetNextAlignment(al) ) {
+		++to;
 		it = pmap.find(al.Name);
 		if (it == pmap.end()) {
 			writer.SaveAlignment(al);
@@ -149,10 +150,11 @@ int main(int argc, char **argv) {
 			++lt;
 		}
 	}
-	fprintf(ferr,"Better\t%d\n",gt);
-	fprintf(ferr,"Equal\t%d\n",eq);
-	fprintf(ferr,"Removed\t%d\n",lt);
-	if (na) fprintf(ferr,"Missing\t%d\n",na);
+	fprintf(ferr,"total\t%d\n",to);
+	fprintf(ferr,"better\t%d\t%2.2f%%\n",gt,100.0*gt/(float)to);
+	fprintf(ferr,"equal\t%d\t%2.2f%%\n",eq,100.0*eq/(float)to);
+	fprintf(ferr,"removed\t%d\t%2.2f%%\n",lt,100.0*lt/(float)to);
+	if (na) fprintf(ferr,"Missing\t%d\t%2.2f%%\n",na,100.0*na/(float)to);
 	return 0;
 }
 
