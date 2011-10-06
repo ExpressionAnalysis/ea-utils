@@ -42,7 +42,7 @@ my %opt;
 GetOptions(\%opt, "help", "bases=i", "count=i", "ext|x=s") || die usage();
 if ($opt{help}) { print usage(); exit 1;}
 
-my $multi = 1 if @ARGV > 0;
+my $multi = 1 if @ARGV > 1;
 $opt{ext}='stats' if $multi && ! $opt{ext};
 $multi = 1 if $opt{ext};
 
@@ -55,7 +55,6 @@ my $MAXN=$opt{count} ? $opt{count} : 2000000000;	# number of reads to track per-
 if (!@ARGV) {
 	$ARGV[0] = '-';
 }
-
 while (@ARGV) {
 my $in = shift @ARGV;
 if ($in && !($in eq '-')) {
@@ -75,12 +74,13 @@ if ($multi) {
 
 	(%mapb, $mapb, @basecnt, $lenmin, $lenmax, $lensum, $lenssq, $mapsum, $mapssq, $nmlen, $nmc, $insum, $dlsum, $nmsum, $nmnz, $nbase, $qualmax, $qualmin, $qualsum, $qualssq, $rev, $for, $mapc, @mapq, @mat, $n) = (undef) x 100;
 
+	%mapb=();
 if ($in =~ /\.bam$/) {
 	close IN;
+
 	require Bio::DB::Sam;
 	my $bam = Bio::DB::Bam->open($in);
 	my $header = $bam->header;
-	++$n;
 	# reset stats
 	while (my $a = $bam->read1()) {
 		++$n;
@@ -245,7 +245,7 @@ sub stats
 		}
 	}
 
-	$mapb{$nmo}+=$l;
+	$mapb{$nmo}+=$l; 
 	$mapb+=$l;
 
 	if ($mat > 0) {
