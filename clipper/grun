@@ -214,17 +214,40 @@ if ($killjob) {
 }
 
 if ($editjob) {
-	my ($jid, $key, $val) = @ARGV;
-	if ($key eq 'status') {
-		$val = substr bestunique($val, qw(hold status)), 0, 2;
-		die "Status must be one of: h(old) r(esume)\n" unless $val;
+	my %ed;
+	while (@ARGV) {
+		$_=$ARGV[0];
+		for (split /,/, $_) {
+			my ($key, $val) = $_ =~ /^([^=]+)(?:=(.*))?$/;
+			my $nk = bestunique($key, qw(hold resume memory cpus state));
+			$key = $nk if $nk;
+			$key = 'state', $val = 'hold' if ($key eq 'hold');
+			$key = 'state', $val = 'resume' if ($key eq 'resume');
+			if ($key eq 'state') {
+				$val = substr bestunique($val, qw(hold resume)), 0, 4;
+				die "' must be one of: h(old) r(esume)\n" unless $val;
+			}
+			$ed{$key}=$val;
+		}
+		shift;
+		last unless $ARGV[0] =~ /=/;
 	}
-        my ($err) = waitmsg($conf{master}, $conf{master_port}, 'jedit', $jid, $key, $val);
-        my $ok = ($err =~ /^Job.*edited/);
-        warn "$err\n" if $ok;
-	$err = 'No response to jedit' if !$ok && !$err;
-        die "Error: $err\n" if !$ok;
-        exit 0;
+	my @jids = @ARGV;
+
+	die usage() if !%ed || !@jids;
+
+	my $ex = 0;
+	for my $jid (@jids) {
+		warn "Edit " . packdump(\%ed) . "\n";
+	        my ($err) = waitmsg($conf{master}, $conf{master_port}, 'jedit', $jid, %ed);
+		my $ok = ($err =~ /^Job.*edited/);
+		$err=~ s/\n$//;
+		warn "$err\n" if $ok;
+		$err = 'No response to jedit' if !$ok && !$err;
+		warn "Error: $err\n" if !$ok;
+		$ex = 1 if !$ok;
+	}
+	exit $ex;
 }
 
 my ($listener, $read_set, $write_set, $quit, %io_wait, %run_wait);	# daemon globals
@@ -343,6 +366,10 @@ if ($opt{memory}) {
 	}
 }
 
+if (!@cmd) {
+	die usage();
+}
+
 if ($conf{auto_profile}) {
 	if (-e ($conf{auto_profile})) {
 		my $cmd = join ' ', @cmd;
@@ -351,10 +378,6 @@ if ($conf{auto_profile}) {
 		$opt{memory}=$mem if ($mem > $opt{memory});
 		$opt{cpus}=$cpu if ($cpu > $opt{cpus});
 	}
-}
-
-if (!@cmd) {
-	die usage();
 }
 
 # no socket io unless waiting
@@ -384,6 +407,17 @@ if ($env eq '*' || ($conf{env} && ($conf{env}->[0] eq '*')) ) {
 $opt{user} = getpwuid($>);
 $opt{umask} = umask();
 $opt{env}->{USER} = $opt{user};
+
+if ($verbose) {
+	printf STDERR "Memory:	%d\n", $opt{memory} ? $opt{memory} : $DEFAULT_MEM/1000;
+	printf STDERR "CPUs:	%d\n", $opt{cpus} ? $opt{cpus} : 1;
+}
+
+if ($opt{jobx}) {
+	if ($opt{jobx} =~ /^\d/) {
+		die "External job id's should start with a non-numeric\n";
+	}
+}
 
 my %info;
 my $interrupt;
@@ -434,17 +468,12 @@ if (!$info{jid}) {
 
 if ($verbose) {
 	printf STDERR "Job_ID:	$info{jid}\n";
-	printf STDERR "Memory:	%d\n", $opt{memory} ? $opt{memory} : $DEFAULT_MEM/1000;
-	printf STDERR "CPU:	%d\n", $opt{cpu} ? $opt{cpu} : 1;
 }
 
 if ($opt{jobx}) {
 	# this is crappy... should be a totally separate set of id's... and should be on the central server
 	# but too much code and not worth it for me right now
 	# with sqlite would be easier
-	if ($opt{jobx} =~ /^\d/) {
-		die "External job id's should start with a non-numeric\n";
-	}
 	mkdir("$ENV{HOME}/.grun") if ! -d "$ENV{HOME}/.grun";
 	mkdir("$ENV{HOME}/.grun/jobx") if ! -d "$ENV{HOME}/.grun/jobx";
 	burp("$ENV{HOME}/.grun/jobx/$opt{jobx}", $info{jid});
@@ -724,10 +753,10 @@ sub process_message {
 		}
 		return ();
         } elsif ($cmd eq 'jedit') {
-		my ($jid, $key, $val) = @args;
-		if (!$key || !defined($val)) {
-                	xlog("error", "Invalid edit request ($jid,$key,$val)");
-                	return "Invalid edit request ($jid,$key,$val)\n";
+		my ($jid, %ed) = @args;
+		if (!$jid || !%ed) {
+                	xlog("error", "Invalid edit request (@args)");
+                	return "Invalid edit request (@args)\n";
 		} elsif (! -e "$conf{spool}/jobs/$jid") {
                         if (! -e "$conf{spool}/jobs/$jid.ip") {
                                 xlog("error", "Job $jid not found");
@@ -739,7 +768,9 @@ sub process_message {
                         }
                 } else {
 			my $ref = $safe->reval(slurp("$conf{spool}/jobs/$jid"));
-			$ref->[0]->{$key} = $val;
+			for my $key (keys(%ed)) {
+				$ref->[0]->{$key} = $ed{$key};
+			}
 			burp("$conf{spool}/jobs/$jid.jedit", packref($ref));
 			rename("$conf{spool}/jobs/$jid.jedit", "$conf{spool}/jobs/$jid");
                         return "Job $jid edited\n";
@@ -1210,6 +1241,8 @@ sub schedule {
 		}
 
 		my $job = $ref->[0];
+
+		next if $job->{state} eq 'hold';
 
 		# this should be config, min requirements
 		$job->{cpus} = 1 if $job->{cpus} == 0;
@@ -1889,8 +1922,8 @@ sub usage {
 	$u .= <<'EOF';
 Usage: grun <exec-options> command...
    or: grun -d [<local-daemon-options>]
-   or: grun -k <jobid>
-   or: grun -e <jobid> key val
+   or: grun -k <jobid> [<jobid2...>]
+   or: grun -e key=val[,key2=val2...] <jobid> [<jobid2...>]
    or: grun -q [<query-options>] <query-command>
 
 Lightweight job queueing system
@@ -1898,7 +1931,7 @@ Lightweight job queueing system
 For more help, run grun -?, grun -d -?, grun -C -? or grun -q -?.
 EOF
 
-	$u .= <<'EOF' unless $daemon || $qinfo;
+	$u .= <<'EOF' unless $daemon || $qinfo || $editjob;
 
 Execution Options:
     -f|ile FILE     Read FILE for job options (mem, cpu, cmd, etc)
@@ -1938,6 +1971,14 @@ Daemon Options:
     -R|ESTART       Kill and restart a running server
 
 Without an option, -d just starts the daemon on the local machine.
+EOF
+        $u .= <<'EOF' if $editjob;
+
+Edit Keys:
+    hold              Hold job (no value needed)
+    resume            Resume job
+    memory=N          Memory in MB
+    cpus=N            # of Cpus needed
 EOF
 
 	$u .= <<'EOF';
@@ -2005,7 +2046,7 @@ sub showhist {
 
         {
                 local @ARGV = @_;
-                GetOptions(\%opt, "count|c=i", "user=s","job=i","resubmit","fmt|F=s","long","grep|g=s");
+                GetOptions(\%opt, "count|c=i", "user=s","job=i","resubmit","fmt|F=s","long","grep|g=s","dump");
                 @_=@ARGV;
         }
 	if ($_[0] =~ /[a-z]/ && !$opt{user}) {
@@ -2079,17 +2120,22 @@ sub showhist {
 			$job{mtime}=fmtime($mtime);
 			if (ref($job{usage})) {
 				for (keys(%{$job{usage}})) {
-					$job{$_}=$job{usage}{$_};
+					$job{"usage_".$_}=$job{usage}{$_};
 				}
+				delete $job{usage};
 			}
 			if ($opt{long}) {
 				$opt{fmt} = '----------\n';
 				for(sort(keys(%job))) {
-					$opt{fmt} .= "$_=" . '%' . $_. '\n';
+					$opt{fmt} .= "$_=" . $job{$_} . '\n';
 				}
 			}
 	
-			$r .= fmtstr($opt{fmt}, \%job);
+			if ($opt{dump}) {
+				$r .= packdump($job) . "\n";
+			} else {
+				$r .= fmtstr($opt{fmt}, \%job);
+			}
                 }
 		last if $count == 0;
         }
@@ -2166,6 +2212,7 @@ sub showjobs {
 			next if $opt{user} && ! ($opt{user} eq $job{user});
 			next if $opt{job} && ! ($opt{job} eq $jid);
 			my $stat = '(I)';
+			$stat = '(H)' if $job->{state} eq 'hold';
 			if ($jid =~ s/:([.\d]+?)\.run$//) {
 				my $ip = $1;
 				my @node = unpackcmd(slurp("$conf{spool}/nodes/$ip.reg"));
@@ -2240,7 +2287,7 @@ sub expandnodes {
 sub evalctx {
 	my ($expr, @ctx) = @_;
 	my $msafe = new Safe;
-	$msafe->permit(qw(:subprocess));        # allow backticks
+	$msafe->permit(qw(:subprocess :filesys_read));        # allow backticks
 	for(my $i = 0; $i < @ctx; $i+=2) {
 		my ($name, $var) = ($ctx[$i], $ctx[$i+1]);
 		# references to hashes/arrays become dereferenced hashes/arrays
