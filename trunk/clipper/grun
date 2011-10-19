@@ -357,12 +357,12 @@ if ($make) {
 #die Dumper \@cmd  if $opt{debug};
 
 if ($opt{memory}) {
-	$opt{memory} *= 1000;
-	if ($opt{memory} =~ /gb?$/) {
+	if ($opt{memory} !~ /kb?$/) {
+		# default is mb
 		$opt{memory} *= 1000;
-	}
-	if ($opt{memory} =~ /kb?$/) {
-		$opt{memory} /= 1000;
+		if ($opt{memory} =~ /gb?$/) {
+			$opt{memory} *= 1000;
+		}
 	}
 }
 
@@ -1012,6 +1012,8 @@ sub process_message {
 					exit $ret;
 				}
 				# special exit code 101 means couldn't run the command
+				close STDOUT; 
+				close STDERR; 
 			}
 		}
 
@@ -1089,6 +1091,7 @@ sub process_message {
 		$io_wait{$jid}->{time} = time();		# toss this entry if it gets old
 #		print "IOWAIT: " . Dumper \%io_wait;
 		if ($pid <= 1) {
+			xlog("error", "Wait xio for job ($jid) which isn't running");
 			return "name:fake.err\nlen:13\n\nJob not foundname:fake.out\nlen:0\n\nname:fake.stat\nlen:4\n\n-102";
 		}
 		return ($SOCK_WAIT);				# leave socket open for response
@@ -1428,6 +1431,7 @@ sub slurp
     local $/ = undef;
     $dat = $in->getline;
     $in->close;
+    close($in);
     return $dat;
 }
 
@@ -1536,9 +1540,10 @@ sub srvexec {
 			if ($conf{expire_secs} && ($conf{loop_num} > 2) && (stat("$conf{spool}/jpids/$jid"))[9] < time()-$conf{expire_secs}) {
 				# and not running
 				my $pid = slurp("$conf{spool}/jpids/$jid");
-				if (! -e "$conf{spool}/pids/$pid") {
+				if (! -e "$conf{spool}/pids/$pid" || ! kill(0, $pid)) {
 					xlog("error", "Expiring i/o for $jid ($pid)");
 					unlink "$conf{spool}/jpids/$jid";
+					unlink "$conf{spool}/pids/$pid";
 					unlink "$conf{spool}/stdio/$pid.err";
 					unlink "$conf{spool}/stdio/$pid.out";
 				}
@@ -1633,7 +1638,7 @@ sub writestat {
 			print(ST "msgsend:$ru->[9]\n");
 			print(ST "msgrecv:$ru->[10]\n");
 		}
-		return close ST;
+		return close(ST);
 	}
 	return 1;
 }
@@ -1726,6 +1731,7 @@ sub _readconf {
 			$conf{$k} = $v;
 		}
 	}
+	close CONF;
 }
 
 sub fail {
@@ -1752,6 +1758,7 @@ sub xlog {
 
 sub waitio {
     my $opts = shift @_ if ref $_[0];
+    my (undef, undef, undef, $jobid) = @_;
     my $tries;
     while (1) {
 	++$tries;
@@ -1784,7 +1791,7 @@ sub waitio {
 #		print "DAT IS: ($dat)\n";
 
 		if (!$head{name}) {
-			xlog("error", "Didn't get name: header ($tries)");
+			xlog("error", "Didn't get name: header ($tries), jid $jobid");
 		}
 		last if (!$head{name});
 
@@ -2228,6 +2235,8 @@ sub showjobs {
 			}
                         $job->{jid} = $jid;
                         $job->{stat} = $stat;
+                        $job->{cpus} = 1 if ! $job->{cpus};
+                        $job->{memory} = $DEFAULT_MEM/1000 if ! $job->{memory};
                         $job->{cmd} = join(' ', @cmd);
 			if ($opt{dump}) {
 				$r .= packdump($job) . "\n";
