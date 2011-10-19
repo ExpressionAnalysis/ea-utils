@@ -1,10 +1,12 @@
 #!/usr/bin/perl
 use strict;
 
+my $ssiz=7000;			# sample size
+
 if ($ARGV[0] =~ /^-[h?]/) {
 	print "Usage: determine-phred FILE
 
-Reads a sam or fastq, possibly gzipped and returns the phred-scale, 
+Reads a sam, fastq or pileup, possibly gzipped and returns the phred-scale, 
   either 64 or 33, based on a quick scan of the data in the file.
 ";
 	exit 0;
@@ -41,6 +43,9 @@ sub determine {
 		$qual = <>;
 		chomp $qual;
 		$fmt = 'fq';
+	} elsif (/^\S+\t\d+\t[ACTGN]\t\d+\t\S+\t(\S+)$/i) {
+		$qual = $1;
+		$fmt = 'pileup';
 	} else {
 		# sam
 		$fmt = 'sam';
@@ -50,7 +55,6 @@ sub determine {
 		die "Unknown file format\n";
 	}
 
-	my $ssiz=7000;			# sample size
 	while($qual) {
 		for (my $i =length($qual)/2; $i < length($qual); ++$i) {
 			if (ord(substr($qual,$i,1)) < 64) {
@@ -68,6 +72,8 @@ sub determine {
 			scalar <>;		# comment
 			$qual = <>;
 			chomp $qual;
+		} elsif ($fmt eq 'pileup') {
+			$qual = (split(/\t/, $_))[5];
 		} else {
 			# sam
 			$qual = (split(/\t/, $_))[10];
