@@ -55,7 +55,7 @@ $def{expire_secs} = 14400;			# remove jobs whose execution nodes haven't reporte
 $def{io_keep} = 3600;				# keep io for this long after a job with i/o is finished in a detached session
 $def{sched_secs} = '1';				# how often to try scheduling
 $def{max_sched} = 50;				# how many different jobs to try and match before giving up on the rest (queue busy)
-$def{spread_pct} = .10;				# how often to "distribute jobs", versus "clump" them
+$def{spread_pct} = 5;				# how often to "distribute jobs", versus "clump" them
 $def{master} = 'localhost:5184';		# central scheduler
 $def{services} = "queue exec";			# all can run
 $def{pid_file} = "/var/run/grun.pid";		# pid file
@@ -497,13 +497,13 @@ if ($opt{wait}) {
 	}
 
 	# look at all the work you can avoid if you don't wait
-	my ($stat, $err);
+	my ($stat, $err, $diderr);
 	# connect to executing node directly and ask for stderr, stdout, and status based on job id
 	while (!defined $stat && !defined $err) {
 		# shadow watcher....
 		if ($info{ip}) {
 			if ($opt{io} && !($opt{err} && $opt{out}) ) {
-				($stat, $err) = waitio($info{ip}, $info{port}, 'xio', $info{jid});
+				($stat, $err, $diderr) = waitio($info{ip}, $info{port}, 'xio', $info{jid});
 			} else {
 				($stat, $err) = waitmsg($info{ip}, $info{port}, 'xstat', $info{jid});
 			}
@@ -522,11 +522,16 @@ if ($opt{wait}) {
 	if ($stat == 11) {
 		$err = 'Segmentation fault';
 	}
+	$stat == $stat>>8;
 	if ($err) {
 		print STDERR $err, "\n";
+	} else {
+		if ($stat != 0 && ! $diderr) {
+                	print STDERR "Error: Command returned $stat\n";
+		}
 	}
 	unlink("$ENV{HOME}/.grun/jobx/$opt{jobx}") if $opt{jobx};
-	exit $stat>>8;
+	exit $stat;
 } else {
 	# aah... nicer
 	print STDOUT "Job id $info{jid}\n";
@@ -1259,7 +1264,7 @@ sub schedule {
 			last;
 		}
 		++$cnt;
-		my $spread = rand() > $conf{spread_pct};
+		my $spread = rand() > $conf{spread_pct}/100;
 		for my $n (values %nodes) {
 			# jobs need enough memory, cpu availability and disk space... that's it
 			if (!$n->{ip}) {
@@ -1456,6 +1461,7 @@ sub srvexec {
 	}
 
 	# this needs to be wait3 for cpu/mem usage history, maybe use Inline::C
+	my %noping;
 	while (1) {
 		my ($kid, $status, @rd) = waitusage(-1, WNOHANG);
 		last if $kid <= 0;
@@ -1463,6 +1469,7 @@ sub srvexec {
 		if (writestat($kid, $status, undef, undef, \@rd)) {
 			$conf{node}->{ping}-=5;					# hurry up to let scheduler know I'm free
 			notifystat($kid);
+			$noping{$kid} = 1;
 		} else {
 			xlog("error", "Premature status sent on pid $kid");
 		}
@@ -1555,6 +1562,7 @@ sub srvexec {
 		while(my $kid = readdir(D)) {
 			next unless /^(\d+)/;
 			$kid = $1;
+			next if $noping{$kid};
 			if (! -e "$conf{spool}/pids/$kid.stat") {
 				xlog("error", "Cleanup leftover err/out for $kid");
 				unlink "$conf{spool}/stdio/$kid.err";
@@ -1760,6 +1768,7 @@ sub waitio {
     my $opts = shift @_ if ref $_[0];
     my (undef, undef, undef, $jobid) = @_;
     my $tries;
+    my $diderr=0;
     while (1) {
 	++$tries;
         my $sock = _sendcmd(@_);
@@ -1815,6 +1824,12 @@ sub waitio {
 
 		my $left = $head{len};
 
+		if ($head{name}=~/\.err$/) {
+			if ($head{len} > 0) {
+				$diderr = 1;
+			}
+		}
+
 		++$got;
 		do {
 #			print STDERR "left: $left dat:" . length($dat) . "\n"; 
@@ -1839,12 +1854,12 @@ sub waitio {
 
 	if ($stat) {
 		$stat = gunpack($stat);
-		return ($stat->{status}, $stat->{error});
+		return ($stat->{status}, $stat->{error}, $diderr);
 	} elsif ($err) {
 		xlog("warn", "Error returned: $err, reporting status -2 for (@_)");
-		return (-2, $err);
+		return (-2, $err, $diderr);
 	} elsif ($opts->{inplace}) {
-		return (0, '');
+		return (0, '', $diderr);
 	} else {
 		sleep(5)
 	}
