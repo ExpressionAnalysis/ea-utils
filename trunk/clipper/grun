@@ -2079,10 +2079,12 @@ sub showhist {
         my $r;
 	
 	my $mx = -1;
+	my $mx2 = -1;
         opendir(D,"$conf{spool}/jhist");
 	while(defined ($_=readdir(D))) {
 		next unless /^\d+$/;
 		if ($_ > $mx) {
+			$mx2 = $mx;
 			$mx = $_;
 		}
 	}
@@ -2091,14 +2093,24 @@ sub showhist {
         opendir(D,"$conf{spool}/jhist/$mx");
 	my @D = sort {$b-$a} readdir(D);
 	closedir(D);
+	grep s/^/$mx\//, @D;
+	# kluge... get this in a db... but make it embedded and nice!
+	if ($mx2 > -1 && (@D < 1000 || @D < $opt{count})) {
+		opendir(D,"$conf{spool}/jhist/$mx2");
+		my @T = sort {$b-$a} readdir(D);
+		closedir(D);
+		grep s/^/$mx2\//, @T;
+		@D = (@D, @T) if @T;
+	}
 
 	my $count = $opt{count}; 
 	$count = 50 if !$count;
 
 	splice @D, $count*1.4 unless $opt{user}||$opt{grep};
 	
-        for my $jid (@D) {
-                my $f = "$conf{spool}/jhist/$mx/$jid";
+        for my $mjid (@D) {
+		my ($jid) = $mjid =~ /\/(.*)$/;
+                my $f = "$conf{spool}/jhist/$mjid";
 		my $mtime = (stat($f))[9];
                 next unless -f $f;
                 my @job=unpackcmd(slurp($f), 1);
