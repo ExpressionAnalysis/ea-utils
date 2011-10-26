@@ -39,7 +39,7 @@ my ($mapc, @mapq, @mat);
 my ($id, $bits, $nmo, $mapq, $cig, $l, $q, $r, $mat, $nm, @fdx);
 
 my %opt;
-GetOptions(\%opt, "help", "bases=i", "count=i", "ext|x=s") || die usage();
+GetOptions(\%opt, "help", "bases=i", "make|M", "count=i", "ext|x=s") || die usage();
 if ($opt{help}) { print usage(); exit 1;}
 
 my $multi = 1 if @ARGV > 1;
@@ -69,6 +69,12 @@ if ($multi) {
 	my $out = $in;
 	$out =~ s/\.gz$//;
 	$out .= ".$opt{ext}";
+
+	if ($opt{make}) {
+		next if -s $out && (stat($out))[9] > (stat($in))[9];
+		warn "+$in>$out\n";
+	}
+
 	open(OUT, ">$out") || die "Can't open $out\n";
 }
 
@@ -185,9 +191,10 @@ if ($mapc > 0) {
 		printf OUT "insert Q3\t%.4f\n", quantile(\@mat, .75);
 	}
 
-	printf OUT "base qual mean\t%.4f\n", ($qualsum/$nbase)-$phred;
-	printf OUT "base qual stdev\t%.4f\n", stdev($nbase, $qualsum, $qualssq);
-
+	if ($nbase > 0) {
+		printf OUT "base qual mean\t%.4f\n", ($qualsum/$nbase)-$phred;
+		printf OUT "base qual stdev\t%.4f\n", stdev($nbase, $qualsum, $qualssq);
+	}
 }
 
 if ($nbase) {
@@ -200,10 +207,10 @@ if ($nbase) {
 	}
 }
 
-if (%mapb > 1) {
+if (%mapb > 1 && %mapb <= 1000) {
 	for my $k (sort(keys(%mapb))) {
 		my $v = $mapb{$k};
-		my ($n) = $k =~ m/([\w.]+)/;
+		my ($n) = $k =~ m/([\w.-]+)/;
 		printf OUT "%%$n\t%.2f\n", 100*$v/$mapb;
 	}
 }
@@ -245,7 +252,10 @@ sub stats
 		}
 	}
 
-	$mapb{$nmo}+=$l; 
+	if (%mapb <= 1000) {
+		$mapb{$nmo}+=$l; 
+	}
+	
 	$mapb+=$l;
 
 	if ($mat > 0) {
