@@ -135,19 +135,25 @@ int main(int argc, char **argv) {
 	int na=0, gt=0, eq=0, lt=0, to=0;
 	while ( inbam.GetNextAlignment(al) ) {
 		++to;
-		it = pmap.find(al.Name);
-		if (it == pmap.end()) {
-			writer.SaveAlignment(al);
-			++na;
-		}
- 		if (al.MapQuality > it->second) {
-			++gt;
-			writer.SaveAlignment(al);
-		} else if (al.MapQuality == it->second) {
-			++eq;
-			writer.SaveAlignment(al);
-		} else {
-			++lt;
+		try {
+			it = pmap.find(al.Name);
+			if (it == pmap.end()) {
+				// not found?
+				writer.SaveAlignment(al);
+				++na;
+			} else if (al.MapQuality > it->second) {
+				// gt
+				++gt;
+				writer.SaveAlignment(al);
+			} else if (al.MapQuality == it->second) {
+				// eq
+				++eq;
+				writer.SaveAlignment(al);
+			} else {
+				// lt
+				++lt;
+			}
+		} catch (...) {
 		}
 	}
 	fprintf(ferr,"total\t%d\n",to);
