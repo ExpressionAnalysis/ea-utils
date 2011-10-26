@@ -65,8 +65,9 @@ if ($in && !($in eq '-')) {
 }
 
 *OUT=*STDOUT;
+my $out;
 if ($multi) {
-	my $out = $in;
+	$out = $in;
 	$out =~ s/\.gz$//;
 	$out .= ".$opt{ext}";
 
@@ -75,7 +76,7 @@ if ($multi) {
 		warn "+$in>$out\n";
 	}
 
-	open(OUT, ">$out") || die "Can't open $out\n";
+	open(OUT, ">$out.tmp") || die "Can't open $out\n";
 }
 
 	(%mapb, $mapb, @basecnt, $lenmin, $lenmax, $lensum, $lenssq, $mapsum, $mapssq, $nmlen, $nmc, $insum, $dlsum, $nmsum, $nmnz, $nbase, $qualmax, $qualmin, $qualsum, $qualssq, $rev, $for, $mapc, @mapq, @mat, $n) = (undef) x 100;
@@ -215,6 +216,8 @@ if (%mapb > 1 && %mapb <= 1000) {
 	}
 }
 
+close OUT;
+rename("$out.tmp", $out);
 }
 
 sub stats
