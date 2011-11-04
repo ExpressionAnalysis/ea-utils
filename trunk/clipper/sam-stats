@@ -309,6 +309,7 @@ Options:
   -b                : base sample size (5000)
   -c                : read sample count (0)
   -x		    : extension (stats)
+  -M		    : make newer only
 
 OUTPUT:
 
