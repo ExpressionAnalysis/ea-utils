@@ -269,7 +269,7 @@ $opt{wait} = 1;				# keep socket open until job is finished
 $opt{io} = 1;				# copy io back on the socket, implies wait
 
 Getopt::Long::Configure qw(require_order no_ignore_case passthrough);
-GetOptions(\%opt, "file=s", "memory|m=i", "hosts|h=s", "cpus|c=i", "io!", "wait!", "err|e=s", "out|o=s", "jobx|jobid|j=s", "verbose", "make|M", "debug|D", "env|E=s", "noexec|N");
+GetOptions(\%opt, "file=s", "memory|m=i", "hosts|h=s", "cpus|c=i", "io!", "wait!", "err|e=s", "out|o=s", "jobx|jobid|j=s", "verbose", "make|M", "debug|D", "env|E=s", "alert=s");
 
 my $verbose = $opt{verbose}; delete $opt{verbose};
 my $make = $opt{make}; delete $opt{make};
@@ -355,22 +355,9 @@ if ($make) {
 
 	warn "+@cmd\n" if $opt{noexec} || $verbose;
 
-	if ($opt{noexec}) {
-		exit 0;
-	}
 }
 
 #die Dumper \@cmd  if $opt{debug};
-
-if ($opt{memory}) {
-	if ($opt{memory} !~ /kb?$/) {
-		# default is mb
-		$opt{memory} *= 1000;
-		if ($opt{memory} =~ /gb?$/) {
-			$opt{memory} *= 1000;
-		}
-	}
-}
 
 if (!@cmd) {
 	die usage();
@@ -381,8 +368,21 @@ if ($conf{auto_profile}) {
 		my $cmd = join ' ', @cmd;
 		# safe'ish eval, just so there aren't weird side effects
 		my ($cpu, $mem) = evalctx(slurp($conf{auto_profile}) . ";\nreturn (\$cpu, \$mem);", cmd=>$cmd, cmd=>\@cmd);
+		if ($@) {
+			die "Can't run $conf{auto_profile}: $@\n";
+		}
 		$opt{memory}=$mem if ($mem > $opt{memory});
 		$opt{cpus}=$cpu if ($cpu > $opt{cpus});
+	}
+}
+
+if ($opt{memory}) {
+	if ($opt{memory} !~ /kb?$/) {
+		# default memory unit is assumed to be in MB
+		$opt{memory} *= 1000;
+		if ($opt{memory} =~ /gb?$/) {
+			$opt{memory} *= 1000;
+		}
 	}
 }
 
@@ -443,6 +443,9 @@ sub sigh {
 		$interrupt = $signame;
 	}
 };
+
+# for testing -M make
+exit 0 if $opt{noexec};
 
 $SIG{INT} = \&sigh;
 $SIG{TERM} = \&sigh;
@@ -1549,13 +1552,12 @@ sub srvexec {
 			# finished, notify submitter
 
 			if ($kid =~ /\.stat$/) {
+				# try again
 				if (fmodtime("$conf{spool}/pids/$kid") < (time()-$conf{ping_secs})) {
 					notifystat($kid);
 				}
-				next;
-			}
-			# running, check status
-			if ($kid =~ /^\d+$/ ) {
+			} elsif ($kid =~ /^\d+$/ ) {
+				# running, check status
 				my ($ret, $status, @rd) = waitusage($kid, WNOHANG);
 				$status = undef if !$ret;
 				my $alive = kill(0, $kid);
@@ -2248,7 +2250,7 @@ sub showjobs {
 	$opt{fmt} = '%s:jid\t%s:user\t%s:stat\t%s:cwd\t%s:cmd\n';
 	{
 		local @ARGV = @_;
-		GetOptions(\%opt, "dump", "user=s","job=i","fmt|F=s");
+		GetOptions(\%opt, "dump", "user=s","job=i","fmt|F=s","long");
 		@_=@ARGV;
 	}
 
@@ -2277,7 +2279,7 @@ sub showjobs {
 		if (ref($job)) {
 			my %job=%{$job};
 			next if $opt{user} && ! ($opt{user} eq $job{user});
-			next if $opt{job} && ! ($opt{job} eq $jid);
+			next if $opt{job} && ! ($jid =~ /^$opt{job}\b/);
 			my $stat = '(I)';
 			$stat = '(H)' if $job->{state} eq 'hold';
 			if ($jid =~ s/:([.\d]+?)\.run$//) {
@@ -2298,6 +2300,12 @@ sub showjobs {
                         $job->{cpus} = 1 if ! $job->{cpus};
                         $job->{memory} = $DEFAULT_MEM/1000 if ! $job->{memory};
                         $job->{cmd} = join(' ', @cmd);
+                        if ($opt{long}) {
+                                $opt{fmt} = '----------\n';
+                                for(sort(keys(%$job))) {
+                                        $opt{fmt} .= "$_=" . $job->{$_} . '\n';
+                                }
+                        }
 			if ($opt{dump}) {
 				$r .= packdump($job) . "\n";
 			} else {
