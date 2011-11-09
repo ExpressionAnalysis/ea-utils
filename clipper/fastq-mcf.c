@@ -76,6 +76,7 @@ struct ad {
 int read_fa(FILE *in, int rno, struct ad *ad);		// 0=done, 1=ok, -1=err+continue
 int read_fq(FILE *in, int rno, struct fq *fq);		// 0=done, 1=ok, -1=err+continue
 int meanq(const char *q, int qn, int i, int w);
+void fqseek(FILE *fin, int s);
 
 int char2bp(char c);
 char bp2char(int b);
@@ -242,36 +243,21 @@ int main (int argc, char **argv) {
 	int avgns[MAX_FILES]; meminit(avgns);			// average sequence length per file
 	// read length
         for (i=0;i<i_n;++i) {
-            struct stat st;
-            stat(ifil[i], &st);
 
             char *s = NULL; size_t na = 0; int nr = 0, ns = 0, totn[MAX_FILES]; meminit(totn);
 	    char *q = NULL; size_t naq = 0; int nq =0;
 	    int j;
 	    int ilv3det=2;
 
-	    if (st.st_size > (sampcnt*100)) {
-		    // jump a third of the way in
-	            fseek(fin[i], (st.st_size-(sampcnt*100))/3, 0);
-		    while (getline(&s, &na, fin[i]) > 0) {
-			if (*s == '@')  {
-				j=getline(&s, &na, fin[i]);
-				if (j && (*s == '@'))  {
-					j=getline(&s, &na, fin[i]);
-					j=getline(&s, &na, fin[i]);
-					j=getline(&s, &na, fin[i]);
-				} else {
-					j=getline(&s, &na, fin[i]);
-					j=getline(&s, &na, fin[i]);
-				}
-				break;
-			}
-		    }
-	    }
+
+	    // jump a third of the way in
+            struct stat st;
+            stat(ifil[i], &st);
+	    if (st.st_size > (sampcnt*100)) 
+	            fqseek(fin[i],(st.st_size-(sampcnt*100))/3);
 
             while (getline(&s, &na, fin[i]) > 0) {
                 if (*s == '@')  {
-
 			// look for illumina purity filtering flags
 			if (ilv3det==2) {
 				ilv3det=0;
@@ -374,12 +360,19 @@ int main (int argc, char **argv) {
 
 	    struct stat st;
 	    stat(ifil[i], &st);
-	    fseek(fin[i], st.st_size > sampcnt ? (st.st_size-sampcnt)/3 : 0, 0);
+	    if (st.st_size/100 > sampcnt) {
+		fqseek(fin[i],(st.st_size-(sampcnt*100))/3);
+	    } else {
+		    fseek(fin[i],0,0);
+	    }
 
-	    char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
+	    // todo, use readfq
+	    char *s = NULL; size_t na = 0; int ns = 0, nr = 0;
 	    char *q = NULL; size_t naq = 0; int nq =0;
-            while (getline(&s, &na, fin[i]) > 0) {
-		if (*s == '@')  {
+	    char *d = NULL; size_t nad = 0; int nd =0;
+
+            while ((nd=getline(&d, &nad, fin[i])) > 0) {
+		if (*d == '@')  {
 			if ((ns=getline(&s, &na, fin[i])) <=0) 
 				break;
 			nq=getline(&q, &naq, fin[i]);
@@ -398,7 +391,20 @@ int main (int argc, char **argv) {
 			if (i > 0 && avgns[i] < 11) 			// reads of avg length < 11 ? barcode lane, skip it
 				continue;
 
-			++nr;
+			if (ilv3) {
+				char * p = strchr(d, ' ');
+				if (p) {
+					p+=2;
+					if (*p==':') {
+						++p;
+						if (*p == 'Y') {
+							continue;
+						}
+					}
+				}
+			}
+
+				++nr;
 
 			// to be safe, we don't assume reads are fixed-length, not any slower, just a little more code
 			int b;
@@ -448,6 +454,7 @@ int main (int argc, char **argv) {
 			break;
             }
 	    if (s) free(s);
+	    if (d) free(d);
 	    if (q) free(q);
 	    if (i == 0 || avgns[i] >= 11) {
 		    if (nsampcnt == 0 || nr < nsampcnt)			// fewer than max, set for thresholds
@@ -1067,4 +1074,27 @@ int meanq(const char *q, int qn, int i, int w) {
 	}
 	return t / (e-s+1);
 }
+
+void fqseek(FILE *fin, int s) {
+    fseek(fin, s, 0);
+    if (s>0) {
+	    char *s = NULL; size_t na = 0; int ns = 0;
+	    while ((ns=getline(&s, &na, fin)) > 0) {
+		if (*s == '@')  {
+			ns=getline(&s, &na, fin);
+			if ((ns>0) && (*s == '@'))  {
+				ns=getline(&s, &na, fin);
+				ns=getline(&s, &na, fin);
+				ns=getline(&s, &na, fin);
+			} else {
+				ns=getline(&s, &na, fin);
+				ns=getline(&s, &na, fin);
+			}
+			break;
+		}
+	    }
+	    if (s) free(s);
+    }
+}
+
 
