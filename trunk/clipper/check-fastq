@@ -1,0 +1,21 @@
+#!/usr/bin/perl
+
+use Getopt::Long;
+
+my $len;
+GetOptions("len=i"=>\$len);
+
+my ($i, $s, $c, $q);
+
+while ($i=<>) {
+	$s=<>;
+	$c=<>;
+	$q=<>;
+	chomp $s;
+	chomp $q;
+	die "$ARGV:$. - length mismatch\n" if length($s) != length($q);
+	die "$ARGV:$. - illegal base ($1)\n" if $s =~ /([^ACTGNactgn]{1})/;
+	if ($len) {
+		die "$ARGV:$. - read too short (" . length($q) . ")\n" if length($q) < $len;
+	}
+}
