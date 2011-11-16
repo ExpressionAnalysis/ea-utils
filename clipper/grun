@@ -338,7 +338,7 @@ if ($make) {
                         }
 		}
 	}
-	die "Unable to determine i/o for -M (make) semantics\n"
+	die "Unable to determine i/o for -M (make) semantics\n\n" . usage()
 		if !@i || !@o;
 
 	my $need=0;
@@ -2007,7 +2007,7 @@ sub burp
 
 sub usage {
 	my $u;
-	$u .= <<'EOF';
+	$u .= <<'EOF' unless $make;
 Usage: grun <exec-options> command...
    or: grun -d [<local-daemon-options>]
    or: grun -k <jobid> [<jobid2...>]
@@ -2019,7 +2019,7 @@ Lightweight job queueing system
 For more help, run grun -?, grun -d -?, grun -C -? or grun -q -?.
 EOF
 
-	$u .= <<'EOF' unless $daemon || $qinfo || $editjob;
+	$u .= <<'EOF' unless $daemon || $qinfo || $editjob || $make;
 
 Execution Options:
     -f|ile FILE     Read FILE for job options (mem, cpu, cmd, etc)
@@ -2028,6 +2028,7 @@ Execution Options:
     -host N1,N2     specify certain hosts
     -j|obid TEXT    user-supplied job ID
     -v|erbose       print job id, execution node and stats to STDERR
+    -M|make	    only run job if inputs are newer than outputs
 
     -noio           disable io-processing, but wait for completion
     -nowait         no io and don't wait, just start the command
@@ -2035,6 +2036,21 @@ Execution Options:
     -o|ut FILE      write stdout directly to FILE, no spool
 
 If the command contains shell metacharacters, it's prefixed with "bash -c".
+EOF
+
+	$u .= <<'EOF' if $make;
+Make Semantics:
+
+	%i:file    Input file, left in the command line
+	#i:file    Input file, removed the command line before executing
+	%o:file    Output file, left in the command line
+	#o:file    Output file, removed the command line before executing
+	< file     Input file, left in the command line
+	> file     Output file, left in the command line
+
+For Example:
+	grun "gzip %i:x.foo #o>x.foo.gz"
+
 EOF
 
 	$u .= <<'EOF' if $qinfo;
@@ -2069,7 +2085,7 @@ Edit Keys:
     cpus=N            # of Cpus needed
 EOF
 
-	$u .= <<'EOF';
+	$u .= <<'EOF' if !$make;
 
 Common Options:
     -C FILE         (/etc/grun.conf) Config file location
