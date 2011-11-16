@@ -37,6 +37,7 @@ my $SOCK_WAIT = -1;				# wait for resp
 my $SOCK_FILE = -2;				# send files over socket
 my $SOCK_RAW = -3;				# send pre-encoded resp
 my $DEFAULT_MEM = 10000;
+my $TIMEFMT = 'command:%C\ncpu-real:%E\ncpu-user:%U\ncpu-sys:%S\nmem-max:%M\nmem-avg:%t\nctx-wait:%w\nfs-in:%I\nfs-out:%O';
 
 my ($daemon, $killjob, $editjob);
 my (%conf, %def);
@@ -291,8 +292,8 @@ while ($ARGV[0] =~ /^--([\w-]+)=([\w=]+)/) {
 	shift @ARGV;
 }
 
-if ($ARGV[0] =~ /^-/) {
-	die "Unknown option $ARGV[0]\n";
+if ($make) {
+	GetOptions(\%opt, "noexec");
 }
 
 my @cmd = @ARGV;
@@ -315,9 +316,9 @@ if ($opt{file}) {
 		}
 	}
 }
+
 if ($make) {
 	# %i:input %o:output
-	GetOptions(\%opt, "noexec");
 	my (@i, @o);
 	for (@cmd) {
 		my @t = m/[#%]([io]):(\S+)/g;
@@ -356,6 +357,11 @@ if ($make) {
 	warn "+@cmd\n" if $opt{noexec} || $verbose;
 
 }
+
+if ($ARGV[0] =~ /^-/) {
+	die "Unknown option $ARGV[0]\n";
+}
+
 
 #die Dumper \@cmd  if $opt{debug};
 
@@ -631,7 +637,8 @@ sub readsocks {
 				}
 				if ($file) {
 					xlog("debug", "Sending $file over $sock\n") if $conf{trace};
-					my $head = "name:$file\nlen:" . (-s $file) . "\n";
+					my $left = scalar @{*$sock{HASH}->{file}};
+					my $head = "name:$file\nlen:" . (-s $file) . "\nmore:$left\n";
 					my $io = new IO::File;
 					if (!open ($io, $file)) {
 						$head .= "error:'$file' : $!\n";
@@ -914,6 +921,7 @@ sub process_message {
 					unlink("$conf{spool}/pids/$opts{pid}.stat");
 					unlink("$conf{spool}/stdio/$opts{pid}.err");
 					unlink("$conf{spool}/stdio/$opts{pid}.out");
+					unlink("$conf{spool}/stdio/$info{id}.time");
 				}
 			}
 		}
@@ -945,6 +953,11 @@ sub process_message {
 		if (!open(PF, ">$pfile")) {
 			xlog($err="error", "Can't create $pfile: $!");
 		}
+		my $tfile = "$conf{spool}/stdio/$opts->{id}.time";
+
+		open XOUT, ">", $tfile;
+		close XOUT;
+		chown($uid,0,$tfile);
 
 		if (!$err && !($pid=fork)) {
 			if (! defined $pid) {
@@ -1027,7 +1040,10 @@ sub process_message {
 					$err = "Error setting uid to $uid: $@\n";
 				}
 				if (!$err) {
-					exec(@cmd);
+					if ($cmd[0] =~ / /) {
+						@cmd = ("bash", "-c", @cmd);
+					}
+					exec("/usr/bin/time", "-f", $TIMEFMT, "-o", $tfile, @cmd);
 					printf STDERR "Can't exec $cmd[0] : $!\n";	
 					exit 101;
 				} else {
@@ -1075,7 +1091,7 @@ sub process_message {
 		my ($jid) = @args;
 		my $pid = slurp("$conf{spool}/jpids/$jid");
 		if ($pid > 1) {
-			unlink  "$conf{spool}/jpids/$jid", "$conf{spool}/stdio/$pid.out", "$conf{spool}/stdio/$pid.err", "$conf{spool}/pids/$pid.stat";
+			unlink  "$conf{spool}/jpids/$jid", "$conf{spool}/stdio/$pid.out", "$conf{spool}/stdio/$pid.err", "$conf{spool}/pids/$pid.stat", "$conf{spool}/pids/$pid.time";
 		} else {
 			xlog("error", "Got a cleanup for $jid which doesn't exist");
 		}
@@ -1494,13 +1510,13 @@ sub srvexec {
 		}
 	}
 
-	# this needs to be wait3 for cpu/mem usage history, maybe use Inline::C
 	my %noping;
 	while (1) {
-		my ($kid, $status, @rd) = waitusage(-1, WNOHANG);
+ 		my $kid = waitpid(-1, WNOHANG);
 		last if $kid <= 0;
+		my $status = $?;
 #		print "waitpid worked status is $?\n";
-		if (writestat($kid, $status, undef, undef, \@rd)) {
+		if (writestat($kid, $status, undef, undef)) {
 			$conf{node}->{ping}-=5;					# hurry up to let scheduler know I'm free
 			notifystat($kid);
 			$noping{$kid} = 1;
@@ -1525,7 +1541,7 @@ sub srvexec {
 						burp("$conf{spool}/pids/$pid.stat", $io_wait{$jid}->{status}) 
 							if ! -e "$conf{spool}/pids/$pid.stat"; 
 					}
-					*$sock{HASH}->{file} = ["$conf{spool}/pids/$pid.stat", "$conf{spool}/stdio/$pid.out", "$conf{spool}/stdio/$pid.err"];
+					*$sock{HASH}->{file} = ["$conf{spool}/pids/$pid.stat", "$conf{spool}/stdio/$pid.out", "$conf{spool}/stdio/$pid.err","$conf{spool}/stdio/$jid.time"];
 					$write_set->add($sock);
 				} elsif ($io_wait{$jid}->{type} eq 'stat') {
 					# only want a status code
@@ -1558,11 +1574,12 @@ sub srvexec {
 				}
 			} elsif ($kid =~ /^\d+$/ ) {
 				# running, check status
-				my ($ret, $status, @rd) = waitusage($kid, WNOHANG);
+				my $ret = waitpid(-1, WNOHANG);
+				my $status = $?;
 				$status = undef if !$ret;
 				my $alive = kill(0, $kid);
 				#print "RET $ret STAT $status ALIVE $alive\n";
-				if (writestat($kid, $status, $alive, undef, \@rd)) {
+				if (writestat($kid, $status, $alive, undef)) {
 					notifystat($kid);
 				}
 			}
@@ -1583,6 +1600,7 @@ sub srvexec {
 					unlink "$conf{spool}/pids/$pid";
 					unlink "$conf{spool}/stdio/$pid.err";
 					unlink "$conf{spool}/stdio/$pid.out";
+					unlink "$conf{spool}/stdio/$jid.time";
 				}
 			}
 		}
@@ -1592,11 +1610,17 @@ sub srvexec {
 		while(my $kid = readdir(D)) {
 			next unless /^(\d+)/;
 			$kid = $1;
-			next if $noping{$kid};
-			if (! -e "$conf{spool}/pids/$kid.stat") {
-				xlog("error", "Cleanup leftover err/out for $kid");
-				unlink "$conf{spool}/stdio/$kid.err";
-				unlink "$conf{spool}/stdio/$kid.out";
+			if (/\.time$/) {
+				if (! -e "$conf{spool}/jpids/$kid") {
+					unlink "$conf{spool}/stdio/$kid.time";
+				}
+			} else {
+				next if $noping{$kid};
+				if (! -e "$conf{spool}/pids/$kid.stat") {
+					xlog("error", "Cleanup leftover err/out for $kid");
+					unlink "$conf{spool}/stdio/$kid.err";
+					unlink "$conf{spool}/stdio/$kid.out";
+				}
 			}
 		}
 		closedir(D);
@@ -1632,12 +1656,17 @@ sub notifystat {
 
 #	print STDERR "HERE I AM NOTIFYING MASTER: " . Dumper($info);
 	funpack("$conf{spool}/pids/$kid.stat", $info);
-	xlog("debug", "Notifying status " . Dumper($info) . ".\n") if ($conf{trace} || $info->{trace});
 
 	# for multi-master-scheduling, need to get the master ip & port from the INFO 
 
 	# info should contain id, status, pid, an i/o wait flag and other rusage stats
 	$info->{pid} = $kid;
+	if ( -e "$conf{spool}/stdio/$jid.time") {
+		funpack("$conf{spool}/stdio/$jid.time", $info);
+	}
+
+	xlog("debug", "Notifying status " . Dumper($info) . ".\n") if ($conf{trace} || $info->{trace});
+
 	my $sock = _sendcmd($conf{master}, $conf{master_port}, 'jstat', %$info);
 
 	$read_set->add($sock) if $sock;
@@ -1656,7 +1685,7 @@ sub notifystat {
 }
 
 sub writestat {
-	my ($kid, $stat, $jrun, $err, $ru) = @_;
+	my ($kid, $stat, $jrun, $err) = @_;
 	if ( -e "$conf{spool}/pids/$kid" ) {
 		if ($err && ! -e "$conf{spool}/stdio/$$.err") {
 			burp("$conf{spool}/stdio/$$.err", $err);
@@ -1665,17 +1694,6 @@ sub writestat {
 		print(ST "status:$stat\n");
 		print(ST "jrun:1\n") if $jrun;
 		print(ST "error:$err\n") if $err;
-		if (@$ru) {
-			xlog("debug", "Stats $kid: @$ru");
-			print(ST "utime:$ru->[0]\n");
-			print(ST "stime:$ru->[1]\n");
-			print(ST "maxrss:$ru->[2]\n");
-			print(ST "majflt:$ru->[5]\n");
-			print(ST "inblock:$ru->[7]\n");
-			print(ST "outblock:$ru->[8]\n");
-			print(ST "msgsend:$ru->[9]\n");
-			print(ST "msgrecv:$ru->[10]\n");
-		}
 		return close(ST);
 	}
 	return 1;
@@ -1807,9 +1825,10 @@ sub waitio {
                 sleep(5);
 		next;
         }
-        my ($dat, $stat, $got) = ('', '', 0);
+        my ($dat, $stat) = ('', '');
 	my $err;
-        while ($got<3) {
+	my $more = 3;		# default is 3 files
+        while ($more>0) {
 		my $buf = '';
 		my %head;
 		my $break = 0;
@@ -1834,6 +1853,11 @@ sub waitio {
 			last;
 		}
 
+		--$more;
+		if ($head{more}) {	# can send any number
+			$more = $head{more};
+		}
+
 		my $statstr;  
 		my $fh;
 
@@ -1845,11 +1869,18 @@ sub waitio {
 			open($fh = new IO::File, '>', $head{name}); 
 		} else {
 			# stderr/out/stat 
-			$fh = $head{name}=~/\.err$/ 
-				? *STDERR
-				: *STDOUT;
-
+			$fh = $head{name}=~/\.err$/ ? 
+					*STDERR :
+			      $head{name}=~/\.out$/ ?
+					*STDOUT :
+					undef;
 			$statstr = 1 if $head{name}=~/\.stat$/;
+			if ($head{name}=~/\.time$/ && $verbose) {
+				$fh = *STDERR;
+				if ($head{error}) {
+					print $fh $head{error}, "\n";
+				}
+			}
 		}
 
 		my $left = $head{len};
@@ -1860,14 +1891,15 @@ sub waitio {
 			}
 		}
 
-		++$got;
 		do {
 #			print STDERR "left: $left dat:" . length($dat) . "\n"; 
 			if ($left>0) {
 				if ($statstr) {
 					$stat .= substr($dat,0,$left);
 				} else {
-					print $fh substr($dat,0,$left);
+					if ($fh) { 
+						print $fh substr($dat,0,$left);
+					};
 				}
 				my $ldat = length($dat);
 				substr($dat,0,$left) = '';
@@ -1878,7 +1910,7 @@ sub waitio {
 
 		if ($opts->{inplace}) {
 			close $fh;
-			$got = 3;
+			$more = 0;
 		}
 	}
 
@@ -2116,6 +2148,7 @@ sub showhist {
 
 	if ($opt{job}) {
 		@D = (jhistpath($opt{job}));
+		$D[0]=~s/^$conf{spool}\/jhist\///;
 	} else {
 		my $mx = -1;
 		my $mx2 = -1;
@@ -2319,12 +2352,34 @@ sub showjobs {
 
 sub fmtstr {
         my ($fmt, $hash) = @_;
-        my @fds = $fmt =~ m/%(?:[#0 +,I:-]*(?:\d+)?(?:\.\d+)?\w+:)?(\w+)/g;
-        my @vals = map $hash->{$_}, @fds;
-        $fmt =~ s/(%[#0 +,I:-]*(?:\d+)?(?:\.\d+)?\w{1,2}):\w+/$1/g;
-	my $fds=join '|', @fds;
+
+	# get list of fields
+        my @fds = $fmt =~ m/%(?:[#0 +,I:-]*(?:\d+)?(?:\.\d+)?\w{1,2}:)?([\w-]+|(?:{[^{}]+}))/g;
+
+	%{$safe->varglob("i")}=%{$hash};
+	my @vals;
+	for (@fds) {
+		if ($_ =~ /^\{(.+)\}/) {
+			push @vals, $safe->reval($1);
+		} else {
+			push @vals, $hash->{$_};
+		}
+	}
+	undef %{$safe->varglob("i")};
+
+	# replace formatted - with format-only
+        $fmt           =~   s/(%[#0 +,I:-]*(?:\d+)?(?:\.\d+)?\w{1,2}):([\w-]+|({[^{}]+}))/$1/g;
+
+	my $fds=join '|', map quotemeta($_), @fds;
+	# replace pure-fields with field-only
         $fmt =~ s/%($fds)/%s/g;
-        $fmt = $safe->reval('"' . $fmt . '"');
+	# expand vars
+
+        $fmt =~ s/\\n/\n/g;
+        $fmt =~ s/\\t/\t/g;
+        $fmt =~ s/\\r/\r/g;
+
+	# format the rest
         return sprintf($fmt, @vals);
 }
 
@@ -2594,65 +2649,3 @@ sub kill_job {
         }
 	return $err;
 }
-
-# if wait3 and a C compiler is available, it also returns 
-# the rusage stats in order of the structure (man getrusage)
-my $wait_loaded;
-sub waitusage {
-	if (!defined($wait_loaded)) {
-		eval {
-			require Inline;
-			my $code = <<EOF;
-#include <sys/wait.h>
-
-#define MORTPUSH(x) Inline_Stack_Push(sv_2mortal(x))
-
-void _waitru(int pid, int opts) {
-	int st=-9;
-	struct rusage r;
-	Inline_Stack_Vars;
-
-	if (pid == -1) {
-		pid=(int)wait3(&st, opts, &r);
-	} else {
-		pid=(int)wait4(pid, &st, opts, &r);
-	}
-
-	Inline_Stack_Reset;
-
-	MORTPUSH(newSViv(pid));
-	MORTPUSH(newSViv(st));
-	MORTPUSH(newSVnv((double) r.ru_utime.tv_sec + ((double) r.ru_utime.tv_usec)/1000000.0 ));
-	MORTPUSH(newSVnv((double) r.ru_stime.tv_sec + ((double) r.ru_stime.tv_usec)/1000000.0 ));
-	MORTPUSH(newSViv(r.ru_maxrss));
-	MORTPUSH(newSViv(r.ru_ixrss));
-	MORTPUSH(newSViv(r.ru_idrss));
-	MORTPUSH(newSViv(r.ru_isrss));
-	MORTPUSH(newSViv(r.ru_minflt));
-	MORTPUSH(newSViv(r.ru_majflt));
-	MORTPUSH(newSViv(r.ru_inblock));
-	MORTPUSH(newSViv(r.ru_oublock));
-	MORTPUSH(newSViv(r.ru_msgsnd));
-	MORTPUSH(newSViv(r.ru_msgrcv));
-	MORTPUSH(newSViv(r.ru_nsignals));
-	MORTPUSH(newSViv(r.ru_nvcsw));
-	MORTPUSH(newSViv(r.ru_nivcsw));
-	
-	Inline_Stack_Done;
-}
-EOF
-			Inline->bind(C => $code);
-		};
-		if ($@) {
-			warn "$@\n";
-		}
-		$wait_loaded = $@ ? 0 : 1;
-	}
-	if ($wait_loaded) {
-		return _waitru(@_);
-	} else {
-		my $pid = waitpid($_[0], $_[1]);
-		my $st = $?;
-		return ($pid, $st);
-	}
-}	
