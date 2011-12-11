@@ -92,7 +92,7 @@ int main (int argc, char **argv) {
 		return 1;
 	}
 
-	FILE *fin = fopen(f, "r"); 
+	FILE *fin = strcmp(f,"-") ? fopen(f, "r") : stdin; 
 	if (!fin) {
 		fprintf(stderr, "Error opening file '%s': %s\n",f, strerror(errno));
 		return 1;
