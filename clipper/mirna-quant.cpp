@@ -68,9 +68,10 @@ int main (int argc, char **argv) {
 
 	int targ = 1000;
 	int thr = -1;
+	int mergs = 1;
 
 	char c;
-        while ( (c = getopt (argc, argv, "-hi:o:s:p:r:n:t:x:")) != -1) {
+        while ( (c = getopt (argc, argv, "-hi:o:s:p:r:n:t:x:m:")) != -1) {
                 switch (c) {
                 case '\1':
                         if (!in)
@@ -85,6 +86,8 @@ int main (int argc, char **argv) {
                         out = optarg; break;
                 case 's':
                         stat = optarg; break;
+                case 'm':
+                        mergs = atoi(optarg); break;
                 case 'r':
                         ref = optarg; break;
                 case 'p':
@@ -153,6 +156,7 @@ int main (int argc, char **argv) {
                 }
                 fprintf(fstat,"npatseq\t%d\n", npat);
         }
+
 
         google::sparse_hash_map<std::string, int> pmap;
 	lno = 0;
@@ -235,7 +239,28 @@ int main (int argc, char **argv) {
 			}
 		}
 	}	
-	
+
+	if (mergs > 0) {	
+		google::sparse_hash_map<std::string,int>::iterator it = pmap.begin();
+		google::sparse_hash_map<std::string,std::string>::iterator mit; 
+		std::string sseq;
+		while (it != pmap.end()) {
+			int i;
+			for (i=1;i<=mergs;++i) {
+				sseq = it->first;
+				sseq.erase(sseq.length()-i);
+				mit = mmap.find(sseq);
+				// merge named sequences
+				if (mit != mmap.end()) {
+					pmap[sseq]+=it->second;
+					pmap[it->first]=0;
+					break;
+				}
+			}
+			++it;
+		}
+	}
+
 	int tot = 0;
 	// build lists
         google::sparse_hash_map<std::string,int>::iterator it = pmap.begin();
@@ -293,7 +318,12 @@ int main (int argc, char **argv) {
 	std::vector<ent>::iterator vit;
 	for (vit=(lis.end()-1); vit>=lis.begin();--vit) {
 		++i;
-		fprintf(fstat, "top %d\t%d\t%s\n", i, vit->cnt, vit->seq.c_str());
+		std::string anno;
+                google::sparse_hash_map<std::string,std::string>::iterator mit = mmap.find(vit->seq);
+                if (mit != mmap.end()) {
+                        anno=mit->second;
+                }
+		fprintf(fstat, "top %d\t%d\t%s\t%s\n", i, vit->cnt, vit->seq.c_str(), anno.c_str());
 		if (i >= 10) break;	
 	}
 
@@ -338,7 +368,7 @@ FILE *openordie(const char *nam, const char * mode, FILE *def, const char *errst
         else {
                 r = fopen(nam, mode);
                 if (!r) {
-                        fprintf(stderr, errstr,nam, errstr, strerror(errno));
+                        fprintf(stderr, errstr,nam, strerror(errno));
                         exit(1);
                 }
 	}
@@ -376,7 +406,13 @@ void revcomp(struct fq *d, struct fq *s) {
 }
 
 int read_line(FILE *in, struct line &l) {
-        return (l.n = getline(&l.s, &l.a, in));
+	l.n = getline(&l.s, &l.a, in);
+	if (l.n > 1 && l.s[l.n-1] == '\n' && l.s[l.n-2] == '\r') {
+		--l.n;
+		l.s[l.n-1] = '\n';
+		l.s[l.n] = '\0';
+	}
+	return l.n;
 }
 
 int read_fa(FILE *in, int &lno, struct fq *fa) {
