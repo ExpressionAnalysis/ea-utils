@@ -100,7 +100,7 @@ int main (int argc, char **argv) {
 	float skewpct = 2; 			// any base at any position is less than skewpct of reads
 	float pctns = 5;			// any base that is more than 5% n's
 	bool rmns = 1;				// remove n's at the end of the read
-	int qthr = 10;				// remove end of-read with quality < qthr
+	int qthr = 7;				// remove end of-read with quality < qthr
 	int qwin = 1;				// remove end of read with mean quality < qthr
 	char phred = 0;
 	bool force = 0;
