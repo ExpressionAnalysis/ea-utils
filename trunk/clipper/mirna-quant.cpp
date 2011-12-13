@@ -69,6 +69,8 @@ int main (int argc, char **argv) {
 	int targ = 1000;
 	int thr = -1;
 	int mergs = 1;
+	int mergc = 0;
+	int mergn = 0;
 
 	char c;
         while ( (c = getopt (argc, argv, "-hi:o:s:p:r:n:t:x:m:")) != -1) {
@@ -252,6 +254,8 @@ int main (int argc, char **argv) {
 				mit = mmap.find(sseq);
 				// merge named sequences
 				if (mit != mmap.end()) {
+					++mergn;
+					mergc+=it->second;
 					pmap[sseq]+=it->second;
 					pmap[it->first]=0;
 					break;
@@ -283,6 +287,9 @@ int main (int argc, char **argv) {
 	fprintf(fstat, "threshold\t%d\n", thr);
 	fprintf(fstat, "pass num\t%d\n", (int)vec.size());
 	fprintf(fstat, "pass tot\t%d\n", tot);
+
+	if (mergc>0) fprintf(fstat, "merge tot\t%d\n", mergc);
+	if (mergn>0) fprintf(fstat, "merge num\t%d\n", mergn);
 
 	if (vec.size() == 0) {
 		exit(0);
@@ -464,9 +471,10 @@ void usage(FILE *f) {
 "-i FIL         Input file (stdin)\n"
 "-s FIL         Stats file (stderr)\n"
 "-r FIL         miRNA reference fasta (none)\n"
-"-x FIL         Annot via fasta, ie: rRNA (none)\n"
+"-x FIL         Annot via alignment, ie: rRNA (none)\n"
 "-n INT         Upper quartile normalize with target (1000)\n"
 "-t INT         Threshold (log10(record count))\n"
+"-m INT         Combine known (-r) seqs with up to INT mismatches\n"
 "\n"
         ,f);
 }
