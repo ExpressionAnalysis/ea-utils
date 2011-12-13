@@ -483,15 +483,19 @@ int main (int argc, char **argv) {
 		exit(0);
 	}
 
+	// one beyond barcode count is unmatched
 	bc[bcnt].id.s=(char *)"unmatched";
 
+	// TODO: output 3rd read for unmatched
 	int b;
         for (b=0;b<=bcnt;++b) {
 		for (i=0;i<f_n;++i) {
-			if (!strcasecmp(out[i],"n/a")) {
-				bc[b].out[i] = NULL;
-				bc[b].fout[i] = NULL;
-				continue;
+			if (!strcasecmp(out[i],"n/a") || !strcasecmp(out[i],"/dev/null")) {
+				if (b != bcnt) {
+					bc[b].out[i] = NULL;
+					bc[b].fout[i] = NULL;
+					continue;
+				}
 			}
 			const char *p=strchr(out[i],'%');
 			if (!p) fail("Each output file name must contain a '%' sign, which is replaced by the barcode id\n");
@@ -747,6 +751,7 @@ void usage(FILE *f) {
 "Usage: fastq-multx [-g|-l|-B] <barcodes.fil> <read1.fq> -o r1.%.fq [mate.fq -o r2.%.fq] ...\n"
 "\n"
 "Output files must contain a '%' sign which is replaced with the barcode id in the barcodes file.\n"
+"Output file can be n/a to discard the corresponding data\n"
 "\n"
 "Barcodes file looks like this:\n"
 "\n"
