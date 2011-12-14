@@ -40,6 +40,13 @@ ALSO, IT WOULD BE NICE IF YOU LET ME KNOW YOU USED IT.
 
 using namespace BamTools;
 
+class mapq {
+public:
+	int	mq;
+	int	nm;
+	mapq() {mq=0;nm=0;};
+};
+
 #define MAX_F 128
 
 void usage(FILE *f);
@@ -97,7 +104,7 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	google::sparse_hash_map<std::string, int> pmap;
+	google::sparse_hash_map<std::string, mapq> pmap;
 	int i;
 	for (i=0;i<nfilter;++i) {
 		BamReader fbam;
@@ -106,15 +113,20 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 		if (debug) fprintf(stderr, "Indexing '%s'\n",filter[i]);
-		google::sparse_hash_map<std::string,int>::iterator it; 
+		google::sparse_hash_map<std::string,mapq>::iterator it; 
 		BamAlignment al;
 		while ( fbam.GetNextAlignment(al) ) {
 			it = pmap.find(al.Name);
+
+			mapq m;
+			m.mq = al.MapQuality;
+			al.GetTag("NM",m.nm);
+
 			if (it == pmap.end()) {
-				pmap[al.Name]=al.MapQuality;
+				pmap[al.Name]=m;
 			} else {
-				if (al.MapQuality > it->second) {
-					pmap[al.Name]=al.MapQuality;
+				if (al.MapQuality > it->second.mq) {
+					pmap[al.Name]=m;
 				}
 			}
 		}
@@ -129,10 +141,10 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	google::sparse_hash_map<std::string,int>::iterator it; 
+	google::sparse_hash_map<std::string,mapq>::iterator it; 
 	BamAlignment al;
 	if (debug) fprintf(stderr, "Filtering\n");
-	int na=0, gt=0, eq=0, lt=0, to=0;
+	int na=0, gt=0, eq=0, lt=0, to=0, nmlt=0;
 	while ( inbam.GetNextAlignment(al) ) {
 		++to;
 		try {
@@ -141,14 +153,20 @@ int main(int argc, char **argv) {
 				// not found?
 				writer.SaveAlignment(al);
 				++na;
-			} else if (al.MapQuality > it->second) {
+			} else if (al.MapQuality > it->second.mq) {
 				// gt
 				++gt;
 				writer.SaveAlignment(al);
-			} else if (al.MapQuality == it->second) {
+			} else if (al.MapQuality == it->second.mq) {
 				// eq
 				++eq;
-				writer.SaveAlignment(al);
+				int nm;
+				al.GetTag("NM",nm);
+				if (nm <= it->second.nm) {
+					writer.SaveAlignment(al);
+				} else {
+					++nmlt;
+				}
 			} else {
 				// lt
 				++lt;
@@ -160,6 +178,7 @@ int main(int argc, char **argv) {
 	fprintf(ferr,"better\t%d\t%2.2f%%\n",gt,100.0*gt/(float)to);
 	fprintf(ferr,"equal\t%d\t%2.2f%%\n",eq,100.0*eq/(float)to);
 	fprintf(ferr,"removed\t%d\t%2.2f%%\n",lt,100.0*lt/(float)to);
+	fprintf(ferr,"removed_nm\t%d\t%2.2f%%\n",nmlt,100.0*lt/(float)to);
 	if (na) fprintf(ferr,"Missing\t%d\t%2.2f%%\n",na,100.0*na/(float)to);
 	return 0;
 }
