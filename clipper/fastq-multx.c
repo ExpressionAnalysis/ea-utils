@@ -491,11 +491,9 @@ int main (int argc, char **argv) {
         for (b=0;b<=bcnt;++b) {
 		for (i=0;i<f_n;++i) {
 			if (!strcasecmp(out[i],"n/a") || !strcasecmp(out[i],"/dev/null")) {
-				if (b != bcnt) {
-					bc[b].out[i] = NULL;
-					bc[b].fout[i] = NULL;
-					continue;
-				}
+				bc[b].out[i] = NULL;
+				bc[b].fout[i] = NULL;
+				continue;
 			}
 			const char *p=strchr(out[i],'%');
 			if (!p) fail("Each output file name must contain a '%' sign, which is replaced by the barcode id\n");
