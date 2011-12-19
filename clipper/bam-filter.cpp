@@ -55,11 +55,14 @@ int debug=0;
 int main(int argc, char **argv) {
 	char c, *in=NULL, *out=NULL, *err=NULL, trimchar = '\0';
 	char *filter[MAX_F];
-	int nfilter = 0;
-        while ( (c = getopt (argc, argv, "do:i:s:f:t:")) != -1) {
+	int nfilter = 0, saveeq = 0, savenm = 0;
+
+        while ( (c = getopt (argc, argv, "demo:i:s:f:t:")) != -1) {
                 switch (c) {
                 case 'd': ++debug; break;
                 case 'o': out=optarg; break;
+                case 'e': saveeq=1; break;
+                case 'm': savenm=1; break;
                 case 'i': in=optarg; break;
                 case 't': trimchar=*optarg; break;
                 case 's': err=optarg; break;
@@ -73,7 +76,7 @@ int main(int argc, char **argv) {
                 case '?':
 		     if (optopt == '?') {
                 	usage(stdout); return 0;
-                     } else if (optopt && strchr("oisf", optopt))
+                     } else if (optopt && strchr("oisft", optopt))
                        fprintf (stderr, "Option -%c requires an argument.\n", optopt);
                      else if (isprint(optopt))
                        fprintf (stderr, "Unknown option `-%c'.\n", optopt);
@@ -144,7 +147,7 @@ int main(int argc, char **argv) {
 	google::sparse_hash_map<std::string,mapq>::iterator it; 
 	BamAlignment al;
 	if (debug) fprintf(stderr, "Filtering\n");
-	int na=0, gt=0, eq=0, lt=0, to=0, nmlt=0;
+	int na=0, gt=0, eq=0, lt=0, to=0, eq_r=0, eq_s=0;
 	while ( inbam.GetNextAlignment(al) ) {
 		++to;
 		try {
@@ -159,13 +162,25 @@ int main(int argc, char **argv) {
 				writer.SaveAlignment(al);
 			} else if (al.MapQuality == it->second.mq) {
 				// eq
-				++eq;
 				int nm;
 				al.GetTag("NM",nm);
-				if (nm <= it->second.nm) {
-					writer.SaveAlignment(al);
+				if (nm < it->second.nm) {
+					// fewer mismatches
+					if (savenm) {
+						writer.SaveAlignment(al);
+						++eq_s;					
+					} else {
+						++eq_r;					
+					}
+				} else if (nm == it->second.nm) {
+					if (saveeq) {
+						writer.SaveAlignment(al);
+						++eq_s;
+					} else {
+						++eq_r;					
+					}
 				} else {
-					++nmlt;
+					++eq_r;					
 				}
 			} else {
 				// lt
@@ -176,10 +191,10 @@ int main(int argc, char **argv) {
 	}
 	fprintf(ferr,"total\t%d\n",to);
 	fprintf(ferr,"better\t%d\t%2.2f%%\n",gt,100.0*gt/(float)to);
-	fprintf(ferr,"equal\t%d\t%2.2f%%\n",eq,100.0*eq/(float)to);
+	if (eq_s > 0) fprintf(ferr,"eq-saved\t%d\t%2.2f%%\n",eq_s,100.0*eq_s/(float)to);
+	if (eq_r > 0) fprintf(ferr,"eq-removed\t%d\t%2.2f%%\n",eq_r,100.0*eq_r/(float)to);
 	fprintf(ferr,"removed\t%d\t%2.2f%%\n",lt,100.0*lt/(float)to);
-	fprintf(ferr,"removed_nm\t%d\t%2.2f%%\n",nmlt,100.0*lt/(float)to);
-	if (na) fprintf(ferr,"Missing\t%d\t%2.2f%%\n",na,100.0*na/(float)to);
+	if (na) fprintf(ferr,"missing\t%d\t%2.2f%%\n",na,100.0*na/(float)to);
 	return 0;
 }
 
@@ -192,6 +207,8 @@ void usage(FILE *f) {
 "	-o	output (stout)\n"
 "	-s	stats (stderr)\n"
 "	-t	trim char (none)\n"
+"	-e	save all equal alignments\n"
+"	-m	save equal only if edit distance is smaller\n"
 "	-f	bam file to filter input against\n"
 "\n"
 "For each probe id in the input bam, searches all the filters.  If any have\n"
