@@ -211,7 +211,6 @@ int main (int argc, char **argv) {
 		}
 	}
 
-
 	if (excl) {
 		std::string ebwt = string_format("%s.1.ebwt", excl);
 		std::string cmd;
@@ -240,6 +239,7 @@ int main (int argc, char **argv) {
 				}
 			}
 		}
+		unlink(tmp);
 	}	
 
 	if (mergs > 0) {	
@@ -309,6 +309,9 @@ int main (int argc, char **argv) {
 	double norm = ((double)targ)/q3;
 	if (targ)
 		fprintf(fstat, "q3 target\t%d\n", targ);
+
+	if (mergs)
+		fprintf(fstat, "allow mismatch\t%d\n", mergs);
 
 	fprintf(fstat, "cnt q1\t%d\n", q1);
 	fprintf(fstat, "cnt med\t%d\n", q2);
