@@ -85,18 +85,20 @@ int dupreads = 1000000;
 bool nodup=0;
 int main(int argc, char **argv) {
 	const char *ext = NULL;
-	bool multi=0, newonly=0;
+	bool multi=0, newonly=0, inbam=0;
 	char c;
 	optind = 0;
-        while ( (c = getopt (argc, argv, "dx:Mh")) != -1) {
+        while ( (c = getopt (argc, argv, "?BDdx:Mh")) != -1) {
                 switch (c) {
                 case 'd': ++debug; break;
+                case 'D': ++nodup; break;
+                case 'B': inbam=1; break;
                 case 'b': qualreads=atoi(optarg); break;
                 case 'x': ext=optarg; break;
                 case 'M': newonly=1; break;
                 case 'h': usage(stdout); return 0;
                 case '?':
-                     if (optopt == '?') {
+                     if (!optopt) {
                         usage(stdout); return 0;
                      } else if (optopt && strchr("ox", optopt))
                        fprintf (stderr, "Option -%c requires an argument.\n", optopt);
@@ -145,22 +147,30 @@ int main(int argc, char **argv) {
 				needpclose=1;
 				if (f) {
 					// hack to deal with dup2 (below) not working with BamReader.Open("-")
-					char c=getc(f); ungetc(c,f);
-					if (c==-1) {
-						warn("Can't unzip %s\n", in);
-						pclose(f);
-						continue;
+					if (inbam) {
+						if (dup2(fileno(f),0) == -1) {
+						      warn("Can't dup2 STDIN\n");
+						      continue;
+						}
+						in = "-";
+					} else {
+						char c=getc(f); ungetc(c,f);
+						if (c==-1) {
+							warn("Can't unzip %s\n", in);
+							pclose(f);
+							continue;
+						}
+						if (c==31) {
+							string cmd = string_format("gunzip -c '%s'", in);
+							f = popen(cmd.c_str(), "r");
+							inbam=1;
+							if (dup2(fileno(f),0) == -1) {
+							      warn("Can't dup2 STDIN\n");
+							      continue;
+							}
+							in = "-";
+						}
 					}
-					if (c==31) {
-						string cmd = string_format("gunzip -c '%s' | samtools view -", in);
-						f = popen(cmd.c_str(), "r");
-					}
-					//Can't seem to get BamReader to read from gunzip -c... ignore for now
-					//if (dup2(fileno(f),0) == -1) {
-					//	warn("Can't dup2 STDIN\n");
-					//	continue;
-					//}
-					//in = "-";
 				} else {
 					warn("Can't unzip %s: %s\n", in, strerror(errno));
 					continue;
@@ -190,7 +200,16 @@ int main(int argc, char **argv) {
 		}
 
 		debug("file:%s, f: %lx\n", in, (long int) f);
-		char c=getc(f); ungetc(c,f);
+		char c;
+		if (!inbam) {
+			c=getc(f); ungetc(c,f);
+			if (c==31 && !strcmp(in,"-")) {
+				// if bamtools api allowed me to pass a stream, this wouldn't be an issue....
+				warn("Specify -B to read a bam file from standard input\n");
+				continue;
+			}
+		} else 
+			c = 31;
 		if (c != 31) {
 			if (!s.parse_sam(f)) {
 				if (needpclose) pclose(f); else fclose(f);
@@ -212,10 +231,10 @@ int main(int argc, char **argv) {
 		int phred = s.dat.qualmin < 64 ? 33 : 64;
 		fprintf(o, "reads\t%d\n", s.dat.n);
 		fprintf(o, "version\t%s\n", VERSION);
-		fprintf(o, "bsize\t%d\n", qualreads);
-		fprintf(o, "phred\t%d\n", phred);
 		fprintf(o, "mapped reads\t%d\n", s.dat.mapn);
 		if (s.dat.mapn > 0) {
+			fprintf(o, "bsize\t%d\n", qualreads);
+			fprintf(o, "phred\t%d\n", phred);
 			fprintf(o, "forward\t%d\n", s.dat.nfor);
 			fprintf(o, "reverse\t%d\n", s.dat.nrev);
 			if (s.dat.lenmax != s.dat.lenmin) {
@@ -225,88 +244,88 @@ int main(int argc, char **argv) {
 			} else {
 				fprintf(o, "len max\t%d\n", s.dat.lenmax);	
 			}
-		}
-		fprintf(o, "mapq mean\t%.4f\n", s.dat.mapsum/s.dat.mapn);
-		fprintf(o, "mapq stdev\t%.4f\n", stdev(s.dat.mapn, s.dat.mapsum, s.dat.mapssq));
-		fprintf(o, "mapq Q1\t%.2f\n", quantile(s.vmapq,.25));
-		fprintf(o, "mapq median\t%.2f\n", quantile(s.vmapq,.50));
-		fprintf(o, "mapq Q3\t%.2f\n", quantile(s.vmapq,.75));
+			fprintf(o, "mapq mean\t%.4f\n", s.dat.mapsum/s.dat.mapn);
+			fprintf(o, "mapq stdev\t%.4f\n", stdev(s.dat.mapn, s.dat.mapsum, s.dat.mapssq));
+			fprintf(o, "mapq Q1\t%.2f\n", quantile(s.vmapq,.25));
+			fprintf(o, "mapq median\t%.2f\n", quantile(s.vmapq,.50));
+			fprintf(o, "mapq Q3\t%.2f\n", quantile(s.vmapq,.75));
 
-		if (s.dat.nmlen > 0) {
-			fprintf(o, "snp rate\t%.6f\n", s.dat.nmsum/s.dat.nmlen);
-			if (s.dat.ins >0 ) fprintf(o, "ins rate\t%.6f\n", s.dat.ins/s.dat.nmlen);
-			if (s.dat.del >0 ) fprintf(o, "del rate\t%.6f\n", s.dat.del/s.dat.nmlen);
-			fprintf(o, "pct mismatch\t%.4f\n", 100*(double)s.dat.nmnz/s.dat.nmc);
-		}
+			if (s.dat.nmlen > 0) {
+				fprintf(o, "snp rate\t%.6f\n", s.dat.nmsum/s.dat.nmlen);
+				if (s.dat.ins >0 ) fprintf(o, "ins rate\t%.6f\n", s.dat.ins/s.dat.nmlen);
+				if (s.dat.del >0 ) fprintf(o, "del rate\t%.6f\n", s.dat.del/s.dat.nmlen);
+				fprintf(o, "pct mismatch\t%.4f\n", 100*(double)s.dat.nmnz/s.dat.nmc);
+			}
 
-		if (s.visize.size() > 0) {
-			double p10 = quantile(s.visize, .10);
-			double p90 = quantile(s.visize, .90);
-			double matsum=0, matssq=0;
-			int matc = 0;
-			int i;
-			for(i=0;i<s.visize.size();++i) {
-				int v = s.visize[i];
-				if (v >= p10 && v <= p90) {
-					++matc;
-					matsum+=v;
-					matssq+=v*v;
+			if (s.visize.size() > 0) {
+				double p10 = quantile(s.visize, .10);
+				double p90 = quantile(s.visize, .90);
+				double matsum=0, matssq=0;
+				int matc = 0;
+				int i;
+				for(i=0;i<s.visize.size();++i) {
+					int v = s.visize[i];
+					if (v >= p10 && v <= p90) {
+						++matc;
+						matsum+=v;
+						matssq+=v*v;
+					}
+				}
+				fprintf(o, "insert mean\t%.4f\n", matsum/matc);
+				if (matc > 1) {
+					fprintf(o, "insert stdev\t%.4f\n", stdev(matc, matsum, matssq));
+					fprintf(o, "insert Q1\t%.2f\n", quantile(s.visize, .25));
+					fprintf(o, "insert median\t%.2f\n", quantile(s.visize, .50));
+					fprintf(o, "insert Q3\t%.2f\n", quantile(s.visize, .75));
 				}
 			}
-			fprintf(o, "insert mean\t%.4f\n", matsum/matc);
-			if (matc > 1) {
-				fprintf(o, "insert stdev\t%.4f\n", stdev(matc, matsum, matssq));
-				fprintf(o, "insert Q1\t%.2f\n", quantile(s.visize, .25));
-				fprintf(o, "insert median\t%.2f\n", quantile(s.visize, .50));
-				fprintf(o, "insert Q3\t%.2f\n", quantile(s.visize, .75));
-			}
-		}
 
-		if (s.dat.nbase >0) {
-			fprintf(o,"base qual mean\t%.4f\n", (s.dat.qualsum/s.dat.nbase)-phred);
-			fprintf(o,"base qual stdev\t%.4f\n", stdev(s.dat.nbase, s.dat.qualsum, s.dat.qualssq));
-			fprintf(o,"%%A\t%.4f\n", 100.0*(double)s.dat.basecnt[T_A]/(double)s.dat.nbase);
-			fprintf(o,"%%C\t%.4f\n", 100.0*(double)s.dat.basecnt[T_C]/(double)s.dat.nbase);
-			fprintf(o,"%%G\t%.4f\n", 100.0*(double)s.dat.basecnt[T_G]/(double)s.dat.nbase);
-			fprintf(o,"%%T\t%.4f\n", 100.0*(double)s.dat.basecnt[T_T]/(double)s.dat.nbase);
-			if (s.dat.basecnt[T_N] > 0) {
-				fprintf(o,"%%N\t%.4f\n", 100.0*(double)s.dat.basecnt[T_N]/(double)s.dat.nbase);
-			}
-		}
-		if (s.mapb.size() > 1 && s.mapb.size() <= 1000) {
-	        	sort(s.vmapq.begin(), s.vmapq.end());
-			vector<string> vtmp;
-		        google::sparse_hash_map<string,int>::iterator it = s.mapb.begin();
-			while (it != s.mapb.end()) {
-				vtmp.push_back(it->first);
-				++it;
-			}
-			sort(vtmp.begin(),vtmp.end());
-			vector<string>::iterator vit=vtmp.begin();
-			while (vit != vtmp.end()) {
-				int v =  s.mapb[*vit];
-				fprintf(o,"%%%s\t%.2f\n", vit->c_str(), 100*v/s.dat.lensum);
-				++vit;
-			}
-		}
-		if (s.mapb.size() > 1) {
-			fprintf(o,"num ref seqs\t%d\n", (int) s.mapb.size());
-		}
-		if (!nodup && s.dat.dupmax > (s.dat.pe+1)) {
-		        google::sparse_hash_map<string,int>::iterator it = s.dups.begin();
-			vector<int> vtmp;
-			int amb = 0;
-			while(it!=s.dups.end()) {
-				if (it->second >  (s.dat.pe+1)) {
-					++amb;
+			if (s.dat.nbase >0) {
+				fprintf(o,"base qual mean\t%.4f\n", (s.dat.qualsum/s.dat.nbase)-phred);
+				fprintf(o,"base qual stdev\t%.4f\n", stdev(s.dat.nbase, s.dat.qualsum, s.dat.qualssq));
+				fprintf(o,"%%A\t%.4f\n", 100.0*(double)s.dat.basecnt[T_A]/(double)s.dat.nbase);
+				fprintf(o,"%%C\t%.4f\n", 100.0*(double)s.dat.basecnt[T_C]/(double)s.dat.nbase);
+				fprintf(o,"%%G\t%.4f\n", 100.0*(double)s.dat.basecnt[T_G]/(double)s.dat.nbase);
+				fprintf(o,"%%T\t%.4f\n", 100.0*(double)s.dat.basecnt[T_T]/(double)s.dat.nbase);
+				if (s.dat.basecnt[T_N] > 0) {
+					fprintf(o,"%%N\t%.4f\n", 100.0*(double)s.dat.basecnt[T_N]/(double)s.dat.nbase);
 				}
-				++it;
 			}
-			fprintf(o,"reads aligned\t%d\n", (int) s.dups.size());
-			if (amb > 0) {
-				fprintf(o,"ambiguous\t%d\n", amb);
-				fprintf(o,"pct ambiguous\t%.6f\n", 100.0*amb/(double)s.dups.size());
-				fprintf(o,"max dup align\t%.d\n", s.dat.dupmax/(s.dat.pe+1));
+			if (s.mapb.size() > 1 && s.mapb.size() <= 1000) {
+				sort(s.vmapq.begin(), s.vmapq.end());
+				vector<string> vtmp;
+				google::sparse_hash_map<string,int>::iterator it = s.mapb.begin();
+				while (it != s.mapb.end()) {
+					vtmp.push_back(it->first);
+					++it;
+				}
+				sort(vtmp.begin(),vtmp.end());
+				vector<string>::iterator vit=vtmp.begin();
+				while (vit != vtmp.end()) {
+					int v =  s.mapb[*vit];
+					fprintf(o,"%%%s\t%.2f\n", vit->c_str(), 100*v/s.dat.lensum);
+					++vit;
+				}
+			}
+			if (s.mapb.size() > 1) {
+				fprintf(o,"num ref seqs\t%d\n", (int) s.mapb.size());
+			}
+			if (!nodup && s.dat.dupmax > (s.dat.pe+1)) {
+				google::sparse_hash_map<string,int>::iterator it = s.dups.begin();
+				vector<int> vtmp;
+				int amb = 0;
+				while(it!=s.dups.end()) {
+					if (it->second >  (s.dat.pe+1)) {
+						++amb;
+					}
+					++it;
+				}
+				fprintf(o,"reads aligned\t%d\n", (int) s.dups.size());
+				if (amb > 0) {
+					fprintf(o,"ambiguous\t%d\n", amb);
+					fprintf(o,"pct ambiguous\t%.6f\n", 100.0*amb/(double)s.dups.size());
+					fprintf(o,"max dup align\t%.d\n", s.dat.dupmax/(s.dat.pe+1));
+				}
 			}
 		}
 	}
@@ -487,6 +506,7 @@ void usage(FILE *f) {
 "\n"
 "-D             Don't keep track of multiple alignments (save ram/faster)\n"
 "-M             Only overwrite if newer (requires -x, or multiple files)\n"
+"-B             Input is bam, don't bother looking at magic\n"
 "-x FIL         File extension for multiple files (stats)\n"
 "-b INT         Number of reads to sample for per-base stats (1M)\n"
 "\n"
