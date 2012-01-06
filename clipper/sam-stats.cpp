@@ -142,34 +142,36 @@ int main(int argc, char **argv) {
 		} else {
 			string out;
 			if ((p = strrchr(in,'.')) && !strcmp(p, ".gz")) {
+				// maybe this is a gzipped sam file...
 				string cmd = string_format("gunzip -c '%s'", in);
 				f = popen(cmd.c_str(), "r");
 				needpclose=1;
 				if (f) {
-					// hack to deal with dup2 (below) not working with BamReader.Open("-")
-					if (inbam) {
-						if (dup2(fileno(f),0) == -1) {
-						      warn("Can't dup2 STDIN\n");
-						      continue;
-						}
-						in = "-";
-					} else {
-						char c=getc(f); ungetc(c,f);
+					char c;
+					if (!inbam) {
+						// guess file format...
+						c=getc(f); ungetc(c,f);
 						if (c==-1) {
 							warn("Can't unzip %s\n", in);
 							pclose(f);
 							continue;
 						}
 						if (c==31) {
+							// bam file... reopen to reset stream
 							string cmd = string_format("gunzip -c '%s'", in);
 							f = popen(cmd.c_str(), "r");
 							inbam=1;
-							if (dup2(fileno(f),0) == -1) {
-							      warn("Can't dup2 STDIN\n");
-							      continue;
-							}
-							in = "-";
 						}
+					} else 
+						c = 31;	// user forced bam, no need to check
+
+					if (inbam) {
+						// why did you gzip a bam... weird? 
+						if (dup2(fileno(f),0) == -1) {
+						      warn("Can't dup2 STDIN\n");
+						      continue;
+						}
+						in = "-";
 					}
 				} else {
 					warn("Can't unzip %s: %s\n", in, strerror(errno));
@@ -202,6 +204,7 @@ int main(int argc, char **argv) {
 		debug("file:%s, f: %lx\n", in, (long int) f);
 		char c;
 		if (!inbam) {
+			// guess file format
 			c=getc(f); ungetc(c,f);
 			if (c==31 && !strcmp(in,"-")) {
 				// if bamtools api allowed me to pass a stream, this wouldn't be an issue....
@@ -211,6 +214,7 @@ int main(int argc, char **argv) {
 		} else 
 			c = 31;
 		if (c != 31) {
+			// (could be an uncompressed bam... but can't magic in 1 char)
 			if (!s.parse_sam(f)) {
 				if (needpclose) pclose(f); else fclose(f);
 				warn("Invalid sam file %s\n", in);
