@@ -486,7 +486,7 @@ int main (int argc, char **argv) {
 	// one beyond barcode count is unmatched
 	bc[bcnt].id.s=(char *)"unmatched";
 
-	// TODO: output 3rd read for unmatched
+	// TODO: output barcode read ...but only for unmatched?
 	int b;
         for (b=0;b<=bcnt;++b) {
 		for (i=0;i<f_n;++i) {
@@ -628,10 +628,9 @@ int main (int argc, char **argv) {
 			if (end =='b') {
 				memmove(fq[0].seq.s, fq[0].seq.s+len, fq[0].seq.n-len);
 				memmove(fq[0].qual.s, fq[0].qual.s+len, fq[0].seq.n-len);
-			} else {
-				fq[0].seq.s[fq[0].seq.n-len]='\0';
-				fq[0].qual.s[fq[0].qual.n-len]='\0';
 			}
+			fq[0].seq.s[fq[0].seq.n-len]='\0';
+			fq[0].qual.s[fq[0].qual.n-len]='\0';
 		}
 
 		if (best < 0) {
