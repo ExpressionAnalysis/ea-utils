@@ -42,26 +42,28 @@ public:
 		memset((void*)&dat,0,sizeof(dat));
 	}
 	struct {
-		int n, mapn, mapd;
-		int lenmin, lenmax; double lensum, lenssq;
-		double mapsum, mapssq; 
-		double nmlen, nmnz, nmsum, nmc;
-		int insum, nbase, qualmax, qualmin;
-		double qualsum, qualssq;
-		int nrev, nfor;
-		double tmapb;
+		int n, mapn;		// # of entries, # of mapped entries, 
+		int lenmin, lenmax; double lensum, lenssq;	// read length stats
+		double mapsum, mapssq;	// map quality sum/ssq 
+		double nmnz, nmsum;	// # of mismatched reads, sum of mismatch lengths 
+		int nbase, qualmax, qualmin;	// num bases samples, min/max qual 
+		double qualsum, qualssq;	// sum quals, sum-squared qual
+		int nrev, nfor;		// rev reads, for reads
+		double tmapb;		// number of mapped bases
 		long long int basecnt[5];
-		int del, ins;
-		bool pe;	
-		int dupmax;
+		int del, ins;		// length total dels/ins found
+		bool pe;		// paired-end ? 0 or 1	
+		int dupmax;		// max dups found
 	} dat;
-	vector<int> vmapq;
-	vector<int> visize;
-	google::sparse_hash_map<std::string, int> mapb;
-	google::sparse_hash_map<std::string, int> dups;
+	vector<int> vmapq;		// all map qualities
+	vector<int> visize;		// all insert sizes
+	google::sparse_hash_map<std::string, int> mapb;		// # mapped per ref seq
+	google::sparse_hash_map<std::string, int> dups;		// alignments by read-id (not necessary for some pipes)
 
+	// file-format neutral ... called per read
 	void dostats(const string &name, int rlen, int bits, const string &ref, int pos, int mapq, int nmate, const string &seq, const string &qual, int nm, int del, int ins);
 
+	// read a bam/sam file and call dostats over and over
 	bool parse_bam(const char *in);
 	bool parse_sam(FILE *f);
 };
@@ -133,6 +135,7 @@ int main(int argc, char **argv) {
 		FILE *o=NULL;
 		bool needpclose = 0;
 		if (!strcmp(in,"-")) {
+			// read sam/bam from stdin
 			if (ext) {
 				warn("Can't use file extension with stdin\n");
 				continue;
@@ -149,7 +152,7 @@ int main(int argc, char **argv) {
 				if (f) {
 					char c;
 					if (!inbam) {
-						// guess file format...
+						// guess file format with 1 char
 						c=getc(f); ungetc(c,f);
 						if (c==-1) {
 							warn("Can't unzip %s\n", in);
@@ -157,13 +160,13 @@ int main(int argc, char **argv) {
 							continue;
 						}
 						if (c==31) {
-							// bam file... reopen to reset stream
+							// bam file... reopen to reset stream... can't pass directly
 							string cmd = string_format("gunzip -c '%s'", in);
 							f = popen(cmd.c_str(), "r");
 							inbam=1;
 						}
 					} else 
-						c = 31;	// user forced bam, no need to check
+						c = 31;	// user forced bam, no need to check/reopen
 
 					if (inbam) {
 						// why did you gzip a bam... weird? 
@@ -254,11 +257,11 @@ int main(int argc, char **argv) {
 			fprintf(o, "mapq median\t%.2f\n", quantile(s.vmapq,.50));
 			fprintf(o, "mapq Q3\t%.2f\n", quantile(s.vmapq,.75));
 
-			if (s.dat.nmlen > 0) {
-				fprintf(o, "snp rate\t%.6f\n", s.dat.nmsum/s.dat.nmlen);
-				if (s.dat.ins >0 ) fprintf(o, "ins rate\t%.6f\n", s.dat.ins/s.dat.nmlen);
-				if (s.dat.del >0 ) fprintf(o, "del rate\t%.6f\n", s.dat.del/s.dat.nmlen);
-				fprintf(o, "pct mismatch\t%.4f\n", 100*(double)s.dat.nmnz/s.dat.nmc);
+			if (s.dat.lensum > 0) {
+				fprintf(o, "snp rate\t%.6f\n", s.dat.nmsum/s.dat.lensum);
+				if (s.dat.ins >0 ) fprintf(o, "ins rate\t%.6f\n", s.dat.ins/s.dat.lensum);
+				if (s.dat.del >0 ) fprintf(o, "del rate\t%.6f\n", s.dat.del/s.dat.lensum);
+				fprintf(o, "pct mismatch\t%.4f\n", 100.0*((double)s.dat.nmnz/s.dat.mapn));
 			}
 
 			if (s.visize.size() > 0) {
@@ -287,12 +290,12 @@ int main(int argc, char **argv) {
 			if (s.dat.nbase >0) {
 				fprintf(o,"base qual mean\t%.4f\n", (s.dat.qualsum/s.dat.nbase)-phred);
 				fprintf(o,"base qual stdev\t%.4f\n", stdev(s.dat.nbase, s.dat.qualsum, s.dat.qualssq));
-				fprintf(o,"%%A\t%.4f\n", 100.0*(double)s.dat.basecnt[T_A]/(double)s.dat.nbase);
-				fprintf(o,"%%C\t%.4f\n", 100.0*(double)s.dat.basecnt[T_C]/(double)s.dat.nbase);
-				fprintf(o,"%%G\t%.4f\n", 100.0*(double)s.dat.basecnt[T_G]/(double)s.dat.nbase);
-				fprintf(o,"%%T\t%.4f\n", 100.0*(double)s.dat.basecnt[T_T]/(double)s.dat.nbase);
+				fprintf(o,"%%A\t%.4f\n", 100.0*((double)s.dat.basecnt[T_A]/(double)s.dat.nbase));
+				fprintf(o,"%%C\t%.4f\n", 100.0*((double)s.dat.basecnt[T_C]/(double)s.dat.nbase));
+				fprintf(o,"%%G\t%.4f\n", 100.0*((double)s.dat.basecnt[T_G]/(double)s.dat.nbase));
+				fprintf(o,"%%T\t%.4f\n", 100.0*((double)s.dat.basecnt[T_T]/(double)s.dat.nbase));
 				if (s.dat.basecnt[T_N] > 0) {
-					fprintf(o,"%%N\t%.4f\n", 100.0*(double)s.dat.basecnt[T_N]/(double)s.dat.nbase);
+					fprintf(o,"%%N\t%.4f\n", 100.0*((double)s.dat.basecnt[T_N]/(double)s.dat.nbase));
 				}
 			}
 			if (s.mapb.size() > 1 && s.mapb.size() <= 1000) {
@@ -307,7 +310,7 @@ int main(int argc, char **argv) {
 				vector<string>::iterator vit=vtmp.begin();
 				while (vit != vtmp.end()) {
 					int v =  s.mapb[*vit];
-					fprintf(o,"%%%s\t%.2f\n", vit->c_str(), 100*v/s.dat.lensum);
+					fprintf(o,"%%%s\t%.2f\n", vit->c_str(), 100.0*((double)v/s.dat.lensum));
 					++vit;
 				}
 			}
@@ -327,7 +330,7 @@ int main(int argc, char **argv) {
 				fprintf(o,"reads aligned\t%d\n", (int) s.dups.size());
 				if (amb > 0) {
 					fprintf(o,"ambiguous\t%d\n", amb);
-					fprintf(o,"pct ambiguous\t%.6f\n", 100.0*amb/(double)s.dups.size());
+					fprintf(o,"pct ambiguous\t%.6f\n", 100.0*((double)amb/(double)s.dups.size()));
 					fprintf(o,"max dup align\t%.d\n", s.dat.dupmax/(s.dat.pe+1));
 				}
 			}
@@ -372,8 +375,6 @@ void sstats::dostats(const string &name, int rlen, int bits, const string &ref, 
 	
 	dat.nmsum += nm;
 	if (nm > 0) dat.nmnz += 1;
-	++dat.nmc;
-	dat.nmlen+=rlen;
 	dat.del+=del;
 	dat.ins+=ins;
 
@@ -435,6 +436,7 @@ bool sstats::parse_sam(FILE *f) {
 		}
 		int nm=0;
 		int i;
+		// get # mismatches
 		for (i=S_TAG;i<n;++i){
 			if (d[i] && !strncmp(d[i],"NM:i:",5)) {
 				nm=atoi(&d[i][5]);
@@ -450,6 +452,7 @@ bool sstats::parse_sam(FILE *f) {
 
 		int ins = 0, del = 0;	
 		char *p=d[S_CIG];
+		// sum the cig
 		while (*p) {
 			int n=strtod(p, &sp);
 			if (sp==p) {
