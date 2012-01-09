@@ -530,8 +530,10 @@ int main (int argc, char **argv) {
 	bool someskew = false;
 	for (i=0;i<i_n;++i) {
 		int totskew = sktrim[i][0] + sktrim[i][1];
-		if (maxns - totskew < nkeep) {
-			fprintf(fstat, "Warning: Too much skewing found (%d), disabling skew clipping\n", totskew);
+		if ((maxns - totskew) < nkeep) {
+			if (totskew > 0) {
+				fprintf(fstat, "Warning: Too much skewing found (%d), disabling skew clipping\n", totskew);
+			}
 			meminit(sktrim);
 			break;
 		}
