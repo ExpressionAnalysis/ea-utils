@@ -105,6 +105,8 @@ void pickbest(const void *nodep, const VISIT which, const int depth);
 int bnodecomp(const void *a, const void *b) {return strcmp(((bnode*)a)->seq,((bnode*)b)->seq);};
 static float pickmaxpct=0.10;
 
+FILE *gzopen(const char *in, const char *mode, bool *isgz);
+
 int main (int argc, char **argv) {
 	char c;
 	bool trim = true;
@@ -123,7 +125,7 @@ int main (int argc, char **argv) {
 	int i;
 	bool omode = false;	
 	char *bfil = NULL;
-	while (	(c = getopt (argc, argv, "-dxnbeov:m:B:g:l:G:")) != -1) {
+	while (	(c = getopt (argc, argv, "-dzxnbeov:m:B:g:l:G:")) != -1) {
 		switch (c) {
 		case '\1': 
                        	if (omode) {
@@ -196,12 +198,9 @@ int main (int argc, char **argv) {
 	}
 
 	FILE *fin[6];
+	bool gzin[6];
 	for (i = 0; i < f_n; ++i) {
-		fin[i] = fopen(in[i], "r"); 
-		if (!fin[i]) {
-			fprintf(stderr, "Error opening file '%s': %s\n",in[i], strerror(errno));
-			return 1;
-		}
+		fin[i]=gzopen(in[i],"r",&gzin[i]);
 	}
 
 	// set all to null, zero
@@ -263,13 +262,30 @@ int main (int argc, char **argv) {
 		meminit(fmax);
 		for (i=0;i<f_n;++i) {
 			stat(in[i], &st);
-			fseek(fin[i], st.st_size/200 > sampcnt ? (st.st_size-sampcnt)/3 : 0, 0);
+			if (!gzin[i]) {	
+				fseek(fin[i], st.st_size/200 > sampcnt ? (st.st_size-sampcnt)/3 : 0, 0);
+			} else {
+				if (st.st_size > 100000) {
+					int x=0;
+					char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
+					while (getline(&s, &na, fin[i]) > 0) {
+						if (++x >= ((int)st.st_size/20000)*4) {
+							break;
+						}
+					}
+					if (s) free(s);
+				}
+			}
 			char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
 			double tots=0, totsq=0;
 			while (getline(&s, &na, fin[i]) > 0) {
 				if (*s == '@')  {
 					if ((ns=getline(&s, &na, fin[i])) <=0)
 						break;
+					if (*s == '@') {
+						if ((ns=getline(&s, &na, fin[i])) <=0)
+							break;
+					}
 					s[--ns]='\0';
 				
 					for (b=0;b<bgcnt;++b) {
@@ -362,8 +378,10 @@ int main (int argc, char **argv) {
                 struct stat st;
                 stat(guide, &st);
 
-		// maybe modularize a random sampling function
-                fseek(gin, st.st_size/200 > sampcnt ? (st.st_size-sampcnt)/3 : 0, 0);
+		// need to modularize a random sampling function
+		if (!gzin[0]) {
+	                fseek(gin, st.st_size/200 > sampcnt ? (st.st_size-sampcnt)/3 : 0, 0);
+		}
                 char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
 
 		// small sample to get lengths
@@ -372,6 +390,10 @@ int main (int argc, char **argv) {
                         if (*s == '@')  {
                                 if ((ns=getline(&s, &na, gin)) <=0)
                                         break;
+				if (*s == '@') {
+					if ((ns=getline(&s, &na, fin[i])) <=0)
+						break;
+				}
 				--ns;
 				tots+=ns;
 				totsq+=ns*ns;
@@ -396,7 +418,9 @@ int main (int argc, char **argv) {
 
 		fprintf(stderr, "Barcode length used: %d (%s)\n", blen, endstr(end));
 
-                fseek(gin, st.st_size/200 > sampcnt ? (st.st_size-sampcnt)/3 : 0, 0);
+		if (!gzin[0]) {
+	                fseek(gin, st.st_size/200 > sampcnt ? (st.st_size-sampcnt)/3 : 0, 0);
+		}
 
 		// load a table of possble codes
 		pickmax=0;
@@ -406,6 +430,10 @@ int main (int argc, char **argv) {
                         if (*s == '@')  {
                                 if ((ns=getline(&s, &na, gin)) <=0)
                                         break;
+                        	if (*s == '@')  {
+					if ((ns=getline(&s, &na, gin)) <=0)
+						break;
+				}
                                 --ns;                           // don't count newline for read len
                                 ++nr;
 
@@ -440,7 +468,11 @@ int main (int argc, char **argv) {
 		pickmax=max(1,(int)(pickmaxpct*pickmax));
 		fprintf(stderr, "Threshold used: %d\n", pickmax);
 		twalk(picktab, pickbest);
-		fseek(fin[0],0,0);
+		if (!gzin[0]) {
+			fseek(fin[0],0,0);
+		} else {
+			fin[0]=gzopen(in[0],"r",&gzin[0]);
+		}
 	} else {
 		// user specifies a list of barcodes
 		FILE *bin = fopen(bfil, "r");
@@ -495,15 +527,29 @@ int main (int argc, char **argv) {
 				bc[b].fout[i] = NULL;
 				continue;
 			}
+			const char *x=strrchr(out[i],'.');
 			const char *p=strchr(out[i],'%');
 			if (!p) fail("Each output file name must contain a '%' sign, which is replaced by the barcode id\n");
-			bc[b].out[i]=(char *) malloc(strlen(out[i])+strlen(bc[b].id.s)+10);
+			bc[b].out[i]=(char *) malloc(strlen(out[i])+strlen(bc[b].id.s)+100);
 			strncpy(bc[b].out[i], out[i], p-out[i]);
 			strcat(bc[b].out[i], bc[b].id.s);
 			strcat(bc[b].out[i], p+1);
-			if (!(bc[b].fout[i]=fopen(bc[b].out[i], "w"))) {
-				fprintf(stderr, "Error opening output file '%s': %s\n",bc[b].out[i], strerror(errno));
-				return 1;
+			if (!strcmp(x,".gz")) {
+				const char *prefix = "gzip -c > '";
+				char *tmp=(char *) malloc(strlen(bc[b].out[i]) + strlen(prefix) + 100);
+				strcpy(tmp, prefix);
+				strcat(tmp, bc[b].out[i]);
+				strcat(tmp, "'");
+				if (!(bc[b].fout[i]=popen(tmp, "w"))) {
+					fprintf(stderr, "Error opening .gz output file '%s': %s\n",bc[b].out[i], strerror(errno));
+					return 1;
+				}	
+				free(tmp);
+			} else {
+				if (!(bc[b].fout[i]=fopen(bc[b].out[i], "w"))) {
+					fprintf(stderr, "Error opening output file '%s': %s\n",bc[b].out[i], strerror(errno));
+					return 1;
+				}
 			}
 		}
 	}
@@ -513,13 +559,33 @@ int main (int argc, char **argv) {
 		int sampcnt = 10000;
 		struct stat st;
 		stat(in[0], &st);
-		fseek(fin[0], st.st_size > sampcnt/200 ? (st.st_size-sampcnt)/3 : 0, 0);
+		if (!gzin[0]) {	
+			fseek(fin[0], st.st_size > sampcnt/200 ? (st.st_size-sampcnt)/3 : 0, 0);
+		} else {
+			// fake seek a bit... this is, essentially, crappy... todo: quality filter, randomize at 10%, save to tmp and use only once.... work for stdin by rereading the tmp.... that's the way to go
+			int x = 0;
+			int l = 0;
+			if (st.st_size > sampcnt/200) {
+				char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
+				while ((l=getline(&s, &na, fin[0])) > 0) {
+					x+=l;
+					if (x >=(st.st_size-sampcnt)/10) {
+						break;
+					}
+				}
+				if (s) free(s);
+			}
+		}
 		char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
 		int ne=0, nb=0;
 		while (getline(&s, &na, fin[0]) > 0) {
 			if (*s == '@')  {
 				if ((ns=getline(&s, &na, fin[0])) <=0) 
 					break;
+				if (*s == '@') {
+					if ((ns=getline(&s, &na, fin[0])) <=0) 
+						break;
+				}
 				--ns;				// don't count newline for read len
 				++nr;
 				for (i=0;i<bcnt;++i) {
@@ -540,7 +606,12 @@ int main (int argc, char **argv) {
 				break;
 		}
 		end = (ne > nb) ? 'e' : 'b';
-		fseek(fin[0],0,0);
+		if (!gzin[0])
+			fseek(fin[0],0,0);
+		else {
+			pclose(fin[0]);
+			fin[0]=gzopen(in[0],"r",&gzin[0]);
+		}
 		fprintf(stderr, "End used: %s\n", endstr(end));
 	}
 
@@ -548,15 +619,18 @@ int main (int argc, char **argv) {
 		// some basic validation of the file formats
 		for (i=0;i<f_n;++i) {
 			char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
-			fseek(fin[i], 0, 0);
 			ns=getline(&s, &na, fin[i]); --ns;
 			if (*s != '@')  {
+				if (debug) fprintf(stderr, "line 1: %s\n", s);
 				fprintf(stderr, "%s doesn't appear to be a fastq file", in[i]);
 				return 1;
 			}
-			//fclose(fin[i]);
-			//fin[i] = fopen(in[i], "r"); 
-			fseek(fin[i],0,0);
+			if (!gzin[0])
+				fseek(fin[0],0,0);
+			else {
+				pclose(fin[0]);
+				fin[0]=gzopen(in[0],"r",&gzin[0]);
+			}
 		}
 	}
 
@@ -741,6 +815,28 @@ int read_fq(FILE *in, int rno, struct fq *fq) {
 		fq->qual.s[--fq->qual.n] = '\0';
 	}
         return 1;
+}
+
+FILE *gzopen(const char *f, const char *m, bool*isgz) {
+	FILE *h;
+	const char *x=strrchr(f,'.');
+	if (!strcmp(x,".gz")) {
+		char *tmp=(char *)malloc(strlen(f)+100);
+		strcpy(tmp, "gunzip -c '");
+		strcat(tmp, f);
+		strcat(tmp, "'");
+		h = popen(tmp, "r");
+		free(tmp);
+		*isgz=1;
+	} else {
+		h = fopen(f, "r");
+		*isgz=0;
+	}
+	if (!h) {
+		fprintf(stderr, "Error opening file '%s': %s\n",f, strerror(errno));
+		exit(1);
+	}
+	return h;
 }
 
 void usage(FILE *f) {
