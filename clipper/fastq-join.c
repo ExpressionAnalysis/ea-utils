@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <getopt.h>
 #include <assert.h>
 #include <math.h>
 #include <sys/stat.h>
@@ -142,7 +143,7 @@ int main (int argc, char **argv) {
 		}
 	}
 
-	char *suffix[5]={"un1", "un2", "join", "un3", "join2"};
+	const char *suffix[5]={"un1", "un2", "join", "un3", "join2"};
         FILE *fout[5]; meminit(fout);
 	char *pre = out[0];
         for (i = 0; i < (in[2] ? 5 : 3); ++i) {
@@ -178,8 +179,6 @@ int main (int argc, char **argv) {
                 }
 	}
 
-
-	if (debug) fprintf(stderr, "here 3 %d\n", fin[2]);
 
 	// some basic validation of the file formats
 	{
@@ -347,9 +346,9 @@ void revcomp(struct fq *d, struct fq *s) {
 	if (!d->seq.s) {
 		d->seq.s=(char *) malloc(d->seq.a=s->seq.n);
 		d->qual.s=(char *) malloc(d->qual.a=s->qual.n);
-	} else if (d->seq.a < s->seq.n) {
-                d->seq.s=(char *) realloc(s->seq.s, d->seq.a=s->seq.n);
-                d->qual.s=(char *) realloc(s->qual.s, d->qual.a=s->qual.n);
+	} else if (d->seq.a <= s->seq.n) {
+                d->seq.s=(char *) realloc(d->seq.s, d->seq.a=(s->seq.n+1));
+                d->qual.s=(char *) realloc(d->qual.s, d->qual.a=(s->qual.n+1));
 	}
 	int i;
 	for (i=0;i<s->seq.n/2;++i) {
@@ -368,7 +367,9 @@ void revcomp(struct fq *d, struct fq *s) {
 		d->qual.s[s->seq.n/2] = s->qual.s[s->seq.n/2];
 	}
 	d->seq.n=s->seq.n;	
-	d->qual.n=s->qual.n;	
+	d->qual.n=s->qual.n;
+	s->seq.s[s->seq.n]='\0';
+	s->qual.s[s->seq.n]='\0';
 }
 
 
