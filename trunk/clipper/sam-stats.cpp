@@ -11,6 +11,7 @@
 
 #include <string>
 #include <google/sparse_hash_map> // or sparse_hash_set, dense_hash_map, ...
+#include <google/dense_hash_map> // or sparse_hash_set, dense_hash_map, ...
 
 #include <api/BamReader.h>
 #include <api/BamWriter.h>
@@ -36,10 +37,21 @@ int debug=0;
 int errs=0;
 extern int optind;
 
+/// if we use this a lot may want to make it variable size
+#define HISTNUM 20
+class scoverage {
+public:
+	scoverage() {mapb=reflen=0; meminit(dist);};			
+	long long int mapb;
+	int reflen;
+	long long int dist[HISTNUM];
+};
+
 class sstats {
 public:
 	sstats() {
 		memset((void*)&dat,0,sizeof(dat));
+		covr.set_empty_key("-");
 	}
 	struct {
 		int n, mapn;		// # of entries, # of mapped entries, 
@@ -57,7 +69,7 @@ public:
 	} dat;
 	vector<int> vmapq;		// all map qualities
 	vector<int> visize;		// all insert sizes
-	google::sparse_hash_map<std::string, int> mapb;		// # mapped per ref seq
+	google::dense_hash_map<std::string, scoverage> covr;	// # mapped per ref seq
 	google::sparse_hash_map<std::string, int> dups;		// alignments by read-id (not necessary for some pipes)
 
 	// file-format neutral ... called per read
@@ -298,24 +310,41 @@ int main(int argc, char **argv) {
 					fprintf(o,"%%N\t%.4f\n", 100.0*((double)s.dat.basecnt[T_N]/(double)s.dat.nbase));
 				}
 			}
-			if (s.mapb.size() > 1 && s.mapb.size() <= 1000) {
-				sort(s.vmapq.begin(), s.vmapq.end());
-				vector<string> vtmp;
-				google::sparse_hash_map<string,int>::iterator it = s.mapb.begin();
-				while (it != s.mapb.end()) {
-					vtmp.push_back(it->first);
-					++it;
+			// how many ref seqs have mapped bases?
+			int mseq=0;
+			google::dense_hash_map<string,scoverage>::iterator it = s.covr.begin();
+			vector<string> vtmp;
+			while (it != s.covr.end()) {
+				if (it->second.mapb > 0) {
+					++mseq;								// number of mapped refseqs
+					if (mseq <= 1000) vtmp.push_back(it->first);		// don't bother if too many chrs
 				}
+				++it;
+			}
+			// don't print per-seq percentages if size is huge, or is 1
+			if (mseq > 1 && mseq <= 1000) {			// worth reporting
+				// sort the id's
 				sort(vtmp.begin(),vtmp.end());
 				vector<string>::iterator vit=vtmp.begin();
+				double logb=log(2);
 				while (vit != vtmp.end()) {
-					int v =  s.mapb[*vit];
-					fprintf(o,"%%%s\t%.2f\n", vit->c_str(), 100.0*((double)v/s.dat.lensum));
+					scoverage &v = s.covr[*vit];
+					if (v.reflen) {
+						string sig;
+						int d;
+						for (d=0;d<HISTNUM;++d) {
+							sig += ('0' + (int) (log(v.dist[d])/logb));
+						}
+						fprintf(o,"%%%s\t%.2f\t%.2f\t%s\n", vit->c_str(), 100.0*((double)v.mapb/s.dat.lensum), 100.0*((double)v.mapb/(double)v.reflen), sig.c_str());
+					} else {
+						fprintf(o,"%%%s\t%.2f\n", vit->c_str(), 100.0*((double)v.mapb/s.dat.lensum));
+					}
 					++vit;
 				}
 			}
-			if (s.mapb.size() > 1) {
-				fprintf(o,"num ref seqs\t%d\n", (int) s.mapb.size());
+			if (s.covr.size() > 1) {
+				fprintf(o,"num ref seqs\t%d\n", (int) s.covr.size());
+				fprintf(o,"num ref aligned\t%d\n", (int) mseq);
 			}
 			if (!nodup && s.dat.dupmax > (s.dat.pe+1)) {
 				google::sparse_hash_map<string,int>::iterator it = s.dups.begin();
@@ -378,7 +407,15 @@ void sstats::dostats(const string &name, int rlen, int bits, const string &ref, 
 	dat.del+=del;
 	dat.ins+=ins;
 
-	mapb[ref]+=rlen;
+	if (ref.length()) {
+		scoverage *sc = &(covr[ref]);
+		if (sc) {
+			sc->mapb+=rlen;
+			if (sc->reflen > 0) {
+				sc->dist[pos % HISTNUM]+=rlen;
+			}	
+		}
+	}
 	dat.tmapb+=rlen;
 	if (nmate>0) {
 		visize.push_back(nmate);
@@ -423,10 +460,27 @@ void sstats::dostats(const string &name, int rlen, int bits, const string &ref, 
 bool sstats::parse_sam(FILE *f) {
 	line l;
 	while (read_line(f, l)>0)  {
+		char *sp;
 		if (l.s[0]=='@') {
+			if (!strncmp(l.s,"@SQ\t",4)) {
+				char *t=strtok_r(l.s, "\t", &sp);
+				string sname; int slen=0;
+				while(t) {
+					if (!strncmp(t,"SN:",3)) {
+						sname=&(t[3]);
+						if (slen) 
+							break;
+					} else if (!strncmp(t,"LN:",3)) {
+						slen=atoi(&t[3]);
+						if (sname.length()) 
+							break;
+					}
+					t=strtok_r(NULL, "\t", &sp);
+				}
+				covr[sname].reflen=slen;
+			}
 			continue;
 		}
-		char *sp;
 		char *t=strtok_r(l.s, "\t", &sp);
 		char *d[100]; meminit(d);
 		int n =0;
@@ -476,9 +530,13 @@ bool sstats::parse_bam(const char *in) {
                 warn("Error reading '%s': %s\n", in, strerror(errno));
                 return false;
         }
-	SamHeader header = inbam.GetHeader();
+	SamHeader theader = inbam.GetHeader();
 	RefVector references = inbam.GetReferenceData();
-	BamAlignment al;	
+	int i;
+	for (i = 0; i < references.size(); ++i) {
+		covr[references[i].RefName].reflen=references[i].RefLength;
+	}
+	BamAlignment al;
         while ( inbam.GetNextAlignment(al) ) {
 		int nm;
 		al.GetTag("NM",nm);
@@ -504,8 +562,9 @@ int read_line(FILE *in, line &l) {
 }
 
 void usage(FILE *f) {
-        fputs(
+        fprintf(f,
 "Usage: sam-stats [options] [file1] [file2...filen]\n"
+"Version: %s\n"
 "\n"
 "Produces lots of easily digested statistics for the files listed\n"
 "\n"
@@ -539,13 +598,13 @@ void usage(FILE *f) {
 "  len <STATS>       : read length stats, ignored if fixed-length\n"
 "  mapq <STATS>      : stats for mapping qualities\n"
 "  insert <STATS>    : stats for insert sizes\n"
-"  %<CHR>            : percentage of mapped bases per chromosome (use to compute coverage)\n"
+"  %%<CHR>            : percentage of mapped bases per chromosome (use to compute coverage)\n"
 "\n"
 "Subsampled stats:\n"
 "  base qual <STATS> : stats for base qualities\n"
-"  %A,%T,%C,%G       : base percentages\n"
+"  %%A,%%T,%%C,%%G       : base percentages\n"
 "\n"
-        ,f);
+        ,VERSION);
 }
 
 std::string string_format(const std::string &fmt, ...) {
