@@ -40,7 +40,7 @@ int histnum=30;
 /// if we use this a lot may want to make it variable size
 class scoverage {
 public:
-	scoverage() {mapb=reflen=0; dist.resize(histnum+1);};
+	scoverage() {mapb=reflen=0; dist.resize(histnum+2);};
 	long long int mapb;
 	int reflen;
 	vector <int> dist;
@@ -417,7 +417,13 @@ void sstats::dostats(const string &name, int rlen, int bits, const string &ref, 
 		if (sc) {
 			sc->mapb+=rlen;
 			if (histnum > 0 && sc->reflen > 0) {
-				sc->dist[histnum * pos / sc->reflen]+=rlen;
+				int x = histnum * (pos / sc->reflen);
+				if (x < histnum) {
+	                                sc->dist[x]+=rlen;
+				} else {
+					// out of bounds.... what to do?
+					sc->dist[histnum] +=rlen;
+				}
 			}	
 		}
 	}
