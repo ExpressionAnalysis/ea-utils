@@ -43,6 +43,8 @@ See "void usage" below for usage.
 #define meminit(l) (memset(&l,0,sizeof(l)))
 #define fail(s) ((fprintf(stderr,"%s",s), exit(1)))
 #define endstr(e) (e=='e'?"end":e=='b'?"start":"n/a")
+#define stdev(cnt, sum, ssq) sqrt((((double)cnt)*ssq-pow((double)sum,2)) / ((double)cnt*((double)cnt-1)))
+
 typedef struct line {
 	char *s; int n; size_t a;
 } line;
@@ -107,6 +109,16 @@ static float pickmaxpct=0.10;
 
 FILE *gzopen(const char *in, const char *mode, bool *isgz);
 
+struct qual_str {
+	long long int cnt;
+	long long int sum;
+	long long int ssq;
+	long long int ns;
+} quals[6];
+
+// judge whether quality is poor...
+bool poorqual(int n, int l, const char *s, const char *q);
+ 
 int main (int argc, char **argv) {
 	char c;
 	bool trim = true;
@@ -121,6 +133,8 @@ int main (int argc, char **argv) {
 	char verify='\0';
 	bool noexec = false;
 	const char *group = NULL;
+
+	meminit(quals);
 
 	int i;
 	bool omode = false;	
@@ -198,7 +212,7 @@ int main (int argc, char **argv) {
 	}
 
 	FILE *fin[6];
-	bool gzin[6];
+	bool gzin[6]; meminit(gzin);
 	for (i = 0; i < f_n; ++i) {
 		fin[i]=gzopen(in[i],"r",&gzin[i]);
 	}
@@ -261,43 +275,38 @@ int main (int argc, char **argv) {
 		meminit(fsum);
 		meminit(fmax);
 		for (i=0;i<f_n;++i) {
-			stat(in[i], &st);
-			if (!gzin[i]) {	
-				fseek(fin[i], st.st_size/200 > sampcnt ? (st.st_size-sampcnt)/3 : 0, 0);
-			} else {
-				if (st.st_size > 100000) {
-					int x=0;
-					char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
-					while (getline(&s, &na, fin[i]) > 0) {
-						if (++x >= ((int)st.st_size/20000)*4) {
-							break;
-						}
-					}
-					if (s) free(s);
-				}
-			}
 			char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
+			char *q = NULL; size_t nq = 0;
 			double tots=0, totsq=0;
+
+                	stat(in[i], &st);
+
 			while (getline(&s, &na, fin[i]) > 0) {
-				if (*s == '@')  {
-					if ((ns=getline(&s, &na, fin[i])) <=0)
-						break;
-					if (*s == '@') {
-						if ((ns=getline(&s, &na, fin[i])) <=0)
-							break;
-					}
-					s[--ns]='\0';
-				
-					for (b=0;b<bgcnt;++b) {
-						if (!strncasecmp(s, bcg[b].b.seq.s, bcg[b].b.seq.n)) 
-							++bcg[b].bcnt[i];
-						if (!strcasecmp(s+ns-bcg[b].b.seq.n, bcg[b].b.seq.s))
-							++bcg[b].ecnt[i]; 
-					}	
-					
-					++nr;
-					if (nr >= sampcnt) break;
+				if (*s != '@')  {
+					fprintf(stderr,"Invalid fastq file: %s.\n", in[i]);
+					exit(1);
 				}
+
+				if ((ns=getline(&s, &na, fin[i])) <=0)
+					break;
+
+				getline(&q, &nq, fin[i]);
+				getline(&q, &nq, fin[i]);
+
+				s[--ns]='\0'; q[ns]='\0';
+
+				if (st.st_size > (sampcnt * 500) && poorqual(i, ns, s, q)) 
+					continue;
+			
+				for (b=0;b<bgcnt;++b) {
+					if (!strncasecmp(s, bcg[b].b.seq.s, bcg[b].b.seq.n)) 
+						++bcg[b].bcnt[i];
+					if (!strcasecmp(s+ns-bcg[b].b.seq.n, bcg[b].b.seq.s))
+						++bcg[b].ecnt[i]; 
+				}	
+				
+				++nr;
+				if (nr >= sampcnt) break;
 			}
 			for (b=0;b<bgcnt;++b) {
 				// highest count
@@ -378,30 +387,27 @@ int main (int argc, char **argv) {
                 struct stat st;
                 stat(guide, &st);
 
-		// need to modularize a random sampling function
-		if (!gzin[0]) {
-	                fseek(gin, st.st_size/200 > sampcnt ? (st.st_size-sampcnt)/3 : 0, 0);
-		}
                 char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
+		char *q = NULL; size_t nq = 0;
 
 		// small sample to get lengths
 		double tots=0, totsq=0;
                 while (getline(&s, &na, gin) > 0) {
-                        if (*s == '@')  {
-                                if ((ns=getline(&s, &na, gin)) <=0)
-                                        break;
-				if (*s == '@') {
-					if ((ns=getline(&s, &na, fin[i])) <=0)
-						break;
-				}
-				--ns;
-				tots+=ns;
-				totsq+=ns*ns;
-				++nr;
-				if (nr >= 100) break;
+			if (*s != '@')  {
+				fprintf(stderr,"Invalid fastq file: %s.\n", in[0]);
+				exit(1);
 			}
+			if ((ns=getline(&s, &na, fin[i])) <=0)
+				break;
+			getline(&q, &nq, fin[i]);
+			getline(&q, &nq, fin[i]);
+			--ns;
+			tots+=ns;
+			totsq+=ns*ns;
+			++nr;
+			if (nr >= 200) break;
 		}
-		double dev = sqrt(((double)nr*totsq-pow(tots,2)) / ((double)nr*(nr-1)) );
+		double dev = stdev(nr, tots, totsq);
 
 		// short, and nonvarying (by much, depends on the tech used)
 		if (dev < .25 && roundl(tots/nr) < 12) {
@@ -418,69 +424,68 @@ int main (int argc, char **argv) {
 
 		fprintf(stderr, "Barcode length used: %d (%s)\n", blen, endstr(end));
 
-		if (!gzin[0]) {
-	                fseek(gin, st.st_size/200 > sampcnt ? (st.st_size-sampcnt)/3 : 0, 0);
-		}
-
 		// load a table of possble codes
 		pickmax=0;
 		picktab=NULL;
 		bnode * ent = NULL;
                 while (getline(&s, &na, gin) > 0) {
-                        if (*s == '@')  {
-                                if ((ns=getline(&s, &na, gin)) <=0)
-                                        break;
-                        	if (*s == '@')  {
-					if ((ns=getline(&s, &na, gin)) <=0)
-						break;
-				}
-                                --ns;                           // don't count newline for read len
-                                ++nr;
-
-				char *p;
-				if (end == 'b') {
-					p=s;
-				} else {
-					p=s+nr-blen;
-				}
-				p[blen]='\0';
-				if (!ent)		// make a new ent 
-					ent = (bnode *) malloc(sizeof(*ent));
-
-				if (strchr(p, 'N')||strchr(p, 'n'))
-					continue;
-
-				ent->cnt=0;
-				strcpy(ent->seq=(char*)malloc(strlen(p)+1), p);
-
-				bnode *fent = * (bnode**)  tsearch(ent, &picktab, bnodecomp);
-
-				if (fent == ent)	// used the ent, added to tree
-					ent = NULL;	// need a new one
-
-				++fent->cnt;
-
-				if (fent->cnt > pickmax) pickmax=fent->cnt;
+			if (*s != '@')  {
+				fprintf(stderr,"Invalid fastq file: %s.\n", in[i]);
+				exit(1);
 			}
+
+			if ((ns=getline(&s, &na, gin)) <=0)
+				break;
+
+			getline(&q, &nq, gin);
+			if (getline(&q, &nq, gin) != ns)
+				break;
+
+			s[--ns]='\0'; q[ns]='\0';
+
+			if (st.st_size > (sampcnt * 500) && poorqual(i, ns, s, q)) 
+				continue;
+
+                        ++nr;
+
+			char *p;
+			if (end == 'b') {
+				p=s;
+			} else {
+				p=s+nr-blen;
+			}
+			p[blen]='\0';
+			if (!ent)		// make a new ent 
+				ent = (bnode *) malloc(sizeof(*ent));
+
+			if (strchr(p, 'N')||strchr(p, 'n'))
+				continue;
+
+			ent->cnt=0;
+			strcpy(ent->seq=(char*)malloc(strlen(p)+1), p);
+
+			bnode *fent = * (bnode**)  tsearch(ent, &picktab, bnodecomp);
+
+			if (fent == ent)	// used the ent, added to tree
+				ent = NULL;	// need a new one
+
+			++fent->cnt;
+
+			if (fent->cnt > pickmax) pickmax=fent->cnt;
+			
 			if (nr > sampcnt)
 				break;
 		}
 		pickmax=max(1,(int)(pickmaxpct*pickmax));
 		fprintf(stderr, "Threshold used: %d\n", pickmax);
 		twalk(picktab, pickbest);
-		if (!gzin[0]) {
-			fseek(fin[0],0,0);
-		} else {
-			fin[0]=gzopen(in[0],"r",&gzin[0]);
-		}
 	} else {
-		// user specifies a list of barcodes
+		// user specifies a list of barcodes, indexed read is f[0]
 		FILE *bin = fopen(bfil, "r");
 		if (!bin) {
 			fprintf(stderr, "Error opening file '%s': %s\n",bfil, strerror(errno));
 			return 1;
 		}
-
 
 		bcnt = 0;
 		int ok;
@@ -558,80 +563,54 @@ int main (int argc, char **argv) {
 	if (end == '\0') {
 		int sampcnt = 10000;
 		struct stat st;
-		stat(in[0], &st);
-		if (!gzin[0]) {	
-			fseek(fin[0], st.st_size > sampcnt/200 ? (st.st_size-sampcnt)/3 : 0, 0);
-		} else {
-			// fake seek a bit... this is, essentially, crappy... todo: quality filter, randomize at 10%, save to tmp and use only once.... work for stdin by rereading the tmp.... that's the way to go
-			int x = 0;
-			int l = 0;
-			if (st.st_size > sampcnt/200) {
-				char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
-				while ((l=getline(&s, &na, fin[0])) > 0) {
-					x+=l;
-					if (x >=(st.st_size-sampcnt)/10) {
-						break;
-					}
-				}
-				if (s) free(s);
-			}
-		}
+                stat(in[0], &st);
 		char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
+		char *q = NULL; size_t nq = 0;
 		int ne=0, nb=0;
 		while (getline(&s, &na, fin[0]) > 0) {
-			if (*s == '@')  {
-				if ((ns=getline(&s, &na, fin[0])) <=0) 
-					break;
-				if (*s == '@') {
-					if ((ns=getline(&s, &na, fin[0])) <=0) 
-						break;
-				}
-				--ns;				// don't count newline for read len
-				++nr;
-				for (i=0;i<bcnt;++i) {
-					int d=strncmp(s, bc[i].seq.s, bc[i].seq.n);
-					if (d) {
-						d=strncmp(s+ns-bc[i].seq.n, bc[i].seq.s, bc[i].seq.n);
-						if (!d) {
-							++ne;
-							break;
-						}
-					} else {
-						++nb;
+			if (*s != '@')  {
+				fprintf(stderr,"Invalid fastq file: %s.\n", in[i]);
+				exit(1);
+			}
+			if ((ns=getline(&s, &na, fin[0])) <=0)
+				break;
+
+			getline(&q, &nq, fin[0]);
+			if (getline(&q, &nq, fin[0]) != ns)
+				break;
+
+			s[--ns]='\0'; q[ns]='\0';
+
+			if (st.st_size > (sampcnt * 500) && poorqual(i, ns, s, q)) 
+				continue;
+			++nr;
+			for (i=0;i<bcnt;++i) {
+				int d=strncmp(s, bc[i].seq.s, bc[i].seq.n);
+				if (d) {
+					d=strncmp(s+ns-bc[i].seq.n, bc[i].seq.s, bc[i].seq.n);
+					if (!d) {
+						++ne;
 						break;
 					}
+				} else {
+					++nb;
+					break;
 				}
 			}
 			if (nr >= sampcnt) 
 				break;
 		}
 		end = (ne > nb) ? 'e' : 'b';
-		if (!gzin[0])
-			fseek(fin[0],0,0);
-		else {
-			pclose(fin[0]);
-			fin[0]=gzopen(in[0],"r",&gzin[0]);
-		}
-		fprintf(stderr, "End used: %s\n", endstr(end));
 	}
 
-	{
-		// some basic validation of the file formats
-		for (i=0;i<f_n;++i) {
-			char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
-			ns=getline(&s, &na, fin[i]); --ns;
-			if (*s != '@')  {
-				if (debug) fprintf(stderr, "line 1: %s\n", s);
-				fprintf(stderr, "%s doesn't appear to be a fastq file", in[i]);
-				return 1;
-			}
-			if (!gzin[0])
-				fseek(fin[0],0,0);
-			else {
-				pclose(fin[0]);
-				fin[0]=gzopen(in[0],"r",&gzin[0]);
-			}
-		}
+	fprintf(stderr, "End used: %s\n", endstr(end));
+
+	// seek back to beginning of fastq
+	if (!gzin[0])
+		fseek(fin[0],0,0);
+	else {
+		pclose(fin[0]);
+		fin[0]=gzopen(in[0],"r",&gzin[0]);
 	}
 
 	struct fq fq[6];	
@@ -793,6 +772,33 @@ int read_line(FILE *in, struct line &l) {
 	return (l.n = getline(&l.s, &l.a, in));
 }
 
+bool poorqual(int n, int l, const char *s, const char *q) {
+	int i=0, sum=0, ns=0;
+	for (i=0;i<l;++i) {
+		if (s[i] == 'N')
+			++ns;
+		quals[n].cnt++;
+		quals[n].ssq += q[i] * q[i];
+		sum+=q[i];
+	}
+	quals[n].sum += sum;
+	quals[n].ns += ns;
+	int xmean = sum/l;
+	if (quals[n].cnt < 100) {
+		return (xmean > 10) && (ns == 0);
+	}
+	int pmean = quals[n].sum / quals[n].cnt;				// mean q
+	double pdev = stdev(quals[n].cnt, quals[n].sum, quals[n].ssq);		// dev q
+	int serr = pdev/sqrt(l);						// stderr for length l
+	if (xmean < (pmean - serr)) {						// off by 1 stdev?
+		return 0;							// ditch it
+	}
+	if (ns > (quals[n].ns / quals[n].cnt)) {				// more n's than average?
+		return 0;							// ditch it
+	}
+	return 1;
+}
+
 int read_fq(FILE *in, int rno, struct fq *fq) {
         read_line(in, fq->id);
         read_line(in, fq->seq);
@@ -820,7 +826,7 @@ int read_fq(FILE *in, int rno, struct fq *fq) {
 FILE *gzopen(const char *f, const char *m, bool*isgz) {
 	FILE *h;
 	const char *x=strrchr(f,'.');
-	if (!strcmp(x,".gz")) {
+	if (x && !strcmp(x,".gz")) {
 		char *tmp=(char *)malloc(strlen(f)+100);
 		strcpy(tmp, "gunzip -c '");
 		strcat(tmp, f);
