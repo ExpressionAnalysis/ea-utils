@@ -62,6 +62,7 @@ struct bc {
 	line seq;
 	char *out[6];			// one output per input
 	FILE *fout[6];
+	bool gzout[6];
 	int cnt;			// count found
 };
 
@@ -532,29 +533,15 @@ int main (int argc, char **argv) {
 				bc[b].fout[i] = NULL;
 				continue;
 			}
-			const char *x=strrchr(out[i],'.');
 			const char *p=strchr(out[i],'%');
 			if (!p) fail("Each output file name must contain a '%' sign, which is replaced by the barcode id\n");
 			bc[b].out[i]=(char *) malloc(strlen(out[i])+strlen(bc[b].id.s)+100);
 			strncpy(bc[b].out[i], out[i], p-out[i]);
 			strcat(bc[b].out[i], bc[b].id.s);
 			strcat(bc[b].out[i], p+1);
-			if (!strcmp(x,".gz")) {
-				const char *prefix = "gzip -c > '";
-				char *tmp=(char *) malloc(strlen(bc[b].out[i]) + strlen(prefix) + 100);
-				strcpy(tmp, prefix);
-				strcat(tmp, bc[b].out[i]);
-				strcat(tmp, "'");
-				if (!(bc[b].fout[i]=popen(tmp, "w"))) {
-					fprintf(stderr, "Error opening .gz output file '%s': %s\n",bc[b].out[i], strerror(errno));
-					return 1;
-				}	
-				free(tmp);
-			} else {
-				if (!(bc[b].fout[i]=fopen(bc[b].out[i], "w"))) {
-					fprintf(stderr, "Error opening output file '%s': %s\n",bc[b].out[i], strerror(errno));
-					return 1;
-				}
+			if (!(bc[b].fout[i]=gzopen(bc[b].out[i], "w", bc[b].gzout[i]))) {
+				fprintf(stderr, "Error opening output file '%s': %s\n",bc[b].out[i], strerror(errno));
+				return 1;
 			}
 		}
 	}
@@ -606,11 +593,14 @@ int main (int argc, char **argv) {
 	fprintf(stderr, "End used: %s\n", endstr(end));
 
 	// seek back to beginning of fastq
-	if (!gzin[0])
-		fseek(fin[0],0,0);
-	else {
-		pclose(fin[0]);
-		fin[0]=gzopen(in[0],"r",&gzin[0]);
+
+	for (i=0;i<f_n;++i) {
+		if (!gzin[i])
+			fseek(fin[i],0,0);
+		else {
+			pclose(fin[i]);
+			fin[i]=gzopen(in[i],"r",&gzin[i]);
+		}
 	}
 
 	struct fq fq[6];	
@@ -702,6 +692,18 @@ int main (int argc, char **argv) {
                         fputs(fq[i].com.s,f);
                         fputs(fq[i].qual.s,f);
                         fputc('\n',f);
+		}
+	}
+
+        for (b=0;b<=bcnt;++b) {
+                for (i=0;i<f_n;++i) {
+			if (bc[b].fout[i]) {
+				if (bc[b].gzout[i]) {
+					pclose(bc[b].fout[i]);
+				} else {
+					fclose(bc[b].fout[i]);
+				}
+			}
 		}
 	}
 
@@ -827,13 +829,22 @@ FILE *gzopen(const char *f, const char *m, bool*isgz) {
 	FILE *h;
 	const char *x=strrchr(f,'.');
 	if (x && !strcmp(x,".gz")) {
-		char *tmp=(char *)malloc(strlen(f)+100);
-		strcpy(tmp, "gunzip -c '");
-		strcat(tmp, f);
-		strcat(tmp, "'");
-		h = popen(tmp, "r");
-		free(tmp);
-		*isgz=1;
+                if (strchr(m,'w')) {
+                        strcpy(tmp, "gzip > '");
+                        strcat(tmp, f);
+                        strcat(tmp, "'");
+                        h = popen(tmp, "w");
+                        free(tmp);
+                        *isgz=1;
+		} else {
+			char *tmp=(char *)malloc(strlen(f)+100);
+			strcpy(tmp, "gunzip -c '");
+			strcat(tmp, f);
+			strcat(tmp, "'");
+			h = popen(tmp, "r");
+			free(tmp);
+			*isgz=1;
+		}
 	} else {
 		h = fopen(f, "r");
 		*isgz=0;
