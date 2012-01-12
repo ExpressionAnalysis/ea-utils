@@ -76,7 +76,7 @@ struct ad {
 int read_fa(FILE *in, int rno, struct ad *ad);		// 0=done, 1=ok, -1=err+continue
 int read_fq(FILE *in, int rno, struct fq *fq);		// 0=done, 1=ok, -1=err+continue
 int meanq(const char *q, int qn, int i, int w);
-void fqseek(FILE *fin, int s);
+void fqseek(FILE *fin, int s, bool isgz);
 
 int char2bp(char c);
 char bp2char(int b);
@@ -208,10 +208,7 @@ int main (int argc, char **argv) {
 	FILE *fout[MAX_FILES]; meminit(fout);
 
 	for (i=0;i<i_n;++i) {
-		if (!(fin[i]=fopen(ifil[i], "r"))) {
-			fprintf(stderr, "Error opening file '%s': %s\n",ifil[i], strerror(errno));
-			return 1;
-		}
+		fin[i]=gzopen(ifil[i], "r");
 	}
 
 
@@ -254,7 +251,7 @@ int main (int argc, char **argv) {
             struct stat st;
             stat(ifil[i], &st);
 	    if (st.st_size > (sampcnt*100)) 
-	            fqseek(fin[i],(st.st_size-(sampcnt*100))/3);
+	            fqseek(fin[i],(st.st_size-(sampcnt*100))/5, gzin[i]);
 
             while (getline(&s, &na, fin[i]) > 0) {
                 if (*s == '@')  {
@@ -361,9 +358,9 @@ int main (int argc, char **argv) {
 	    struct stat st;
 	    stat(ifil[i], &st);
 	    if (st.st_size/100 > sampcnt) {
-		fqseek(fin[i],(st.st_size-(sampcnt*100))/3);
+		fqseek(fin[i],(st.st_size-(sampcnt*100))/5, gzin[i]);
 	    } else {
-		    fseek(fin[i],0,0);
+		    freset(fin[i], gzin[i]);
 	    }
 
 	    // todo, use readfq
@@ -615,9 +612,8 @@ int main (int argc, char **argv) {
 	for (i=0;i<o_n;++i) {
 		if (!strcmp(ofil[i],"-")) {
 			fout[i]=stdout;
-		} else if (!(fout[i]=fopen(ofil[i], "w"))) {
-                        fprintf(stderr, "Error opening output file '%s': %s\n",ofil[i], strerror(errno));
-                        return 1;
+		} else {
+			ofil[i]=gzopen(ofil[i], "w");
                 }
 	}
 
@@ -661,7 +657,7 @@ int main (int argc, char **argv) {
 		fprintf(fstat, "Files: %d\n", i_n);
 
 	for (i=0;i<i_n;++i)
-		fseek(fin[i], 0, 0);
+		freset(fin[i], gzin[i]);
 
 	while (read_ok=read_fq(fin[0], nrec, &fq[0])) {
 		for (i=1;i<i_n;++i) {
@@ -1077,7 +1073,10 @@ int meanq(const char *q, int qn, int i, int w) {
 	return t / (e-s+1);
 }
 
-void fqseek(FILE *fin, int s) {
+void fqseek(FILE *fin, int s, bool isgz) {
+    if (isgz) {
+	while (x=fread(fin, .....
+    }
     fseek(fin, s, 0);
     if (s>0) {
 	    char *s = NULL; size_t na = 0; int ns = 0;
@@ -1099,4 +1098,25 @@ void fqseek(FILE *fin, int s) {
     }
 }
 
+FILE *gzopen(const char *f, const char *m, bool*isgz) {
+        FILE *h;
+        const char *x=strrchr(f,'.');
+        if (!strcmp(x,".gz")) {
+                char *tmp=(char *)malloc(strlen(f)+100);
+                strcpy(tmp, "gunzip -c '");
+                strcat(tmp, f);
+                strcat(tmp, "'");
+                h = popen(tmp, "r");
+                free(tmp);
+                *isgz=1;
+        } else {
+                h = fopen(f, "r");
+                *isgz=0;
+        }
+        if (!h) {
+                fprintf(stderr, "Error opening file '%s': %s\n",f, strerror(errno));
+                exit(1);
+        }
+        return h;
+}
 
