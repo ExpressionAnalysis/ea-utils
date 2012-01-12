@@ -539,7 +539,7 @@ int main (int argc, char **argv) {
 			strncpy(bc[b].out[i], out[i], p-out[i]);
 			strcat(bc[b].out[i], bc[b].id.s);
 			strcat(bc[b].out[i], p+1);
-			if (!(bc[b].fout[i]=gzopen(bc[b].out[i], "w", bc[b].gzout[i]))) {
+			if (!(bc[b].fout[i]=gzopen(bc[b].out[i], "w", &bc[b].gzout[i]))) {
 				fprintf(stderr, "Error opening output file '%s': %s\n",bc[b].out[i], strerror(errno));
 				return 1;
 			}
@@ -829,22 +829,19 @@ FILE *gzopen(const char *f, const char *m, bool*isgz) {
 	FILE *h;
 	const char *x=strrchr(f,'.');
 	if (x && !strcmp(x,".gz")) {
+		char *tmp=(char *)malloc(strlen(f)+100);
                 if (strchr(m,'w')) {
                         strcpy(tmp, "gzip > '");
                         strcat(tmp, f);
                         strcat(tmp, "'");
-                        h = popen(tmp, "w");
-                        free(tmp);
-                        *isgz=1;
 		} else {
-			char *tmp=(char *)malloc(strlen(f)+100);
 			strcpy(tmp, "gunzip -c '");
 			strcat(tmp, f);
 			strcat(tmp, "'");
-			h = popen(tmp, "r");
-			free(tmp);
-			*isgz=1;
 		}
+		h = popen(tmp, m);
+		*isgz=1;
+		free(tmp);
 	} else {
 		h = fopen(f, "r");
 		*isgz=0;
