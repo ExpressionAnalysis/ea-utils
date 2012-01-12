@@ -374,7 +374,7 @@ int main (int argc, char **argv) {
 					// shifted count exceeds threshold... use it
 					bc[bcnt]=bcg[b].b;
 					bc[bcnt].shifted=1;
-                			fprintf(stderr, "Warning: Barcode %s was shifted\n", bcg[bcnt].b.id);
+                			fprintf(stderr, "Warning: Barcode %s was shifted\n", bcg[bcnt].b.id.s);
 					++bcnt;
 				}
 			}
@@ -385,12 +385,15 @@ int main (int argc, char **argv) {
 			FILE *f = fin[0];
 			char *n = in[0];
 			const char *o = out[0];
+			bool gzi = gzin[0];
 			fin[0]=fin[i];
 			in[0]=in[i];
 			out[0]=out[i];
+			gzin[0]=gzin[i];
 			fin[i]=f;
 			in[i]=n;
 			out[i]=o;
+			gzin[i]=gzi;
 		}
 		if (bcg) free(bcg);
 	} else if (guide) {
