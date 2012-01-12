@@ -261,6 +261,7 @@ int main (int argc, char **argv) {
 					continue;
 				}
 			}
+                        if (!strcmp(bcg[bgcnt].b.seq.s,"seq")) continue;
 			bcg[bgcnt].gptr = getgroup(g);
                         bcg[bgcnt].b.id.n=strlen(bcg[bgcnt].b.id.s);
                         bcg[bgcnt].b.seq.n=strlen(bcg[bgcnt].b.seq.s);
@@ -305,10 +306,11 @@ int main (int argc, char **argv) {
 				for (b=0;b<bgcnt;++b) {
 					if (!strncasecmp(s, bcg[b].b.seq.s, bcg[b].b.seq.n)) 
 						++bcg[b].bcnt[i];
-					else if (!strncasecmp(s+1, bcg[b].b.seq.s, bcg[b].b.seq.n))
+					else if (!strncasecmp(s+1, bcg[b].b.seq.s, bcg[b].b.seq.n)) {
 						++bcg[b].bscnt[i];
+					}
 
-					if (!strcasecmp(s+ns-bcg[b].b.seq.n, bcg[b].b.seq.s))
+					if (ns >= bcg[b].b.seq.n && !strcasecmp(s+ns-bcg[b].b.seq.n, bcg[b].b.seq.s))
 						++bcg[b].ecnt[i]; 
 					else if (ns > bcg[b].b.seq.n && !strncasecmp(s+ns-bcg[b].b.seq.n-1, bcg[b].b.seq.s, bcg[b].b.seq.n))
 						++bcg[b].escnt[i]; 
@@ -374,7 +376,7 @@ int main (int argc, char **argv) {
 					// shifted count exceeds threshold... use it
 					bc[bcnt]=bcg[b].b;
 					bc[bcnt].shifted=1;
-                			fprintf(stderr, "Warning: Barcode %s was shifted\n", bcg[bcnt].b.id.s);
+                			fprintf(stderr, "Warning: Barcode %s was shifted\n", bcg[b].b.id.s);
 					++bcnt;
 				}
 			}
@@ -602,9 +604,8 @@ int main (int argc, char **argv) {
 				break;
 		}
 		end = (ne > nb) ? 'e' : 'b';
+		fprintf(stderr, "End used: %s\n", endstr(end));
 	}
-
-	fprintf(stderr, "End used: %s\n", endstr(end));
 
 	// seek back to beginning of fastq
 
@@ -668,7 +669,11 @@ int main (int argc, char **argv) {
 						d=bc[i].seq.n;
 					}
 				} else {
-	                                d=hd(fq[0].seq.s+fq[0].seq.n-bc[i].seq.n, bc[i].seq.s, bc[i].seq.n);
+					if (fq[0].seq.n >= bc[i].seq.n) {
+		                                d=hd(fq[0].seq.s+fq[0].seq.n-bc[i].seq.n, bc[i].seq.s, bc[i].seq.n);
+					} else {
+						d=bc[i].seq.n;
+					}
 				}
 			} else {
 				if (bc[i].shifted) 
