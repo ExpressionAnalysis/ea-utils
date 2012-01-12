@@ -36,15 +36,14 @@ std::string string_format(const std::string &fmt, ...);
 int debug=0;
 int errs=0;
 extern int optind;
-
+int histnum=30;
 /// if we use this a lot may want to make it variable size
-#define HISTNUM 20
 class scoverage {
 public:
-	scoverage() {mapb=reflen=0; meminit(dist);};			
+	scoverage() {mapb=reflen=0; dist.resize(histnum+1);};
 	long long int mapb;
 	int reflen;
-	long long int dist[HISTNUM];
+	vector <int> dist;
 };
 
 class sstats {
@@ -52,6 +51,9 @@ public:
 	sstats() {
 		memset((void*)&dat,0,sizeof(dat));
 		covr.set_empty_key("-");
+	}
+	~sstats() {
+		covr.clear();
 	}
 	struct {
 		int n, mapn;		// # of entries, # of mapped entries, 
@@ -102,12 +104,13 @@ int main(int argc, char **argv) {
 	bool multi=0, newonly=0, inbam=0;
 	char c;
 	optind = 0;
-        while ( (c = getopt (argc, argv, "?BDdx:Mh")) != -1) {
+        while ( (c = getopt (argc, argv, "?BDdx:MhH:")) != -1) {
                 switch (c) {
                 case 'd': ++debug; break;
                 case 'D': ++nodup; break;
                 case 'B': inbam=1; break;
                 case 'b': qualreads=atoi(optarg); break;
+                case 'H': histnum=atoi(optarg); break;
                 case 'x': ext=optarg; break;
                 case 'M': newonly=1; break;
                 case 'h': usage(stdout); return 0;
@@ -314,28 +317,30 @@ int main(int argc, char **argv) {
 			int mseq=0;
 			google::dense_hash_map<string,scoverage>::iterator it = s.covr.begin();
 			vector<string> vtmp;
+			bool haverlen = 0;
 			while (it != s.covr.end()) {
 				if (it->second.mapb > 0) {
 					++mseq;								// number of mapped refseqs
 					if (mseq <= 1000) vtmp.push_back(it->first);		// don't bother if too many chrs
+					if (it->second.reflen > 0) haverlen = 1;
 				}
 				++it;
 			}
 			// don't print per-seq percentages if size is huge, or is 1
-			if (mseq > 1 && mseq <= 1000) {			// worth reporting
+			if ((haverlen || mseq > 1) && mseq <= 1000) {			// worth reporting
 				// sort the id's
 				sort(vtmp.begin(),vtmp.end());
 				vector<string>::iterator vit=vtmp.begin();
 				double logb=log(2);
 				while (vit != vtmp.end()) {
 					scoverage &v = s.covr[*vit];
-					if (v.reflen) {
+					if (v.reflen && histnum > 0) {
 						string sig;
 						int d;
-						for (d=0;d<HISTNUM;++d) {
+						for (d=0;d<histnum;++d) {
 							sig += ('0' + (int) (log(v.dist[d])/logb));
 						}
-						fprintf(o,"%%%s\t%.2f\t%.2f\t%s\n", vit->c_str(), 100.0*((double)v.mapb/s.dat.lensum), 100.0*((double)v.mapb/(double)v.reflen), sig.c_str());
+						fprintf(o,"%%%s\t%.2f\t%s\n", vit->c_str(), 100.0*((double)v.mapb/s.dat.lensum), sig.c_str());
 					} else {
 						fprintf(o,"%%%s\t%.2f\n", vit->c_str(), 100.0*((double)v.mapb/s.dat.lensum));
 					}
@@ -388,7 +393,7 @@ void sstats::dostats(const string &name, int rlen, int bits, const string &ref, 
 	++dat.mapn;
 
 	if (rlen > dat.lenmax) dat.lenmax = rlen;
-	if (rlen < dat.lenmin) dat.lenmin = rlen;
+	if ((rlen < dat.lenmin) || dat.lenmin==0) dat.lenmin = rlen;
 	dat.lensum += rlen;
 	dat.lenssq += rlen*rlen;
 
@@ -411,8 +416,8 @@ void sstats::dostats(const string &name, int rlen, int bits, const string &ref, 
 		scoverage *sc = &(covr[ref]);
 		if (sc) {
 			sc->mapb+=rlen;
-			if (sc->reflen > 0) {
-				sc->dist[pos % HISTNUM]+=rlen;
+			if (histnum > 0 && sc->reflen > 0) {
+				sc->dist[histnum * pos / sc->reflen]+=rlen;
 			}	
 		}
 	}
@@ -575,6 +580,7 @@ void usage(FILE *f) {
 "-B             Input is bam, don't bother looking at magic\n"
 "-x FIL         File extension for multiple files (stats)\n"
 "-b INT         Number of reads to sample for per-base stats (1M)\n"
+"-S INT         Size of ascii-signature (30)\n"
 "\n"
 "OUTPUT:\n"
 "\n"
@@ -598,11 +604,16 @@ void usage(FILE *f) {
 "  len <STATS>       : read length stats, ignored if fixed-length\n"
 "  mapq <STATS>      : stats for mapping qualities\n"
 "  insert <STATS>    : stats for insert sizes\n"
-"  %%<CHR>            : percentage of mapped bases per chromosome (use to compute coverage)\n"
+"  %%<CHR>           : percentage of mapped bases per chr, followed by a signature\n"
 "\n"
-"Subsampled stats:\n"
+"Subsampled stats (1M reads max):\n"
 "  base qual <STATS> : stats for base qualities\n"
 "  %%A,%%T,%%C,%%G       : base percentages\n"
+"\n"
+"Meaning of the per-chromosome signature:\n"
+"  A ascii-histogram of mapped reads by chromosome position.\n"
+"  It is only output if the original SAM/BAM has a header. The values\n"
+"  are the log2 of the # of mapped reads at each position + ascii '0'.\n"
 "\n"
         ,VERSION);
 }
