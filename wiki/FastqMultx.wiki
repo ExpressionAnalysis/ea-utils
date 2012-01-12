@@ -48,22 +48,25 @@ Options:
 
 # this example will read/output files that are gzipped, since -B is used and only 1 sequence files is present, it will look for barcodes on the "ends" of the sequence and will tell you which end it found them on
 
-fastq-multx -B barcodes.fil seq.fastq.gz -o %.fq.gz
+`fastq-multx -B barcodes.fil seq.fastq.gz -o %.fq.gz`
 
-# contents of barcodes.fil
+Contents of barcodes.fil:
+
+{{{
 mock_a ACCC
 salt_a CGTA
 mock_b  GAGT
 salty_b  CGGT
+}}}
 
-
-= Example 1 =
+= Example 2 =
 
 # this example will first determine which "barcode group" to use, will select the most likely set of barcodes from that file, and will then proceed as if only that set was specified.   this allows for a single pipeline that works with multiple technologies
 
 `fastq-multx -l barcodes.grp seq2.fastq.gz seq1.fastq.gz -o n/a -o out%.fq`
 
-# contents of barcodes.grp
+Contents of barcodes.grp:
+
 {{{
 id      seq     style
 LB1     ATCACG  TruSeq
