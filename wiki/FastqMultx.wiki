@@ -42,3 +42,44 @@ Options:
 -v C            Verify that mated id's match up to character C ('/' for illumina)
 -m N            Allow up to N mismatches, as long as they are unique
 }}}
+
+
+= Example 1 =
+
+# this example will read/output files that are gzipped, since -B is used and only 1 sequence files is present, it will look for barcodes on the "ends" of the sequence and will tell you which end it found them on
+
+fastq-multx -B barcodes.fil seq.fastq.gz -o %.fq.gz
+
+# contents of barcodes.fil
+mock_a ACCC
+salt_a CGTA
+mock_b  GAGT
+salty_b  CGGT
+
+
+= Example 1 =
+
+# this example will first determine which "barcode group" to use, will select the most likely set of barcodes from that file, and will then proceed as if only that set was specified.   this allows for a single pipeline that works with multiple technologies
+
+`fastq-multx -l barcodes.grp seq2.fastq.gz seq1.fastq.gz -o n/a -o out%.fq`
+
+# contents of barcodes.grp
+{{{
+id      seq     style
+LB1     ATCACG  TruSeq
+LB2     CGATGT  TruSeq
+LB3     TTAGGC  TruSeq
+LB4     TGACCA  TruSeq
+LB5     ACAGTG  TruSeq
+A01_01  TAGCTTGT        Fluidigm
+B01_02  CGATGTTT        Fluidigm
+C01_03  GCCAATGT        Fluidigm
+D01_04  ACAGTGGT        Fluidigm
+E01_05  ATCACGTT        Fluidigm
+}}}
+
+Standard error will output:
+
+`Using Barcode Group: TruSeq on File: seq2.fastq.gz (start), Threshold 0.59%`
+
+This indicated that The LB1-LB5 barcodes will be used, and that the filess will be named LB1-LB5, and that the barcode was at the "start" of the reads in the seq2 file.
