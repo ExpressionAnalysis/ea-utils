@@ -73,6 +73,13 @@ struct ad {
 	int thr[MAX_FILES];			// min-length for clip
 };
 
+struct qual_str {
+        long long int cnt;
+        long long int sum;
+        long long int ssq;
+        long long int ns;
+} quals[6];
+
 int read_fa(FILE *in, int rno, struct ad *ad);		// 0=done, 1=ok, -1=err+continue
 int read_fq(FILE *in, int rno, struct fq *fq);		// 0=done, 1=ok, -1=err+continue
 int meanq(const char *q, int qn, int i, int w);
@@ -81,6 +88,10 @@ void fqseek(FILE *fin, int s, bool isgz);
 int char2bp(char c);
 char bp2char(int b);
 void saveskip(FILE **fout, int fo_n, struct fq *fq);
+FILE *gzopen(const char *in, const char *mode, bool *isgz);
+bool poorqual(int n, int l, const char *s, const char *q);
+
+const char *fext(const char *f);
 
 void usage(FILE *f, const char *msg=NULL);
 int hd(char *a, char *b, int n);
@@ -107,6 +118,8 @@ int main (int argc, char **argv) {
 	int ilv3 = -1;
 
 	int i;
+
+	meminit(quals);
 	
 	char *afil = NULL;
 	char *ifil[MAX_FILES]; meminit(ifil);
@@ -205,10 +218,12 @@ int main (int argc, char **argv) {
 	}
 
 	FILE *fin[MAX_FILES];  meminit(fin);
+	bool gzin[MAX_FILES]; meminit(gzin);
 	FILE *fout[MAX_FILES]; meminit(fout);
+	bool gzout[MAX_FILES]; meminit(gzout);
 
 	for (i=0;i<i_n;++i) {
-		fin[i]=gzopen(ifil[i], "r");
+		fin[i]=gzopen(ifil[i], "r", &gzin[i]);
 	}
 
 
@@ -250,8 +265,6 @@ int main (int argc, char **argv) {
 	    // jump a third of the way in
             struct stat st;
             stat(ifil[i], &st);
-	    if (st.st_size > (sampcnt*100)) 
-	            fqseek(fin[i],(st.st_size-(sampcnt*100))/5, gzin[i]);
 
             while (getline(&s, &na, fin[i]) > 0) {
                 if (*s == '@')  {
@@ -291,6 +304,11 @@ int main (int argc, char **argv) {
 
 			nq=getline(&q, &naq, fin[i]);
 			nq=getline(&q, &naq, fin[i]);		// qual is 2 lines down
+
+			// skip poor quals/lots of N's when doing sampling
+			if (st.st_size > (sampcnt * 500) && poorqual(i, ns, s, q))
+				continue;
+
 			if (phred == 0) {
 				--nq;
 				for (j=0;j<nq;++j) {
@@ -346,6 +364,14 @@ int main (int argc, char **argv) {
 		}
 	}
 
+        for (i=0;i<i_n;++i) {
+                if (gzin[i]) {
+                        fin[i]=gzopen(ifil[i], "r", &gzin[i]);
+                } else {
+                        fseek(fin[i],0,0);
+                }
+        }
+
 	if (debug) printf("Max ns: %d, Avg[0]: %d\n", maxns, avgns[0]);
 
 	// total base count per read position in sample
@@ -357,11 +383,6 @@ int main (int argc, char **argv) {
 
 	    struct stat st;
 	    stat(ifil[i], &st);
-	    if (st.st_size/100 > sampcnt) {
-		fqseek(fin[i],(st.st_size-(sampcnt*100))/5, gzin[i]);
-	    } else {
-		    freset(fin[i], gzin[i]);
-	    }
 
 	    // todo, use readfq
 	    char *s = NULL; size_t na = 0; int ns = 0, nr = 0;
@@ -376,6 +397,10 @@ int main (int argc, char **argv) {
 			nq=getline(&q, &naq, fin[i]);		// qual is 2 lines down
 
 			--nq; --ns;				// don't count newline for read len
+
+			// skip poor quals/lots of N's when doing sampling (otherwise you'll miss some)
+			if ((st.st_size > (sampcnt * 500)) && poorqual(i, ns, s, q))
+				continue;
 
 			if (nq != ns) {
 				if (warncount < MAXWARN) {
@@ -613,19 +638,28 @@ int main (int argc, char **argv) {
 		if (!strcmp(ofil[i],"-")) {
 			fout[i]=stdout;
 		} else {
-			ofil[i]=gzopen(ofil[i], "w");
+			fout[i]=gzopen(ofil[i], "w", &gzout[i]);
                 }
 	}
 
-	FILE *fskip[MAX_FILES]; memset(&fskip, 0, sizeof(FILE*));
+	FILE *fskip[MAX_FILES]; meminit(fskip);
+	bool gzskip[MAX_FILES]; meminit(gzskip);
+
 	if (skipb) {
 		for (i=0;i<o_n;++i) {
 			if (!strcmp(ofil[i],"-")) {
 				fskip[i]=stderr;
 			} else {
 				char *skipfil = (char *) malloc(strlen(ofil[i])+10);
-				sprintf(skipfil, "%s.skip", ofil[i]);
-				if (!(fskip[i]=fopen(skipfil, "w"))) {
+				if (!strcmp(fext(ofil[i]),".gz")) {
+					char *p=(char *)strrchr(ofil[i],'.');
+					*p='\0';
+					sprintf(skipfil, "%s.skip.gz", ofil[i]);
+					*p='.';
+				} else {
+					sprintf(skipfil, "%s.skip", ofil[i]);
+				}
+				if (!(fskip[i]=gzopen(skipfil, "w", &gzskip[i]))) {
 					fprintf(stderr, "Error opening skip file '%s': %s\n",skipfil, strerror(errno));
 					return 1;
 				}
@@ -656,8 +690,13 @@ int main (int argc, char **argv) {
 	if (i_n > 0)
 		fprintf(fstat, "Files: %d\n", i_n);
 
-	for (i=0;i<i_n;++i)
-		freset(fin[i], gzin[i]);
+	for (i=0;i<i_n;++i) {
+		if (gzin[i]) {
+			fin[i]=gzopen(ifil[i], "r", &gzin[i]);
+		} else {
+			fseek(fin[i],0,0);
+		}
+	}
 
 	while (read_ok=read_fq(fin[0], nrec, &fq[0])) {
 		for (i=1;i<i_n;++i) {
@@ -889,6 +928,13 @@ int main (int argc, char **argv) {
 			++ntooshort;
 		}
 	}
+
+        for (i=0;i<i_n;++i) {
+		if (fout[i])  { if (gzout[i])  pclose(fout[i]);  else fclose(fout[i]); }
+                if (fin[i])   { if (gzin[i])   pclose(fin[i]);   else fclose(fin[i]); }
+                if (fskip[i]) { if (gzskip[i]) pclose(fskip[i]); else fclose(fskip[i]); }
+        }
+
 	fprintf(fstat, "Total reads: %d\n", nrec);
 	fprintf(fstat, "Too short after clip: %d\n", ntooshort);
 
@@ -1073,44 +1119,27 @@ int meanq(const char *q, int qn, int i, int w) {
 	return t / (e-s+1);
 }
 
-void fqseek(FILE *fin, int s, bool isgz) {
-    if (isgz) {
-	while (x=fread(fin, .....
-    }
-    fseek(fin, s, 0);
-    if (s>0) {
-	    char *s = NULL; size_t na = 0; int ns = 0;
-	    while ((ns=getline(&s, &na, fin)) > 0) {
-		if (*s == '@')  {
-			ns=getline(&s, &na, fin);
-			if ((ns>0) && (*s == '@'))  {
-				ns=getline(&s, &na, fin);
-				ns=getline(&s, &na, fin);
-				ns=getline(&s, &na, fin);
-			} else {
-				ns=getline(&s, &na, fin);
-				ns=getline(&s, &na, fin);
-			}
-			break;
-		}
-	    }
-	    if (s) free(s);
-    }
-}
-
 FILE *gzopen(const char *f, const char *m, bool*isgz) {
         FILE *h;
-        const char *x=strrchr(f,'.');
-        if (!strcmp(x,".gz")) {
+        if (!strcmp(fext(f),".gz")) {
                 char *tmp=(char *)malloc(strlen(f)+100);
-                strcpy(tmp, "gunzip -c '");
-                strcat(tmp, f);
-                strcat(tmp, "'");
-                h = popen(tmp, "r");
-                free(tmp);
-                *isgz=1;
+		if (strchr(m,'w')) {
+                        strcpy(tmp, "gzip > '");
+                        strcat(tmp, f);
+                        strcat(tmp, "'");
+                        h = popen(tmp, "w");
+                        free(tmp);
+                        *isgz=1;
+		} else {
+			strcpy(tmp, "gunzip -c '");
+			strcat(tmp, f);
+			strcat(tmp, "'");
+			h = popen(tmp, "r");
+			free(tmp);
+			*isgz=1;
+		}
         } else {
-                h = fopen(f, "r");
+                h = fopen(f, m);
                 *isgz=0;
         }
         if (!h) {
@@ -1118,5 +1147,38 @@ FILE *gzopen(const char *f, const char *m, bool*isgz) {
                 exit(1);
         }
         return h;
+}
+
+const char *fext(const char *f) {
+	const char *x=strrchr(f,'.');
+	return x ? x : "";
+}
+
+
+bool poorqual(int n, int l, const char *s, const char *q) {
+        int i=0, sum=0, ns=0;
+        for (i=0;i<l;++i) {
+                if (s[i] == 'N')
+                        ++ns;
+                quals[n].cnt++;
+                quals[n].ssq += q[i] * q[i];
+                sum+=q[i];
+        }
+        quals[n].sum += sum;
+        quals[n].ns += ns;
+        int xmean = sum/l;
+        if (quals[n].cnt < 100) {
+                return (xmean > 10) && (ns == 0);
+        }
+        int pmean = quals[n].sum / quals[n].cnt;                                // mean q
+        double pdev = stdev(quals[n].cnt, quals[n].sum, quals[n].ssq);          // dev q
+        int serr = pdev/sqrt(l);                                                // stderr for length l
+        if (xmean < (pmean - serr)) {                                           // off by 1 stdev?
+                return 0;                                                       // ditch it
+        }
+        if (ns > (quals[n].ns / quals[n].cnt)) {                                // more n's than average?
+                return 0;                                                       // ditch it
+        }
+        return 1;
 }
 
