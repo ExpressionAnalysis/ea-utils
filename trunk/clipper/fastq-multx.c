@@ -64,6 +64,7 @@ struct bc {
 	FILE *fout[6];
 	bool gzout[6];
 	int cnt;			// count found
+	bool shifted;			// count found in 1-shifted position
 };
 
 // group of barcodes
@@ -79,6 +80,8 @@ struct bcg {
         line group;			// group (fluidigm, truseq, etc)
         int bcnt[6];			// matched begin of file n
         int ecnt[6];			// matched end of file n
+        int bscnt[6];			// matched begin of file n, shifted by 1
+        int escnt[6];			// matched end of file n, shifted by 1
 	struct group *gptr;		
 };
 
@@ -302,8 +305,13 @@ int main (int argc, char **argv) {
 				for (b=0;b<bgcnt;++b) {
 					if (!strncasecmp(s, bcg[b].b.seq.s, bcg[b].b.seq.n)) 
 						++bcg[b].bcnt[i];
+					else if (!strncasecmp(s+1, bcg[b].b.seq.s, bcg[b].b.seq.n))
+						++bcg[b].bscnt[i];
+
 					if (!strcasecmp(s+ns-bcg[b].b.seq.n, bcg[b].b.seq.s))
 						++bcg[b].ecnt[i]; 
+					else if (ns > bcg[b].b.seq.n && !strncasecmp(s+ns-bcg[b].b.seq.n-1, bcg[b].b.seq.s, bcg[b].b.seq.n))
+						++bcg[b].escnt[i]; 
 				}	
 				
 				++nr;
@@ -359,8 +367,15 @@ int main (int argc, char **argv) {
                 for (b=0;b<bgcnt;++b) {
 			if (bcg[b].gptr->i == gindex) {
 				int cnt = end == 'e' ? bcg[b].ecnt[i] : bcg[b].bcnt[i];
+				int shcnt = end == 'e' ? bcg[b].escnt[i] : bcg[b].bscnt[i];
 				if (cnt > thresh / 6) {
 					bc[bcnt++]=bcg[b].b;
+				} else if (shcnt > thresh / 6) {
+					// shifted count exceeds threshold... use it
+					bc[bcnt]=bcg[b].b;
+					bc[bcnt].shifted=1;
+                			fprintf(stderr, "Warning: Barcode %s was shifted\n", bcg[bcnt].b.id);
+					++bcnt;
 				}
 			}
 		}
@@ -572,15 +587,11 @@ int main (int argc, char **argv) {
 				continue;
 			++nr;
 			for (i=0;i<bcnt;++i) {
-				int d=strncmp(s, bc[i].seq.s, bc[i].seq.n);
-				if (d) {
-					d=strncmp(s+ns-bc[i].seq.n, bc[i].seq.s, bc[i].seq.n);
-					if (!d) {
-						++ne;
-						break;
-					}
-				} else {
+				if (!strncmp(s, bc[i].seq.s, bc[i].seq.n)) {
 					++nb;
+					break;
+				} else if (!strncmp(s+ns-bc[i].seq.n, bc[i].seq.s, bc[i].seq.n)) {
+					++ne;
 					break;
 				}
 			}
@@ -647,9 +658,20 @@ int main (int argc, char **argv) {
 		for (i =0; i < bcnt; ++i) {
                         int d;
 			if (end == 'e') {
-                                d=hd(fq[0].seq.s+fq[0].seq.n-bc[i].seq.n, bc[i].seq.s, bc[i].seq.n);
+				if (bc[i].shifted) {
+					if (fq[0].seq.n > bc[i].seq.n) {
+		                                d=hd(fq[0].seq.s+fq[0].seq.n-bc[i].seq.n-1, bc[i].seq.s, bc[i].seq.n);
+					} else {
+						d=bc[i].seq.n;
+					}
+				} else {
+	                                d=hd(fq[0].seq.s+fq[0].seq.n-bc[i].seq.n, bc[i].seq.s, bc[i].seq.n);
+				}
 			} else {
-				d=hd(fq[0].seq.s,bc[i].seq.s, bc[i].seq.n);
+				if (bc[i].shifted) 
+					d=hd(fq[0].seq.s+1,bc[i].seq.s, bc[i].seq.n);
+				else
+					d=hd(fq[0].seq.s,bc[i].seq.s, bc[i].seq.n);
 				if (debug) fprintf(stderr, "index: %d dist: %d bc:%s n:%d\n", i, d, bc[i].seq.s, bc[i].seq.n);
 			}
 			if (d==0) { 
