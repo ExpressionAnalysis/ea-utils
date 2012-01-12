@@ -666,7 +666,7 @@ int main (int argc, char **argv) {
 			}
 		}
 
-		if (trim) {
+		if (trim && best >= 0) {
 			int len=bc[best].seq.n;
 			if (end =='b') {
 				memmove(fq[0].seq.s, fq[0].seq.s+len, fq[0].seq.n-len);
@@ -686,7 +686,16 @@ int main (int argc, char **argv) {
 		for (i=0;i<f_n;++i) {
 			FILE *f=bc[best].fout[i];
 			if (!f) continue;
-                	fputs(fq[i].id.s,f);
+			if (best==bcnt && !bc[best].fout[0]) {
+				*strrchr(fq[i].id.s, '\n') = '\0';
+				if (best ==bcnt && debug) fprintf(stderr, "here %d, %s : %s %s\n", i, bc[best].out[i], fq[i].id.s, fq[0].seq.s);
+                		fputs(fq[i].id.s,f);
+				fputc(' ', f);
+                		fputs(fq[0].seq.s,f);
+				fputc('\n', f);
+			} else {
+	                	fputs(fq[i].id.s,f);
+			}
                         fputs(fq[i].seq.s,f);
                         fputc('\n',f);
                         fputs(fq[i].com.s,f);
@@ -843,7 +852,7 @@ FILE *gzopen(const char *f, const char *m, bool*isgz) {
 		*isgz=1;
 		free(tmp);
 	} else {
-		h = fopen(f, "r");
+		h = fopen(f, m);
 		*isgz=0;
 	}
 	if (!h) {
