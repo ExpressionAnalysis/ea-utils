@@ -688,7 +688,6 @@ int main (int argc, char **argv) {
 			if (!f) continue;
 			if (best==bcnt && !bc[best].fout[0]) {
 				*strrchr(fq[i].id.s, '\n') = '\0';
-				if (best ==bcnt && debug) fprintf(stderr, "here %d, %s : %s %s\n", i, bc[best].out[i], fq[i].id.s, fq[0].seq.s);
                 		fputs(fq[i].id.s,f);
 				fputc(' ', f);
                 		fputs(fq[0].seq.s,f);
