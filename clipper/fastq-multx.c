@@ -271,7 +271,6 @@ int main (int argc, char **argv) {
 					if (ns >= bcg[b].b.seq.n && !strcasecmp(s+ns-bcg[b].b.seq.n, bcg[b].b.seq.s))
 						++bcg[b].ecnt[i]; 
 					else if (ns > bcg[b].b.seq.n && !strncasecmp(s+ns-bcg[b].b.seq.n-1, bcg[b].b.seq.s, bcg[b].b.seq.n)) {
-						fprintf(stderr,"Found %s at %d, id %s\n",  bcg[b].b.seq.s, ns-bcg[b].b.seq.n-1, s); 
 						++bcg[b].escnt[i]; 
 					}
 				}	
