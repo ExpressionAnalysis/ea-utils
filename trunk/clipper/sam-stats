@@ -24,6 +24,7 @@ use strict;
 use Getopt::Long;
 use Data::Dumper;
 
+###### NOTE: The C++ version is bothe faster, uses less RAM, and calculates better, more accurate stats
 
 my ($cq);
 
