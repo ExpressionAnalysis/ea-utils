@@ -413,7 +413,7 @@ int main (int argc, char **argv) {
 			if (i > 0 && avgns[i] < 11) 			// reads of avg length < 11 ? barcode lane, skip it
 				continue;
 
-			if (ilv3) {
+			if (ilv3) {					// illumina purity filtering
 				char * p = strchr(d, ' ');
 				if (p) {
 					p+=2;
