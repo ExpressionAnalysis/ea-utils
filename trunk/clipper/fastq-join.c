@@ -20,22 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include <ctype.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
-#include <errno.h>
-#include <getopt.h>
-#include <assert.h>
-#include <math.h>
-#include <sys/stat.h>
-#include <search.h>
-#include <limits.h>
-
-#ifdef _WIN32
-ssize_t getline(char **lineptr, size_t *n, FILE *stream);
-#endif
+#include "fastq-lib.h"
 
 /*
 
@@ -43,30 +28,8 @@ See "void usage" below for usage.
 
 */
 
-#define max(a,b) (a>b?a:b)
-#define min(a,b) (a<b?a:b)
-#define meminit(l) (memset(&l,0,sizeof(l)))
-#define fail(s) ((fprintf(stderr,"%s",s), exit(1)))
-#define endstr(e) (e=='e'?"end":e=='b'?"start":"n/a")
-
-typedef struct line {
-	char *s; int n; size_t a;
-} line;
-
-struct fq {
-	line id;
-	line seq;
-	line com;
-	line qual;
-};
-
-int read_line(FILE *in, struct line &l);		// 0=done, 1=ok, -1=err+continue
-int read_fq(FILE *in, int rno, struct fq *fq);		// 0=done, 1=ok, -1=err+continue
-
 void usage(FILE *f);
-int hd(char *a, char *b, int n);
 int debug=0;
-void revcomp(struct fq *dest, struct fq* src);
 
 int main (int argc, char **argv) {
 	char c;
@@ -339,75 +302,6 @@ int main (int argc, char **argv) {
 	return 0;
 }
 
-
-#define comp(c) ((c)=='A'?'T':(c)=='a'?'t':(c)=='C'?'G':(c)=='c'?'g':(c)=='G'?'C':(c)=='g'?'c':(c)=='T'?'A':(c)=='t'?'a':(c))
-
-void revcomp(struct fq *d, struct fq *s) {
-	if (!d->seq.s) {
-		d->seq.s=(char *) malloc(d->seq.a=s->seq.n);
-		d->qual.s=(char *) malloc(d->qual.a=s->qual.n);
-	} else if (d->seq.a <= s->seq.n) {
-                d->seq.s=(char *) realloc(d->seq.s, d->seq.a=(s->seq.n+1));
-                d->qual.s=(char *) realloc(d->qual.s, d->qual.a=(s->qual.n+1));
-	}
-	int i;
-	for (i=0;i<s->seq.n/2;++i) {
-		char b=s->seq.s[i];
-		char q=s->qual.s[i];
-		//printf("%d: %c, %c\n", i, comp(s->seq.s[s->seq.n-i-1]), s->qual.s[s->qual.n-i-1]);
-		d->seq.s[i]=comp(s->seq.s[s->seq.n-i-1]);
-		d->qual.s[i]=s->qual.s[s->qual.n-i-1];
-		//printf("%d: %c, %c\n", s->seq.n-i-1, comp(b), q);
-		d->seq.s[s->seq.n-i-1]=comp(b);
-		d->qual.s[s->seq.n-i-1]=q;
-	}
-	if (s->seq.n % 2) {
-		//printf("%d: %c, %c\n", 1+s->seq.n/2, comp(s->seq.s[s->seq.n/2]));
-		d->seq.s[s->seq.n/2] = comp(s->seq.s[s->seq.n/2]);
-		d->qual.s[s->seq.n/2] = s->qual.s[s->seq.n/2];
-	}
-	d->seq.n=s->seq.n;	
-	d->qual.n=s->qual.n;
-	s->seq.s[s->seq.n]='\0';
-	s->qual.s[s->seq.n]='\0';
-}
-
-
-// returns number of differences
-inline int hd(char *a, char *b, int n) {
-	int d=0;
-	//if (debug) fprintf(stderr, "hd: %s,%s ", a, b);
-	while (*a && *b && n > 0) {
-		if (*a != *b) ++d;
-		--n;
-		++a;
-		++b;
-	}
-	//if (debug) fprintf(stderr, ", %d/%d\n", d, n);
-	return d+n;
-}
-
-int read_line(FILE *in, struct line &l) {
-	return (l.n = getline(&l.s, &l.a, in));
-}
-
-int read_fq(FILE *in, int rno, struct fq *fq) {
-        read_line(in, fq->id);
-        read_line(in, fq->seq);
-        read_line(in, fq->com);
-        read_line(in, fq->qual);
-        if (fq->qual.n <= 0)
-                return 0;
-        if (fq->id.s[0] != '@' || fq->com.s[0] != '+' || fq->seq.n != fq->qual.n) {
-                fprintf(stderr, "Malformed fastq record at line %d\n", rno*2+1);
-                return -1;
-        }
-	// chomp
-	fq->seq.s[--fq->seq.n] = '\0';
-	fq->qual.s[--fq->qual.n] = '\0';
-        return 1;
-}
-
 void usage(FILE *f) {
 	fputs( 
 "Usage: fastq-join [options] <read1.fq> <read2.fq> [mate.fq] -o <read.%.fq>\n"
@@ -434,110 +328,3 @@ void usage(FILE *f) {
 "\n"
 	,f);
 }
-
-#ifdef _WIN32
-/* getline.c -- Replacement for GNU C library function getline
-
-Copyright (C) 1993 Free Software Foundation, Inc.
-
-This program is free software; you can redistribute it and/or
-modify it under the terms of the GNU General Public License as
-published by the Free Software Foundation; either version 2 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful, but
-WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program; if not, write to the Free Software
-Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA. */
-
-/* Written by Jan Brittenson, bson@gnu.ai.mit.edu.  */
-
-#include <sys/types.h>
-#include <stdio.h>
-#include <assert.h>
-#include <stdlib.h>
-
-/* Read up to (and including) a TERMINATOR from STREAM into *LINEPTR
-   + OFFSET (and null-terminate it). *LINEPTR is a pointer returned from
-   malloc (or NULL), pointing to *N characters of space.  It is realloc'd
-   as necessary.  Return the number of characters read (not including the
-   null terminator), or -1 on error or EOF.  */
-
-int getstr (char ** lineptr, size_t *n, FILE * stream, char terminator, int offset)
-{
-  int nchars_avail;		/* Allocated but unused chars in *LINEPTR.  */
-  char *read_pos;		/* Where we're reading into *LINEPTR. */
-  int ret;
-
-  if (!lineptr || !n || !stream)
-    return -1;
-
-  if (!*lineptr)
-    {
-      *n = 64;
-      *lineptr = (char *) malloc (*n);
-      if (!*lineptr)
-	return -1;
-    }
-
-  nchars_avail = *n - offset;
-  read_pos = *lineptr + offset;
-
-  for (;;)
-    {
-      register int c = getc (stream);
-
-      /* We always want at least one char left in the buffer, since we
-	 always (unless we get an error while reading the first char)
-	 NUL-terminate the line buffer.  */
-
-      assert(*n - nchars_avail == read_pos - *lineptr);
-      if (nchars_avail < 1)
-	{
-	  if (*n > 64)
-	    *n *= 2;
-	  else
-	    *n += 64;
-
-	  nchars_avail = *n + *lineptr - read_pos;
-	  *lineptr = (char *) realloc (*lineptr, *n);
-	  if (!*lineptr)
-	    return -1;
-	  read_pos = *n - nchars_avail + *lineptr;
-	  assert(*n - nchars_avail == read_pos - *lineptr);
-	}
-
-      if (c == EOF || ferror (stream))
-	{
-	  /* Return partial line, if any.  */
-	  if (read_pos == *lineptr)
-	    return -1;
-	  else
-	    break;
-	}
-
-      *read_pos++ = c;
-      nchars_avail--;
-
-      if (c == terminator)
-	/* Return the line.  */
-	break;
-    }
-
-  /* Done - NUL terminate and return the number of chars read.  */
-  *read_pos = '\0';
-
-  ret = read_pos - (*lineptr + offset);
-  return ret;
-}
-
-ssize_t getline(char **lineptr, size_t *n, FILE *stream)
-{
-  return getstr (lineptr, n, stream, '\n', 0);
-}
-
-#endif

@@ -39,7 +39,7 @@ $(PKG).${VER}-${REL}.tar.gz: $(PKG).tar.gz
 	cp $< $@
 
 %: %.c
-	$(CC) $(CFLAGS) -o $@ $<
+	$(CC) $(CFLAGS) fastq-lib.cpp -o $@ $<
 
 sam-stats: sam-stats.cpp
 	$(CC) $(CFLAGS) -lbamtools -o $@ $<

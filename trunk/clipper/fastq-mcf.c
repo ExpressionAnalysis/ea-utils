@@ -26,25 +26,12 @@ See "void usage" below for usage.
 
 */
 
-#include <ctype.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
-#include <errno.h>
-#include <assert.h>
-#include <math.h>
-#include <limits.h>
-#include <sys/stat.h>
+#include "fastq-lib.h"
 
 #define MAX_ADAPTER_NUM 1000
-#define max(a,b) (a>b?a:b)
-#define min(a,b) (a<b?a:b)
 #define SCANLEN 15
 #define SCANMIDP ((int) SCANLEN/2)
 #define MAX_FILES 3
-#define meminit(l) (memset(&l,0,sizeof(l)))
-#define stdev(cnt, sum, ssq) sqrt((((double)cnt)*ssq-pow((double)sum,2)) / ((double)cnt*((double)cnt-1)))
 #define B_A     0
 #define B_C     1
 #define B_G     2
@@ -53,13 +40,6 @@ See "void usage" below for usage.
 #define B_CNT   5
 #define SVNREV  "$LastChangedRevision$"
 #define MAXWARN 10
-
-struct fq {
-	char *id;   int nid;   size_t naid;
-	char *seq;  int nseq;  size_t naseq;
-	char *com;  int ncom;  size_t nacom;
-	char *qual; int nqual; size_t naqual;
-};
 
 struct ad {
 	char *id;  int nid;  size_t naid; 
@@ -73,28 +53,14 @@ struct ad {
 	int thr[MAX_FILES];			// min-length for clip
 };
 
-struct qual_str {
-        long long int cnt;
-        long long int sum;
-        long long int ssq;
-        long long int ns;
-} quals[6];
-
 int read_fa(FILE *in, int rno, struct ad *ad);		// 0=done, 1=ok, -1=err+continue
-int read_fq(FILE *in, int rno, struct fq *fq);		// 0=done, 1=ok, -1=err+continue
 int meanq(const char *q, int qn, int i, int w);
-void fqseek(FILE *fin, int s, bool isgz);
 
 int char2bp(char c);
 char bp2char(int b);
 void saveskip(FILE **fout, int fo_n, struct fq *fq);
-FILE *gzopen(const char *in, const char *mode, bool *isgz);
-bool poorqual(int n, int l, const char *s, const char *q);
-
-const char *fext(const char *f);
 
 void usage(FILE *f, const char *msg=NULL);
-int hd(char *a, char *b, int n);
 int debug=0;
 int warncount = 0;
 int main (int argc, char **argv) {
@@ -119,8 +85,6 @@ int main (int argc, char **argv) {
 
 	int i;
 
-	meminit(quals);
-	
 	char *afil = NULL;
 	char *ifil[MAX_FILES]; meminit(ifil);
 	const char *ofil[MAX_FILES]; meminit(ofil);
@@ -713,7 +677,7 @@ int main (int argc, char **argv) {
 		}
 
 		if (ilv3) {
-			char * p = strchr(fq[0].id, ' ');
+			char * p = strchr(fq[0].id.s, ' ');
 			if (p) {
 				p+=2;
 				if (*p==':') {
@@ -740,16 +704,16 @@ int main (int argc, char **argv) {
 				continue;
 
 		    if (rmns) {
-			    for (i=dotrim[f][0];i<(fq[f].nseq);++i) {
+			    for (i=dotrim[f][0];i<(fq[f].seq.n);++i) {
 			    		// trim N's from the front
-					if (fq[f].seq[i] == 'N') 
+					if (fq[f].seq.s[i] == 'N') 
 						dotrim[f][0] = i + 1;
 					else
 						break;
 			    }
-			    for (i=dotrim[f][1];i<(fq[f].nseq);++i) {
+			    for (i=dotrim[f][1];i<(fq[f].seq.n);++i) {
 					// trim N's from the end
-					if (fq[f].seq[fq[f].nseq-i-1] == 'N')
+					if (fq[f].seq.s[fq[f].seq.n-i-1] == 'N')
 						dotrim[f][1] = i + 1;
 					else 
 						break;
@@ -760,12 +724,12 @@ int main (int argc, char **argv) {
 			    bool istrimq = false;
 
                             // trim qual from the begin
-			    for (i=dotrim[f][0];i<(fq[f].nseq);++i) {
-				if (qwin > 1 && (meanq(fq[f].qual,fq[f].nseq,i,qwin)-phred) < qthr) {
+			    for (i=dotrim[f][0];i<(fq[f].seq.n);++i) {
+				if (qwin > 1 && (meanq(fq[f].qual.s,fq[f].seq.n,i,qwin)-phred) < qthr) {
 					++trimqb[f];
 					istrimq = true;
 					dotrim[f][0] = i + 1;
-				} else if ((fq[f].qual[i]-phred) < qthr) {
+				} else if ((fq[f].qual.s[i]-phred) < qthr) {
 					++trimqb[f];
 					istrimq = true;
 					dotrim[f][0] = i + 1;
@@ -773,12 +737,12 @@ int main (int argc, char **argv) {
 					break;
 			    }
 
-                            for (i=dotrim[f][1];i<(fq[f].nseq);++i) {
-                                if (qwin > 1 && (meanq(fq[f].qual,fq[f].nseq,fq[f].nseq-i-1,qwin)-phred) < qthr) {
+                            for (i=dotrim[f][1];i<(fq[f].seq.n);++i) {
+                                if (qwin > 1 && (meanq(fq[f].qual.s,fq[f].seq.n,fq[f].seq.n-i-1,qwin)-phred) < qthr) {
                                         ++trimqb[f];
                                         istrimq = true;
                                         dotrim[f][1] = i + 1;
-				} else if ((fq[f].qual[fq[f].nseq-i-1]-phred) < qthr) {
+				} else if ((fq[f].qual.s[fq[f].seq.n-i-1]-phred) < qthr) {
 					++trimqb[f];
 					istrimq = true;
 					dotrim[f][1] = i + 1;
@@ -793,7 +757,7 @@ int main (int argc, char **argv) {
 		    int bestscore_b = INT_MAX, bestoff_b = 0, bestlen_b = 0; 
 
 		    for (i =0; i < acnt; ++i) {
-		    	if (debug) fprintf(stderr, "seq[%d]: %s %d\n", f, fq[f].seq, fq[f].nseq);
+		    	if (debug) fprintf(stderr, "seq[%d]: %s %d\n", f, fq[f].seq.s, fq[f].seq.n);
 
 			if (!ad[i].end[f])
 				continue;
@@ -804,7 +768,7 @@ int main (int argc, char **argv) {
 			// how far in to search for a match?
 			int mx = ad[i].nseq;
 			if (xmax) {
-				 mx = fq[f].nseq;
+				 mx = fq[f].seq.n;
 				 if (xmax > 0 && (xmax+ad[i].nseq) < mx)
 					mx = xmax+ad[i].nseq;			// xmax is added to adapter length
 			}
@@ -815,7 +779,7 @@ int main (int argc, char **argv) {
 			if (ad[i].end[f] == 'e') {
 			    int off;
 			    for (off = nmatch; off <= mx; ++off) {		// off is distance from tail of sequence
-				char *seqtail = fq[f].seq+fq[f].nseq-off; 	// search at tail
+				char *seqtail = fq[f].seq.s+fq[f].seq.n-off; 	// search at tail
 				int ncmp = off<ad[i].nseq ? off : ad[i].nseq;
 				int mind = (pctdiff * ncmp) / 100;
 				int d = hd(ad[i].seq,seqtail,ncmp);		// # differences
@@ -839,7 +803,7 @@ int main (int argc, char **argv) {
                             for (off = nmatch; off <= mx; ++off) {              // off is distance from start of sequence
                                 int ncmp = off<ad[i].nseq ? off : ad[i].nseq;	// number we are comparing
                                 char *matchtail = ad[i].seq+ad[i].nseq-ncmp;    // tail of adapter
-                                char *seqstart = fq[f].seq+off-ncmp;		// offset into sequence (if any)
+                                char *seqstart = fq[f].seq.s+off-ncmp;		// offset into sequence (if any)
                                 int mind = (pctdiff * ncmp) / 100;
                                 int d = hd(matchtail,seqstart,ncmp);            // # differences
                                 if (debug>1)
@@ -866,12 +830,12 @@ int main (int argc, char **argv) {
 		    if (bestoff_e > dotrim[f][1])
 			dotrim[f][1]=bestoff_e;
 
-		    int totclip = min(fq[f].nseq,dotrim[f][0] + dotrim[f][1]);
+		    int totclip = min(fq[f].seq.n,dotrim[f][0] + dotrim[f][1]);
 
 		    if (debug) printf("totclip %d\n", totclip);
 		    
 		    if (totclip > 0) {
-		    	if ( (fq[f].nseq-totclip) < nkeep) {
+		    	if ( (fq[f].seq.n-totclip) < nkeep) {
 					// skip all reads if one is severely truncated ??
 					// maybe not... ?
 					skip = 1;
@@ -902,25 +866,25 @@ int main (int argc, char **argv) {
 			for (f=0;f<o_n;++f) {
 				if (dotrim[f][1] > 0) {
 					if (debug) printf("trimming %d from end\n", dotrim[f][1]);
-					fq[f].seq [fq[f].nseq -=dotrim[f][1]]='\0';
-					fq[f].qual[fq[f].nqual-=dotrim[f][1]]='\0';
+					fq[f].seq.s[fq[f].seq.n -=dotrim[f][1]]='\0';
+					fq[f].qual.s[fq[f].qual.n-=dotrim[f][1]]='\0';
 				}
                                 if (dotrim[f][0] > 0) {
                                         if (debug) printf("trimming %d from begin\n", dotrim[f][0]);
-                                        memmove(fq[f].seq ,fq[f].seq +dotrim[f][0],fq[f].nseq -=dotrim[f][0]);
-                                        memmove(fq[f].qual,fq[f].qual+dotrim[f][0],fq[f].nqual-=dotrim[f][0]);
-                                        fq[f].seq[fq[f].nseq]='\0';
-                                        fq[f].qual[fq[f].nqual]='\0';
+                                        memmove(fq[f].seq.s ,fq[f].seq.s +dotrim[f][0],fq[f].seq.n -=dotrim[f][0]);
+                                        memmove(fq[f].qual.s,fq[f].qual.s+dotrim[f][0],fq[f].qual.n-=dotrim[f][0]);
+                                        fq[f].seq.s[fq[f].seq.n]='\0';
+                                        fq[f].qual.s[fq[f].qual.n]='\0';
                                 }
 				if (nmax > 0) {
-					fq[f].seq[nmax]='\0';
-					fq[f].qual[nmax]='\0';
+					fq[f].seq.s[nmax]='\0';
+					fq[f].qual.s[nmax]='\0';
 				}
-				fputs(fq[f].id,fout[f]);
-				fputs(fq[f].seq,fout[f]);
+				fputs(fq[f].id.s,fout[f]);
+				fputs(fq[f].seq.s,fout[f]);
 				fputc('\n',fout[f]);
-				fputs(fq[f].com,fout[f]);
-				fputs(fq[f].qual,fout[f]);
+				fputs(fq[f].com.s,fout[f]);
+				fputs(fq[f].qual.s,fout[f]);
 				fputc('\n',fout[f]);
 			}
 		} else {
@@ -970,20 +934,6 @@ int main (int argc, char **argv) {
 	return 0;
 }
 
-// returns number of differences
-inline int hd(char *a, char *b, int n) {
-	int d=0;
-	//if (debug) fprintf(stderr, "hd: %s,%s ", a, b);
-	while (*a && *b && n > 0) {
-		if (*a != *b) ++d;
-		--n;
-		++a;
-		++b;
-	}
-	//if (debug) fprintf(stderr, ", %d/%d\n", d, n);
-	return d+n;
-}
-
 int read_fa(FILE *in, int rno, struct ad *fa) {
 // note: this only reads one line of sequence!
 	fa->nid = getline(&fa->id, &fa->naid, in);
@@ -1010,27 +960,6 @@ int read_fa(FILE *in, int rno, struct ad *fa) {
 		if (fa->seq[i]=='U') fa->seq[i] = 'T';
 	}
 	return 1;
-}
-
-int read_fq(FILE *in, int rno, struct fq *fq) {
-        fq->nid = getline(&fq->id, &fq->naid, in);
-        fq->nseq = getline(&fq->seq, &fq->naseq, in);
-        fq->ncom = getline(&fq->com, &fq->nacom, in);
-        fq->nqual = getline(&fq->qual, &fq->naqual, in);
-        if (fq->nqual <= 0)
-                return 0;
-        if (fq->id[0] != '@' || fq->com[0] != '+' || fq->nseq != fq->nqual) {
-		if (warncount < MAXWARN) {
-                	fprintf(stderr, "Malformed fastq record at line %d, probe: %s, nsq: %d, nql: %d\n", rno*2, fq->id, fq->nseq, fq->nqual);
-			++warncount;
-		}
-                return -1;
-        }
-
-	// chomp
-	fq->seq[--fq->nseq] = '\0';
-	fq->qual[--fq->nqual] = '\0';
-        return 1;
 }
 
 void usage(FILE *f, const char *msg) {
@@ -1097,11 +1026,11 @@ inline char bp2char(int b) {
 void saveskip(FILE **fout, int fo_n, struct fq *fq)  {
 	int f;
 	for (f=0;f<fo_n;++f) {
-		fputs(fq[f].id,fout[f]);
-		fputs(fq[f].seq,fout[f]);
+		fputs(fq[f].id.s,fout[f]);
+		fputs(fq[f].seq.s,fout[f]);
 		fputc('\n',fout[f]);
-		fputs(fq[f].com,fout[f]);
-		fputs(fq[f].qual,fout[f]);
+		fputs(fq[f].com.s,fout[f]);
+		fputs(fq[f].qual.s,fout[f]);
 		fputc('\n',fout[f]);
 	}
 }
@@ -1118,67 +1047,3 @@ int meanq(const char *q, int qn, int i, int w) {
 	}
 	return t / (e-s+1);
 }
-
-FILE *gzopen(const char *f, const char *m, bool*isgz) {
-        FILE *h;
-        if (!strcmp(fext(f),".gz")) {
-                char *tmp=(char *)malloc(strlen(f)+100);
-		if (strchr(m,'w')) {
-                        strcpy(tmp, "gzip > '");
-                        strcat(tmp, f);
-                        strcat(tmp, "'");
-                        h = popen(tmp, "w");
-                        free(tmp);
-                        *isgz=1;
-		} else {
-			strcpy(tmp, "gunzip -c '");
-			strcat(tmp, f);
-			strcat(tmp, "'");
-			h = popen(tmp, "r");
-			free(tmp);
-			*isgz=1;
-		}
-        } else {
-                h = fopen(f, m);
-                *isgz=0;
-        }
-        if (!h) {
-                fprintf(stderr, "Error opening file '%s': %s\n",f, strerror(errno));
-                exit(1);
-        }
-        return h;
-}
-
-const char *fext(const char *f) {
-	const char *x=strrchr(f,'.');
-	return x ? x : "";
-}
-
-
-bool poorqual(int n, int l, const char *s, const char *q) {
-        int i=0, sum=0, ns=0;
-        for (i=0;i<l;++i) {
-                if (s[i] == 'N')
-                        ++ns;
-                quals[n].cnt++;
-                quals[n].ssq += q[i] * q[i];
-                sum+=q[i];
-        }
-        quals[n].sum += sum;
-        quals[n].ns += ns;
-        int xmean = sum/l;
-        if (quals[n].cnt < 100) {
-                return (xmean > 10) && (ns == 0);
-        }
-        int pmean = quals[n].sum / quals[n].cnt;                                // mean q
-        double pdev = stdev(quals[n].cnt, quals[n].sum, quals[n].ssq);          // dev q
-        int serr = pdev/sqrt(l);                                                // stderr for length l
-        if (xmean < (pmean - serr)) {                                           // off by 1 stdev?
-                return 0;                                                       // ditch it
-        }
-        if (ns > (quals[n].ns / quals[n].cnt)) {                                // more n's than average?
-                return 0;                                                       // ditch it
-        }
-        return 1;
-}
-
