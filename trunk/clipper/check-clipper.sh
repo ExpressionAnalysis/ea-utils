@@ -1,10 +1,11 @@
-#!/bin/sh -e
+#!/bin/bash -e
 
 g++ fastq-clipper.c
 
 ok=/opt/bin/fastq-clipper
 new=./a.out
 
+# comparre
 fastx_clipper -i test1.fq -a AGTCCCGTAC -o test1.fx.out
 
 for v in new ok; do
