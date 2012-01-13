@@ -1,0 +1,49 @@
+#!/usr/bin/perl
+
+use Getopt::Long qw(:config pass_through);
+
+GetOptions(\%opt,"lines|n=i", "bytes|c=i","verbose","help","quiet|silent|q") || die("Try ztail --help\n");
+
+if ($ARGV[0] =~ /-(\d+)/ && ! $opt{lines}) {
+	$opt{lines}=$1;
+	shift @ARGV;
+}
+
+$opt{lines} = 10 if !$opt{lines} && !$opt{bytes};
+
+if ($opt{help}) {
+	print "ztail is similar to tail... see below.\n\n";
+	exec("tail --help");
+}
+
+$ARGV[0] = '-' if (!@ARGV);
+
+$first = 1;
+for (@ARGV) {
+	open(IN, $_) || die "zhead: cannot open `$_' for reading: $!\n";
+	if (/\.gz$/) {
+		close IN;
+		$_=~ s/'/'"'"'/g;
+		open(IN, "gunzip -c '$_' |") || die "$!\n";
+	}
+	if (@ARGV > 1 && ! $opt{quiet}) {
+		print "\n" if !$first;
+		print "==> $_ <==\n";
+		$first = 0;
+	}
+	$l = 0;
+	if ($opt{lines}) {
+		while (<IN>) {
+			++$l;
+			print;
+			last if $l >= $opt{lines};
+		}
+	} elsif ($opt{bytes}) {
+		$r = $opt{bytes};	# bytes remaining
+		while(($l=read(IN,$b,$r))>0) {
+			$r-=$l;
+			print $b;
+		}	
+	}
+	close IN;
+}
