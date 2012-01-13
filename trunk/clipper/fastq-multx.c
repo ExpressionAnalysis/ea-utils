@@ -368,15 +368,14 @@ int main (int argc, char **argv) {
                 fprintf(stderr, "Using Barcode Group: %s on File: %s (%s), Threshold %2.2f%%\n", grs[gindex].id, in[i], endstr(end), 100.0 * (float) ((float)thresh/6)/sampcnt);
                 for (b=0;b<bgcnt;++b) {
 			if (bcg[b].gptr->i == gindex) {
-				int cnt = end == 'e' ? bcg[b].ecnt[i] : bcg[b].bcnt[i];
-				int shcnt = end == 'e' ? bcg[b].escnt[i] : bcg[b].bscnt[i];
+				int cnt = (end == 'e' ? (bcg[b].ecnt[i]+bcg[b].escnt[i]) : ( bcg[b].bcnt[i] + bcg[b].bscnt[i] ));
 				if (cnt > thresh / 6) {
-					bc[bcnt++]=bcg[b].b;
-				} else if (shcnt > thresh / 6) {
-					// shifted count exceeds threshold... use it
+					// count exceeds threshold... use it
 					bc[bcnt]=bcg[b].b;
-					bc[bcnt].shifted=1;
-                			fprintf(stderr, "Warning: Barcode %s was shifted\n", bcg[b].b.id.s);
+					if (bcg[b].escnt[i] > bcg[b].ecnt[i]) {
+						bc[bcnt].shifted=1;
+						fprintf(stderr, "Warning: Barcode %s was shifted\n", bcg[b].b.id.s);
+					}
 					++bcnt;
 				}
 			}
