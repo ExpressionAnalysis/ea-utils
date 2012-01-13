@@ -11,14 +11,14 @@ TATAGCCTCTAGCTTGACTCTAGCT
 +
 hhhh]]hhhhhhhhhhhhh]hhfff
 @4 CLIP AG at end if nmin >= 2
-ATCTATCTTAGTCATCTTATCTACTATCAG
+ATCTATCTTAGTCATCTTATCTACTATC
 +
-hhhhhdchhhhhhhhhhh]hhfggfaabbA
+hhhhhdchhhhhhhhhhh]hhfggfaab
 @5 CLIP AGT at END if nmin >= 3
-ATATACTTATCTACTTATCTATCTTAAAGT
+ATATACTTATCTACTTATCTATCTTAA
 +
-hhhhh]bhddhhhhhhhhhh]hhffffgaA
+hhhhh]bhddhhhhhhhhhh]hhffff
 @6 CLIP NOTHING, even though some at front, because mismatch pct too high
-AGTCCTTGGTCTTATCTACTTATCTATCTT
+AGTCCTTGGTCTTATCTACTTATCTATCT
 +
-hhhhh]bhddhhhhhhhhhh]hhffffgaA
+hhhhh]bhddhhhhhhhhhh]hhffffga
