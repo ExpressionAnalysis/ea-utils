@@ -2,7 +2,7 @@
 
 use Getopt::Long qw(:config pass_through);
 
-GetOptions(\%opt,"lines|n=i", "bytes|c=i","verbose","help","quiet|silent|q") || die("Try ztail --help\n");
+GetOptions(\%opt,"lines|n=i", "bytes|c=i","verbose","help","quiet|silent|q") || die("Try zhead --help\n");
 
 if ($ARGV[0] =~ /-(\d+)/ && ! $opt{lines}) {
 	$opt{lines}=$1;
@@ -12,8 +12,8 @@ if ($ARGV[0] =~ /-(\d+)/ && ! $opt{lines}) {
 $opt{lines} = 10 if !$opt{lines} && !$opt{bytes};
 
 if ($opt{help}) {
-	print "ztail is similar to tail... see below.\n\n";
-	exec("tail --help");
+	print "zhead is similar to head... see below.\n\n";
+	exec("head --help");
 }
 
 $ARGV[0] = '-' if (!@ARGV);
