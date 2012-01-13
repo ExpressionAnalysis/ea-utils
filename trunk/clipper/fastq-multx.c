@@ -26,35 +26,11 @@ See "void usage" below for usage.
 
 */
 
-#include <ctype.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
-#include <errno.h>
-#include <assert.h>
-#include <math.h>
-#include <sys/stat.h>
-#include <search.h>
+#include "fastq-lib.h"
 
 #define MAX_BARCODE_NUM 1000
 #define MAX_GROUP_NUM 50
-#define max(a,b) ((a)>(b)?(a):(b))
-#define meminit(l) (memset(&l,0,sizeof(l)))
-#define fail(s) ((fprintf(stderr,"%s",s), exit(1)))
 #define endstr(e) (e=='e'?"end":e=='b'?"start":"n/a")
-#define stdev(cnt, sum, ssq) sqrt((((double)cnt)*ssq-pow((double)sum,2)) / ((double)cnt*((double)cnt-1)))
-
-typedef struct line {
-	char *s; int n; size_t a;
-} line;
-
-struct fq {
-	line id;
-	line seq;
-	line com;
-	line qual;
-};
 
 // barcode
 struct bc {
@@ -87,11 +63,7 @@ struct bcg {
 
 struct group* getgroup(char *s);
 
-int read_line(FILE *in, struct line &l);		// 0=done, 1=ok, -1=err+continue
-int read_fq(FILE *in, int rno, struct fq *fq);		// 0=done, 1=ok, -1=err+continue
-
 void usage(FILE *f);
-int hd(char *a, char *b, int n);
 static int debug=0;
 // it's times like this when i think a class might be handy, but nah, not worth it
 typedef struct bnode {
@@ -111,18 +83,6 @@ void pickbest(const void *nodep, const VISIT which, const int depth);
 int bnodecomp(const void *a, const void *b) {return strcmp(((bnode*)a)->seq,((bnode*)b)->seq);};
 static float pickmaxpct=0.10;
 
-FILE *gzopen(const char *in, const char *mode, bool *isgz);
-
-struct qual_str {
-	long long int cnt;
-	long long int sum;
-	long long int ssq;
-	long long int ns;
-} quals[6];
-
-// judge whether quality is poor...
-bool poorqual(int n, int l, const char *s, const char *q);
- 
 int main (int argc, char **argv) {
 	char c;
 	bool trim = true;
@@ -137,8 +97,6 @@ int main (int argc, char **argv) {
 	char verify='\0';
 	bool noexec = false;
 	const char *group = NULL;
-
-	meminit(quals);
 
 	int i;
 	bool omode = false;	
@@ -312,8 +270,10 @@ int main (int argc, char **argv) {
 
 					if (ns >= bcg[b].b.seq.n && !strcasecmp(s+ns-bcg[b].b.seq.n, bcg[b].b.seq.s))
 						++bcg[b].ecnt[i]; 
-					else if (ns > bcg[b].b.seq.n && !strncasecmp(s+ns-bcg[b].b.seq.n-1, bcg[b].b.seq.s, bcg[b].b.seq.n))
+					else if (ns > bcg[b].b.seq.n && !strncasecmp(s+ns-bcg[b].b.seq.n-1, bcg[b].b.seq.s, bcg[b].b.seq.n)) {
+						fprintf(stderr,"Found %s at %d, id %s\n",  bcg[b].b.seq.s, ns-bcg[b].b.seq.n-1, s); 
 						++bcg[b].escnt[i]; 
+					}
 				}	
 				
 				++nr;
@@ -362,6 +322,7 @@ int main (int argc, char **argv) {
 			}
 		};
 		end = scnt >= ecnt ? 'b' : 'e';
+
 		if (debug) printf("scnt: %d, ecnt, %d, end: %c\n", scnt, ecnt, end);
 
 		// since this is a known good set, use a very low threshold, just to catch them all
@@ -372,9 +333,11 @@ int main (int argc, char **argv) {
 				if (cnt > thresh / 6) {
 					// count exceeds threshold... use it
 					bc[bcnt]=bcg[b].b;
-					if (bcg[b].escnt[i] > bcg[b].ecnt[i]) {
+					if ((end == 'e' && (bcg[b].escnt[i] > bcg[b].ecnt[i])) ||
+					    (end == 'b' && (bcg[b].bscnt[i] > bcg[b].bcnt[i]))
+					  ) {
 						bc[bcnt].shifted=1;
-						fprintf(stderr, "Warning: Barcode %s was shifted\n", bcg[b].b.id.s);
+						fprintf(stderr, "Warning: Barcode %s (%s) was shifted\n", bcg[b].b.id.s, bcg[b].b.seq.s);
 					}
 					++bcnt;
 				}
@@ -553,7 +516,7 @@ int main (int argc, char **argv) {
 				continue;
 			}
 			const char *p=strchr(out[i],'%');
-			if (!p) fail("Each output file name must contain a '%' sign, which is replaced by the barcode id\n");
+			if (!p) fail("Each output file name must contain a '%%' sign, which is replaced by the barcode id\n");
 			bc[b].out[i]=(char *) malloc(strlen(out[i])+strlen(bc[b].id.s)+100);
 			strncpy(bc[b].out[i], out[i], p-out[i]);
 			strcat(bc[b].out[i], bc[b].id.s);
@@ -793,103 +756,6 @@ void pickbest(const void *nodep, const VISIT which, const int depth)
 	}
 }
 
-// returns number of differences
-inline int hd(char *a, char *b, int n) {
-	int d=0;
-	//if (debug) fprintf(stderr, "hd: %s,%s ", a, b);
-	while (*a && *b && n > 0) {
-		if (*a != *b) ++d;
-		--n;
-		++a;
-		++b;
-	}
-	//if (debug) fprintf(stderr, ", %d/%d\n", d, n);
-	return d+n;
-}
-
-int read_line(FILE *in, struct line &l) {
-	return (l.n = getline(&l.s, &l.a, in));
-}
-
-bool poorqual(int n, int l, const char *s, const char *q) {
-	int i=0, sum=0, ns=0;
-	for (i=0;i<l;++i) {
-		if (s[i] == 'N')
-			++ns;
-		quals[n].cnt++;
-		quals[n].ssq += q[i] * q[i];
-		sum+=q[i];
-	}
-	quals[n].sum += sum;
-	quals[n].ns += ns;
-	int xmean = sum/l;
-	if (quals[n].cnt < 100) {
-		return (xmean > 10) && (ns == 0);
-	}
-	int pmean = quals[n].sum / quals[n].cnt;				// mean q
-	double pdev = stdev(quals[n].cnt, quals[n].sum, quals[n].ssq);		// dev q
-	int serr = pdev/sqrt(l);						// stderr for length l
-	if (xmean < (pmean - serr)) {						// off by 1 stdev?
-		return 0;							// ditch it
-	}
-	if (ns > (quals[n].ns / quals[n].cnt)) {				// more n's than average?
-		return 0;							// ditch it
-	}
-	return 1;
-}
-
-int read_fq(FILE *in, int rno, struct fq *fq) {
-        read_line(in, fq->id);
-        read_line(in, fq->seq);
-        read_line(in, fq->com);
-        read_line(in, fq->qual);
-
-        if (fq->qual.n <= 0)
-                return 0;
-        if (fq->id.s[0] != '@' || fq->com.s[0] != '+' || fq->seq.n != fq->qual.n) {
-                fprintf(stderr, "Malformed fastq record at line %d\n", rno*2+1);
-                return -1;
-        }
-	// chomp
-	fq->seq.s[--fq->seq.n] = '\0';
-	if (fq->seq.s[fq->seq.n-1] == '\r') {
-		fq->seq.s[--fq->seq.n] = '\0';
-	}
-	fq->qual.s[--fq->qual.n] = '\0';
-	if (fq->qual.s[fq->qual.n-1] == '\r') {
-		fq->qual.s[--fq->qual.n] = '\0';
-	}
-        return 1;
-}
-
-FILE *gzopen(const char *f, const char *m, bool*isgz) {
-	FILE *h;
-	const char *x=strrchr(f,'.');
-	if (x && !strcmp(x,".gz")) {
-		char *tmp=(char *)malloc(strlen(f)+100);
-                if (strchr(m,'w')) {
-                        strcpy(tmp, "gzip > '");
-                        strcat(tmp, f);
-                        strcat(tmp, "'");
-		} else {
-			strcpy(tmp, "gunzip -c '");
-			strcat(tmp, f);
-			strcat(tmp, "'");
-		}
-		h = popen(tmp, m);
-		*isgz=1;
-		free(tmp);
-	} else {
-		h = fopen(f, m);
-		*isgz=0;
-	}
-	if (!h) {
-		fprintf(stderr, "Error opening file '%s': %s\n",f, strerror(errno));
-		exit(1);
-	}
-	return h;
-}
-
 void usage(FILE *f) {
 	fputs( 
 "Usage: fastq-multx [-g|-l|-B] <barcodes.fil> <read1.fq> -o r1.%.fq [mate.fq -o r2.%.fq] ...\n"
@@ -931,23 +797,3 @@ void usage(FILE *f) {
 "-m N		Allow up to N mismatches, as long as they are unique (1)\n"
 	,f);
 }
-
-/*
-#!/usr/bin/perl
-
-my ($f, $a) = @ARGV;
-
-my @a = split(/,/, $a);
-
-open (F, $f) || die;
-
-while (my $r = <F>) {
-	for my $a (@a) {
-		for (my $i = 1; $i < length($a); ++$i) {
-			
-		}
-	}
-}
-# http://www.perlmonks.org/?node_id=500235
-sub hd{ length( $_[ 0 ] ) - ( ( $_[ 0 ] ^ $_[ 1 ] ) =~ tr[\0][\0] ) }
-*/
