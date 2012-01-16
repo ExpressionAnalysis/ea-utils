@@ -232,7 +232,7 @@ int main (int argc, char **argv) {
 			return 1;
 		}
 
-                int sampcnt = 20000;
+                int sampcnt = 200000;
                 struct stat st;
 		int fsum[f_n], fmax[f_n]; int bestcnt=0, besti=-1;
 		meminit(fsum);
@@ -241,7 +241,7 @@ int main (int argc, char **argv) {
 			char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
 			char *q = NULL; size_t nq = 0;
 			double tots=0, totsq=0;
-
+			
                 	stat(in[i], &st);
 
 			while (getline(&s, &na, fin[i]) > 0) {
@@ -325,18 +325,22 @@ int main (int argc, char **argv) {
 		if (debug) printf("scnt: %d, ecnt, %d, end: %c\n", scnt, ecnt, end);
 
 		// since this is a known good set, use a very low threshold, just to catch them all
-                fprintf(stderr, "Using Barcode Group: %s on File: %s (%s), Threshold %2.2f%%\n", grs[gindex].id, in[i], endstr(end), 100.0 * (float) ((float)thresh/6)/sampcnt);
+                fprintf(stderr, "Using Barcode Group: %s on File: %s (%s), Threshold %2.2f%%\n", grs[gindex].id, in[i], endstr(end), 100.0 * (float) ((float)thresh/20)/sampcnt);
                 for (b=0;b<bgcnt;++b) {
 			if (bcg[b].gptr->i == gindex) {
 				int cnt = (end == 'e' ? (bcg[b].ecnt[i]+bcg[b].escnt[i]) : ( bcg[b].bcnt[i] + bcg[b].bscnt[i] ));
-				if (cnt > thresh / 6) {
+				if (cnt > thresh/20) {
 					// count exceeds threshold... use it
 					bc[bcnt]=bcg[b].b;
 					if ((end == 'e' && (bcg[b].escnt[i] > bcg[b].ecnt[i])) ||
 					    (end == 'b' && (bcg[b].bscnt[i] > bcg[b].bcnt[i]))
 					  ) {
 						bc[bcnt].shifted=1;
-						fprintf(stderr, "Warning: Barcode %s (%s) was shifted\n", bcg[b].b.id.s, bcg[b].b.seq.s);
+						fprintf(stderr, "Using Barcode %s (%s)\n", bcg[b].b.id.s, bcg[b].b.seq.s);
+						if (debug) printf("Using Barcode %s (%s) ... ecnt:%d, escnt:%d,bcnt:%d, bscnt:%d\n", bcg[b].b.id.s, bcg[b].b.seq.s, bcg[b].ecnt[i], bcg[b].escnt[i], bcg[b].bcnt[i], bcg[b].bscnt[i]);
+					} else {
+						fprintf(stderr, "Using Barcode %s (%s) shifted\n", bcg[b].b.id.s, bcg[b].b.seq.s);
+						if (debug) printf("Using Barcode %s (%s) shifted ... ecnt:%d, escnt:%d,bcnt:%d, bscnt:%d\n", bcg[b].b.id.s, bcg[b].b.seq.s, bcg[b].ecnt[i], bcg[b].escnt[i], bcg[b].bcnt[i], bcg[b].bscnt[i]);
 					}
 					++bcnt;
 				}
@@ -677,6 +681,7 @@ int main (int argc, char **argv) {
 		for (i=0;i<f_n;++i) {
 			FILE *f=bc[best].fout[i];
 			if (!f) continue;
+			// todo: capture whole original sequence for all barcoded stuff, including shifting, and always output in id/comment
 			if (best==bcnt && !bc[best].fout[0]) {
 				*strrchr(fq[i].id.s, '\n') = '\0';
                 		fputs(fq[i].id.s,f);
