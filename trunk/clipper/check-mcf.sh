@@ -28,11 +28,14 @@ for v in $list; do
 	${prog} -L 72 -f test.fa test4.fq1 test4.fq2 -o test4.$v.out -o test4.$v.out2 > /dev/null || echo err during 4 $v
 # check skip saving
 	${prog} test.fa test1.fq -S -o test5.$v.out > test5.$v.err || echo err during 5 $v
+# check gzipping
+	${prog} test.fa test1.fq -o test6.$v.out.gz > test6.$v.err || echo err during 6 $v
 	mv test5.$v.out.skip test5.$v.out
+	mv test6.$v.out.gz test6.$v.out
 done
 set +o xtrace	
 
-for n in test1 test2 test3 test4 test5; do
+for n in test1 test2 test3 test4 test5 test6; do
 	echo $n
 	diff $n.new.out $n.ok.out
 	[[ -e $n.ok.err ]] && diff $n.new.err $n.ok.err
