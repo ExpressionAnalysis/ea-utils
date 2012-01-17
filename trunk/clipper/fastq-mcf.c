@@ -93,7 +93,7 @@ int main (int argc, char **argv) {
 	int e_n = 0;
 	bool skipb = 0;
 	
-	while (	(c = getopt(argc, argv, "-nf0uUVSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:")) != -1) {
+	while (	(c = getopt_long(argc, argv, "-nf0uUVSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:",NULL,NULL)) != -1) {
 		switch (c) {
 		case '\1': 
 			if (!afil) 
