@@ -31,15 +31,18 @@ for v in $list; do
 # check gzipping
 	${prog} test.fa test1.fq -o test6.$v.out.gz > test6.$v.err || echo err during 6 $v
 	mv test5.$v.out.skip test5.$v.out
-	mv test6.$v.out.gz test6.$v.out
 done
 set +o xtrace	
 
-for n in test1 test2 test3 test4 test5 test6; do
+for n in test1 test2 test3 test4 test5; do
 	echo $n
 	diff $n.new.out $n.ok.out
 	[[ -e $n.ok.err ]] && diff $n.new.err $n.ok.err
 done
+
+n=test6
+echo $n
+zdiff $n.new.out.gz $n.ok.out.gz
 
 shopt -s extglob
 
