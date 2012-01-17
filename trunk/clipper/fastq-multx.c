@@ -522,6 +522,7 @@ int main (int argc, char **argv) {
 			if (!p) fail("Each output file name must contain a '%%' sign, which is replaced by the barcode id\n");
 			bc[b].out[i]=(char *) malloc(strlen(out[i])+strlen(bc[b].id.s)+100);
 			strncpy(bc[b].out[i], out[i], p-out[i]);
+			bc[b].out[i][p-out[i]]='\0';
 			strcat(bc[b].out[i], bc[b].id.s);
 			strcat(bc[b].out[i], p+1);
 			if (!(bc[b].fout[i]=gzopen(bc[b].out[i], "w", &bc[b].gzout[i]))) {
