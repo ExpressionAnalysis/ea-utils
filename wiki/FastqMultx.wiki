@@ -44,6 +44,9 @@ Options:
 }}}
 
 
+Files named ".gz" are assumed to be compressed, and can be 
+read/written as long as "gzip" is in the path.
+
 = Example 1 =
 
 # this example will read/output files that are gzipped, since -B is used and only 1 sequence files is present, it will look for barcodes on the "ends" of the sequence and will tell you which end it found them on
