@@ -98,8 +98,9 @@ int main (int argc, char **argv) {
 	}
 
 	FILE *fin[2];
+	bool gzin[2]; meminit(gzin);
 	for (i = 0; i < in_n; ++i) {
-		fin[i] = fopen(in[i], "r"); 
+		fin[i] = gzopen(in[i], "r",&gzin[i]); 
 		if (!fin[i]) {
 			fprintf(stderr, "Error opening file '%s': %s\n",in[i], strerror(errno));
 			return 1;
@@ -108,6 +109,7 @@ int main (int argc, char **argv) {
 
 	const char *suffix[5]={"un1", "un2", "join", "un3", "join2"};
         FILE *fout[5]; meminit(fout);
+	bool gzout[5]; meminit(gzout);
 	char *pre = out[0];
         for (i = 0; i < (in[2] ? 5 : 3); ++i) {
 		// prefix out
@@ -123,7 +125,7 @@ int main (int argc, char **argv) {
 				strcat(out[i], suffix[i]);
 			}
 		} // else explicit
-                fout[i] = fopen(out[i], "w");
+                fout[i] = gzopen(out[i], "w",&gzout[i]);
                 if (!fout[i]) {
                         fprintf(stderr, "Error opening output file '%s': %s\n",out[i], strerror(errno));
                         return 1;
