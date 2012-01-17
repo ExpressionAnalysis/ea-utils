@@ -24,6 +24,9 @@ appended to the file, or they replace a %-character if present.
 
   If a 'mate' input file is present (barcode read), then the files
 'un3' and 'join2' are also created.
+
+  Files named ".gz" are assumed to be compressed, and can be 
+read/written as long as "gzip" is in the path.
 }}}
 
 == Etc ==
