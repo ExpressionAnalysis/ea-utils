@@ -52,6 +52,9 @@ Increasing the scale makes recognition-lengths longer, a scale
 of 100 will force full-length recognition.
 
 Set the skew (-k) or N-pct (-x) to 100 or 0 to turn it off
+
+Files named ".gz" are assumed to be compressed, and can be 
+read/written as long as "gzip" is in the path.
 }}}
 
 == Notes ==
