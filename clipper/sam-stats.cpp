@@ -253,7 +253,37 @@ int main(int argc, char **argv) {
 		int phred = s.dat.qualmin < 64 ? 33 : 64;
 		fprintf(o, "reads\t%d\n", s.dat.n);
 		fprintf(o, "version\t%s\n", VERSION);
-		fprintf(o, "mapped reads\t%d\n", s.dat.mapn);
+
+		// mapped reads is the number of reads that mapped at least once (either mated or not)
+		if (s.dat.mapn > 0) {
+			if (!nodup && s.dat.dupmax > (s.dat.pe+1)) {
+				google::sparse_hash_map<string,int>::iterator it = s.dups.begin();
+				vector<int> vtmp;
+				int amb = 0;
+				while(it!=s.dups.end()) {
+					if (it->second >  (s.dat.pe+1)) {
+						++amb;
+					}
+					++it;
+				}
+				fprintf(o,"mapped reads\t%d\n", (int) s.dups.size()*(s.dat.pe+1));
+				if (amb > 0) {
+					fprintf(o,"ambiguous\t%d\n", amb);
+					fprintf(o,"pct ambiguous\t%.6f\n", 100.0*((double)amb/(double)s.dups.size()));
+					fprintf(o,"max dup align\t%.d\n", s.dat.dupmax/(s.dat.pe+1));
+				}
+				// number of total mappings
+				fprintf(o, "total mappings\t%d\n", s.dat.mapn);
+			} else {
+				// dup-id's not tracked
+				fprintf(o, "mapped reads\t%d\n", s.dat.mapn);
+				// todo: add support for bwa's multiple alignment tag
+				// fprintf(o, "total mappings\t%d\n", s.dat.mapn);
+			}
+		} else {
+			fprintf(o, "mapped reads\t%d\n", s.dat.mapn);
+		}
+
 		if (s.dat.mapn > 0) {
 			fprintf(o, "bsize\t%d\n", qualreads);
 			fprintf(o, "phred\t%d\n", phred);
@@ -350,23 +380,6 @@ int main(int argc, char **argv) {
 			if (s.covr.size() > 1) {
 				fprintf(o,"num ref seqs\t%d\n", (int) s.covr.size());
 				fprintf(o,"num ref aligned\t%d\n", (int) mseq);
-			}
-			if (!nodup && s.dat.dupmax > (s.dat.pe+1)) {
-				google::sparse_hash_map<string,int>::iterator it = s.dups.begin();
-				vector<int> vtmp;
-				int amb = 0;
-				while(it!=s.dups.end()) {
-					if (it->second >  (s.dat.pe+1)) {
-						++amb;
-					}
-					++it;
-				}
-				fprintf(o,"reads aligned\t%d\n", (int) s.dups.size());
-				if (amb > 0) {
-					fprintf(o,"ambiguous\t%d\n", amb);
-					fprintf(o,"pct ambiguous\t%.6f\n", 100.0*((double)amb/(double)s.dups.size()));
-					fprintf(o,"max dup align\t%.d\n", s.dat.dupmax/(s.dat.pe+1));
-				}
 			}
 		}
 	}
