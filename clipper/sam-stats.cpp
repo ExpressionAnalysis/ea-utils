@@ -418,7 +418,7 @@ void sstats::dostats(const string &name, int rlen, int bits, const string &ref, 
 			sc->mapb+=rlen;
 			if (histnum > 0 && sc->reflen > 0) {
 				int x = histnum * ((double)pos / sc->reflen);
-				warn("chr: %s, hn: %d, pos: %d, rl: %d, x: %x\n", ref.c_str(), histnum, pos, sc->reflen, x);
+				if (debug > 1) warn("chr: %s, hn: %d, pos: %d, rl: %d, x: %x\n", ref.c_str(), histnum, pos, sc->reflen, x);
 				if (x < histnum) {
 	                                sc->dist[x]+=rlen;
 				} else {
