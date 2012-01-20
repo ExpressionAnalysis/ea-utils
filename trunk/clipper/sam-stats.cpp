@@ -251,6 +251,10 @@ int main(int argc, char **argv) {
 	        sort(s.visize.begin(), s.visize.end());
 
 		int phred = s.dat.qualmin < 64 ? 33 : 64;
+		if (!s.data.n) {
+			warn("No reads in %s\n", in);
+			continue;
+		}
 		fprintf(o, "reads\t%d\n", s.dat.n);
 		fprintf(o, "version\t%s\n", VERSION);
 
