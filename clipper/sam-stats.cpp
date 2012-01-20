@@ -251,7 +251,7 @@ int main(int argc, char **argv) {
 	        sort(s.visize.begin(), s.visize.end());
 
 		int phred = s.dat.qualmin < 64 ? 33 : 64;
-		if (!s.data.n) {
+		if (!s.dat.n) {
 			warn("No reads in %s\n", in);
 			continue;
 		}
