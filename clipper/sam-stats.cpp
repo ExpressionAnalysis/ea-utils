@@ -26,7 +26,7 @@ void usage(FILE *f);
 #define max(a,b) (a>b?a:b)
 #define min(a,b) (a<b?a:b)
 #define meminit(l) (memset(&l,0,sizeof(l)))
-#define debug(s,...) if (debug) fprintf(stderr,s,##__VA_ARGS__)
+#define debugout(s,...) if (debug) fprintf(stderr,s,##__VA_ARGS__)
 #define warn(s,...) ++errs; fprintf(stderr,s,##__VA_ARGS__)
 #define stdev(cnt, sum, ssq) sqrt((((double)cnt)*ssq-pow((double)sum,2)) / ((double)cnt*((double)cnt-1)))
 
@@ -141,7 +141,7 @@ int main(int argc, char **argv) {
 	if (multi && !ext) 
 		ext = "stats";
 
-	debug("argc:%d, argv[1]:%s, multi:%d, ext:%s\n", argc,argv[optind],multi,ext);
+	debugout("argc:%d, argv[1]:%s, multi:%d, ext:%s\n", argc,argv[optind],multi,ext);
 	const char *p;
 	for (;optind < argc;++optind) {
 		sstats s;
@@ -219,7 +219,7 @@ int main(int argc, char **argv) {
 				o=stdout;
 		}
 
-		debug("file:%s, f: %lx\n", in, (long int) f);
+		debugout("file:%s, f: %lx\n", in, (long int) f);
 		char c;
 		if (!inbam) {
 			// guess file format
