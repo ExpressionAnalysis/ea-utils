@@ -16,7 +16,7 @@
 #include <api/BamReader.h>
 #include <api/BamWriter.h>
 
-const char * VERSION = "1.1";
+const char * VERSION = "1.2";
 
 using namespace BamTools;
 using namespace std;
@@ -264,18 +264,25 @@ int main(int argc, char **argv) {
 				google::sparse_hash_map<string,int>::iterator it = s.dups.begin();
 				vector<int> vtmp;
 				int amb = 0;
+				int sing = 0;
 				while(it!=s.dups.end()) {
+					// *not* making the distinction between 2 singleton mappings and 1 paired here
 					if (it->second > (s.dat.pe+1)) {
 						++amb;
 					}
+					if (it->second == 1 && s.dat.pe) {
+						++sing;	
+					}
 					++it;
 				}
-				fprintf(o,"mapped reads\t%d\n", (int) s.dups.size()*(s.dat.pe+1));
+				fprintf(o,"mapped reads\t%d\n", (int) s.dups.size()*(s.dat.pe+1)-sing);
 				if (amb > 0) {
 					fprintf(o,"ambiguous\t%d\n", amb*(s.dat.pe+1));
 					fprintf(o,"pct ambiguous\t%.6f\n", 100.0*((double)amb/(double)s.dups.size()));
 					fprintf(o,"max dup align\t%.d\n", s.dat.dupmax-s.dat.pe);
 				}
+				if (sing)
+					fprintf(o,"singleton mappings\t%.d\n", sing);
 				// number of total mappings
 				fprintf(o, "total mappings\t%d\n", s.dat.mapn);
 			} else {
