@@ -16,7 +16,7 @@
 #include <api/BamReader.h>
 #include <api/BamWriter.h>
 
-const char * VERSION = "1.0";
+const char * VERSION = "1.1";
 
 using namespace BamTools;
 using namespace std;
@@ -27,7 +27,7 @@ void usage(FILE *f);
 #define min(a,b) (a<b?a:b)
 #define meminit(l) (memset(&l,0,sizeof(l)))
 #define debugout(s,...) if (debug) fprintf(stderr,s,##__VA_ARGS__)
-#define warn(s,...) ++errs; fprintf(stderr,s,##__VA_ARGS__)
+#define warn(s,...) ((++errs), fprintf(stderr,s,##__VA_ARGS__))
 #define stdev(cnt, sum, ssq) sqrt((((double)cnt)*ssq-pow((double)sum,2)) / ((double)cnt*((double)cnt-1)))
 
 double quantile(const std::vector<int> &vec, double p);
@@ -75,7 +75,7 @@ public:
 	google::sparse_hash_map<std::string, int> dups;		// alignments by read-id (not necessary for some pipes)
 
 	// file-format neutral ... called per read
-	void dostats(const string &name, int rlen, int bits, const string &ref, int pos, int mapq, int nmate, const string &seq, const string &qual, int nm, int del, int ins);
+	void dostats(string name, int rlen, int bits, const string &ref, int pos, int mapq, int nmate, const string &seq, const string &qual, int nm, int del, int ins);
 
 	// read a bam/sam file and call dostats over and over
 	bool parse_bam(const char *in);
@@ -98,16 +98,16 @@ int read_line(FILE *in, line &l);
 
 int qualreads = 1000000;
 int dupreads = 1000000;
-bool nodup=0;
+bool trackdup=0;
 int main(int argc, char **argv) {
 	const char *ext = NULL;
 	bool multi=0, newonly=0, inbam=0;
 	char c;
 	optind = 0;
-        while ( (c = getopt (argc, argv, "?BDdx:MhH:")) != -1) {
+    while ( (c = getopt (argc, argv, "?BDdx:MhH:")) != -1) {
                 switch (c) {
                 case 'd': ++debug; break;
-                case 'D': ++nodup; break;
+                case 'D': ++trackdup; break;
                 case 'B': inbam=1; break;
                 case 'b': qualreads=atoi(optarg); break;
                 case 'H': histnum=atoi(optarg); break;
@@ -126,7 +126,7 @@ int main(int argc, char **argv) {
                      usage(stderr);
                      return 1;
                 }
-        }
+    }
 
 	// recompute argc owing to getopt
 	const char *stdv[3] = {argv[0],"-",NULL}; 
@@ -247,8 +247,8 @@ int main(int argc, char **argv) {
 		}
 		if (needpclose) pclose(f); else fclose(f);
 
-	        sort(s.vmapq.begin(), s.vmapq.end());
-	        sort(s.visize.begin(), s.visize.end());
+		sort(s.vmapq.begin(), s.vmapq.end());
+		sort(s.visize.begin(), s.visize.end());
 
 		int phred = s.dat.qualmin < 64 ? 33 : 64;
 		if (!s.dat.n) {
@@ -260,21 +260,21 @@ int main(int argc, char **argv) {
 
 		// mapped reads is the number of reads that mapped at least once (either mated or not)
 		if (s.dat.mapn > 0) {
-			if (!nodup && s.dat.dupmax > (s.dat.pe+1)) {
+			if (trackdup && s.dat.dupmax > 1) {
 				google::sparse_hash_map<string,int>::iterator it = s.dups.begin();
 				vector<int> vtmp;
 				int amb = 0;
 				while(it!=s.dups.end()) {
-					if (it->second >  (s.dat.pe+1)) {
+					if (it->second > 1) {
 						++amb;
 					}
 					++it;
 				}
-				fprintf(o,"mapped reads\t%d\n", (int) s.dups.size()*(s.dat.pe+1));
+				fprintf(o,"mapped reads\t%d\n", (int) s.dups.size());
 				if (amb > 0) {
 					fprintf(o,"ambiguous\t%d\n", amb);
 					fprintf(o,"pct ambiguous\t%.6f\n", 100.0*((double)amb/(double)s.dups.size()));
-					fprintf(o,"max dup align\t%.d\n", s.dat.dupmax/(s.dat.pe+1));
+					fprintf(o,"max dup align\t%.d\n", s.dat.dupmax);
 				}
 				// number of total mappings
 				fprintf(o, "total mappings\t%d\n", s.dat.mapn);
@@ -286,6 +286,10 @@ int main(int argc, char **argv) {
 			}
 		} else {
 			fprintf(o, "mapped reads\t%d\n", s.dat.mapn);
+		}
+
+		if (s.dat.pe) {
+			fprintf(o, "library\tpaired-end\n");
 		}
 
 		if (s.dat.mapn > 0) {
@@ -401,7 +405,7 @@ int main(int argc, char **argv) {
 #define S_QUAL 10
 #define S_TAG 11
 
-void sstats::dostats(const string &name, int rlen, int bits, const string &ref, int pos, int mapq, int nmate, const string &seq, const string &qual, int nm, int del, int ins) {
+void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos, int mapq, int nmate, const string &seq, const string &qual, int nm, int del, int ins) {
 
 	++dat.n;
 
@@ -435,7 +439,9 @@ void sstats::dostats(const string &name, int rlen, int bits, const string &ref, 
 			sc->mapb+=rlen;
 			if (histnum > 0 && sc->reflen > 0) {
 				int x = histnum * ((double)pos / sc->reflen);
-				if (debug > 1) warn("chr: %s, hn: %d, pos: %d, rl: %d, x: %x\n", ref.c_str(), histnum, pos, sc->reflen, x);
+				if (debug > 1) { 
+					warn("chr: %s, hn: %d, pos: %d, rl: %d, x: %x\n", ref.c_str(), histnum, pos, sc->reflen, x);
+				}
 				if (x < histnum) {
 	                                sc->dist[x]+=rlen;
 				} else {
@@ -474,15 +480,14 @@ void sstats::dostats(const string &name, int rlen, int bits, const string &ref, 
 			++dat.nbase;
 		}
 	}
-	if (!nodup) {
+	if (trackdup) {
+		size_t p;
+		if ((p = name.find_first_of('/'))!=string::npos) 
+				name.resize(p);
+		name += (nmate >= 0 ? "/1" : "/2");
 		int x=++dups[name];
 		if (x>dat.dupmax) 
 			dat.dupmax=x;
-		if (dat.mapn > dupreads && dat.dupmax <= (dat.pe+1)) {
-			// after a million or so reads, and no dups, free up ram and stop tracking them
-			nodup=1;
-			dups.clear();
-		}
 	}
 }
 
