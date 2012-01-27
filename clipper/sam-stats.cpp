@@ -260,21 +260,21 @@ int main(int argc, char **argv) {
 
 		// mapped reads is the number of reads that mapped at least once (either mated or not)
 		if (s.dat.mapn > 0) {
-			if (trackdup && s.dat.dupmax > 1) {
+			if (trackdup && s.dat.dupmax > (s.dat.pe+1)) {
 				google::sparse_hash_map<string,int>::iterator it = s.dups.begin();
 				vector<int> vtmp;
 				int amb = 0;
 				while(it!=s.dups.end()) {
-					if (it->second > 1) {
+					if (it->second > (s.dat.pe+1)) {
 						++amb;
 					}
 					++it;
 				}
-				fprintf(o,"mapped reads\t%d\n", (int) s.dups.size());
+				fprintf(o,"mapped reads\t%d\n", (int) s.dups.size()*(s.dat.pe+1));
 				if (amb > 0) {
-					fprintf(o,"ambiguous\t%d\n", amb);
+					fprintf(o,"ambiguous\t%d\n", amb*(s.dat.pe+1));
 					fprintf(o,"pct ambiguous\t%.6f\n", 100.0*((double)amb/(double)s.dups.size()));
-					fprintf(o,"max dup align\t%.d\n", s.dat.dupmax);
+					fprintf(o,"max dup align\t%.d\n", s.dat.dupmax-s.dat.pe);
 				}
 				// number of total mappings
 				fprintf(o, "total mappings\t%d\n", s.dat.mapn);
@@ -484,7 +484,6 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 		size_t p;
 		if ((p = name.find_first_of('/'))!=string::npos) 
 				name.resize(p);
-		name += (nmate >= 0 ? "/1" : "/2");
 		int x=++dups[name];
 		if (x>dat.dupmax) 
 			dat.dupmax=x;
