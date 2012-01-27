@@ -604,7 +604,7 @@ void usage(FILE *f) {
 "\n"
 "Options:\n"
 "\n"
-"-D             Don't keep track of multiple alignments (save ram/faster)\n"
+"-D             Keep track of multiple alignments (slower!)\n"
 "-M             Only overwrite if newer (requires -x, or multiple files)\n"
 "-B             Input is bam, don't bother looking at magic\n"
 "-x FIL         File extension for multiple files (stats)\n"
