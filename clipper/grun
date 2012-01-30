@@ -180,8 +180,9 @@ if (open(IN, $conf{pid_file})) {
 if ($killjob) {
 	# grun -k code
 	my $sig = 15;
+	my $kforce = 0;
 	Getopt::Long::Configure qw(no_require_order no_ignore_case);
-        GetOptions("signal|n=i"=>\$sig) || die usage();
+        GetOptions("signal|n=i"=>\$sig, "force"=>\$kforce) || die usage();
 
 	if ($conf{trace}) {
                 sendcmd($conf{master}, $conf{master_port}, 'trace', 1);
@@ -197,7 +198,7 @@ if ($killjob) {
 			}
 			$job = $tmp;
 		}
-		my $err = kill_job($job, $sig);
+		my $err = kill_job($job, $sig, $kforce);
 		if (!defined($err) && $@) {
 			warn $@,"\n";
 			$exit=-1;
@@ -2650,7 +2651,7 @@ sub packdump {
 }
 
 sub kill_job {
-	my ($killjob, $sig) = @_;
+	my ($killjob, $sig, $kforce) = @_;
         my ($err) = waitmsg($conf{master}, $conf{master_port}, 'jkill', $killjob);
         if ($err =~ /Forward:?\s*([\d.]+):?(\d*)/) {
                 my ($ip, $port) = ($1, $2);
@@ -2658,7 +2659,7 @@ sub kill_job {
                 # this is WRONG ... messages should all have trace bits... that would be nice
                 sendcmd($ip, $port, 'trace', 1) if ($conf{trace});
                 ($err) = waitmsg($ip, $port, 'xabort', $killjob, $sig);
-		if ($err =~ /(Not Found)|(Inappropriate ioctl for device)/i) {
+		if ($err =~ /(Not Found)|(Inappropriate ioctl for device)/i || $kforce) {
         		waitmsg($conf{master}, $conf{master_port}, 'jkill', $killjob, $ip);
 		}
                 sendcmd($ip, $port, 'trace', 0) if ($conf{trace});
