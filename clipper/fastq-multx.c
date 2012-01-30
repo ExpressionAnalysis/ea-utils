@@ -325,20 +325,20 @@ int main (int argc, char **argv) {
 		if (debug) printf("scnt: %d, ecnt, %d, end: %c\n", scnt, ecnt, end);
 
 		// since this is a known good set, use a very low threshold, just to catch them all
-                fprintf(stderr, "Using Barcode Group: %s on File: %s (%s), Threshold %2.2f%%\n", grs[gindex].id, in[i], endstr(end), 100.0 * (float) ((float)thresh/20)/sampcnt);
+                fprintf(stderr, "Using Barcode Group: %s on File: %s (%s), Threshold %2.2f%%\n", grs[gindex].id, in[i], endstr(end), 100.0 * (float) ((float)thresh/15)/sampcnt);
                 for (b=0;b<bgcnt;++b) {
 			if (bcg[b].gptr->i == gindex) {
 				int cnt = (end == 'e' ? (bcg[b].ecnt[i]+bcg[b].escnt[i]) : ( bcg[b].bcnt[i] + bcg[b].bscnt[i] ));
-				if (cnt > thresh/20) {
+				if (cnt > thresh/15) {
 					// count exceeds threshold... use it
 					bc[bcnt]=bcg[b].b;
-					if ((end == 'e' && (bcg[b].escnt[i] > bcg[b].ecnt[i])) ||
-					    (end == 'b' && (bcg[b].bscnt[i] > bcg[b].bcnt[i]))
+					if ((end == 'e' && (bcg[b].escnt[i] < 1.2*bcg[b].ecnt[i])) ||
+					    (end == 'b' && (bcg[b].bscnt[i] < 1.2*bcg[b].bcnt[i]))
 					  ) {
-						bc[bcnt].shifted=1;
 						fprintf(stderr, "Using Barcode %s (%s)\n", bcg[b].b.id.s, bcg[b].b.seq.s);
 						if (debug) printf("Using Barcode %s (%s) ... ecnt:%d, escnt:%d,bcnt:%d, bscnt:%d\n", bcg[b].b.id.s, bcg[b].b.seq.s, bcg[b].ecnt[i], bcg[b].escnt[i], bcg[b].bcnt[i], bcg[b].bscnt[i]);
 					} else {
+						bc[bcnt].shifted=1;
 						fprintf(stderr, "Using Barcode %s (%s) shifted\n", bcg[b].b.id.s, bcg[b].b.seq.s);
 						if (debug) printf("Using Barcode %s (%s) shifted ... ecnt:%d, escnt:%d,bcnt:%d, bscnt:%d\n", bcg[b].b.id.s, bcg[b].b.seq.s, bcg[b].ecnt[i], bcg[b].escnt[i], bcg[b].bcnt[i], bcg[b].bscnt[i]);
 					}
