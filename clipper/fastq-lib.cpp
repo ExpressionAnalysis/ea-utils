@@ -34,9 +34,33 @@ int read_line(FILE *in, struct line &l) {
 
 int read_fq(FILE *in, int rno, struct fq *fq) {
         read_line(in, fq->id);
-        read_line(in, fq->seq);
-        read_line(in, fq->com);
-        read_line(in, fq->qual);
+	if (fq->id.s && (*fq->id.s == '>')) {
+		fq->id.s[0] = '@';
+		// read fasta instead
+		char c = fgetc(in);
+		while (c != '>' && c != EOF) {
+			if (fq->seq.a <= (fq->seq.n+1)) {
+				fq->seq.s=(char *)realloc(fq->seq.s, fq->seq.a=(fq->seq.a+16)*2);
+			}
+			if (!isspace(c)) 
+				fq->seq.s[fq->seq.n++]=c;
+			c = fgetc(in);
+		}
+		if (c != EOF) {
+			ungetc(c, in);
+		}
+		// make it look like a fastq
+		fq->qual.s=(char *)realloc(fq->qual.s, fq->qual.a=(fq->seq.n+1));
+		memset(fq->qual.s, 'h', fq->seq.n);
+		fq->qual.s[fq->qual.n=fq->seq.n]=fq->seq.s[fq->seq.n]='\0';
+		fq->com.s=(char *)malloc(fq->com.a=2);
+		fq->com.n=1;
+		strcpy(fq->com.s,"+");
+	} else {
+		read_line(in, fq->seq);
+		read_line(in, fq->com);
+		read_line(in, fq->qual);
+	}
 
         if (fq->qual.n <= 0)
                 return 0;
