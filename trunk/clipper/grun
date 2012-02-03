@@ -539,16 +539,21 @@ if ($opt{wait}) {
 	if ($stat == 11) {
 		$err = 'Segmentation fault';
 	}
-	$stat == $stat>>8;
+	if ($stat) {
+		# shift... but if that doesn't get you anything, set to -1 (unknown error)
+		$stat == $stat>>8;
+		$stat = -1 if !$stat;
+	}
 	if ($err) {
 		print STDERR "[$host] $err", "\n";
+		$stat = -1 if !$stat;				# unknown error if undefined
 	} else {
 		if ($stat != 0 && ! $diderr) {
-                	print STDERR "Error: [$host] Command returned $stat\n";
+           	print STDERR "Error: [$host] Command returned $stat\n";
 		}
 	}
 	unlink("$ENV{HOME}/.grun/jobx/$opt{jobx}") if $opt{jobx};
-	exit $stat;
+	exit($stat);
 } else {
 	# aah... nicer
 	print STDOUT "Job id $info{jid}\n";
@@ -1092,7 +1097,7 @@ sub process_message {
 		my ($jid) = @args;
 		my $pid = slurp("$conf{spool}/jpids/$jid");
 		if ($pid > 1) {
-			unlink  "$conf{spool}/jpids/$jid", "$conf{spool}/stdio/$pid.out", "$conf{spool}/stdio/$pid.err", "$conf{spool}/pids/$pid.stat", "$conf{spool}/pids/$pid.time";
+			unlink  "$conf{spool}/jpids/$jid", "$conf{spool}/stdio/$pid.out", "$conf{spool}/stdio/$pid.err", "$conf{spool}/pids/$pid.stat", "$conf{spool}/stdio/$jid.time";
 		} else {
 			xlog("error", "Got a cleanup for $jid which doesn't exist");
 		}
@@ -1612,10 +1617,12 @@ sub srvexec {
 			next unless /^(\d+)/;
 			$kid = $1;
 			if (/\.time$/) {
+				# kid is a job id, not a pid
 				if (! -e "$conf{spool}/jpids/$kid") {
 					unlink "$conf{spool}/stdio/$kid.time";
 				}
 			} else {
+				# kid is a pid
 				next if $noping{$kid};
 				if (! -e "$conf{spool}/pids/$kid.stat") {
 					xlog("error", "Cleanup leftover err/out for $kid");
