@@ -185,8 +185,6 @@ void revcomp(struct fq *d, struct fq *s) {
 }
 
 
-#ifndef __GNUC__
-
 /* getline.c -- Replacement for GNU C library function getline
 
 Copyright (C) 1993 Free Software Foundation, Inc.
@@ -285,6 +283,8 @@ int getstr (char ** lineptr, size_t *n, FILE * stream, char terminator, int offs
   ret = read_pos - (*lineptr + offset);
   return ret;
 }
+
+#if !defined(__GNUC__) || defined(__APPLE__) || defined(WIN32)
 
 ssize_t getline(char **lineptr, size_t *n, FILE *stream)
 {
