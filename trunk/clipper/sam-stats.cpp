@@ -16,6 +16,8 @@
 #include <api/BamReader.h>
 #include <api/BamWriter.h>
 
+#include "fastq-lib.h"
+
 const char * VERSION = "1.2";
 
 using namespace BamTools;
@@ -23,8 +25,8 @@ using namespace std;
 
 void usage(FILE *f);
 
-#define max(a,b) (a>b?a:b)
-#define min(a,b) (a<b?a:b)
+//#define max(a,b) (a>b?a:b)
+//#define min(a,b) (a<b?a:b)
 #define meminit(l) (memset(&l,0,sizeof(l)))
 #define debugout(s,...) if (debug) fprintf(stderr,s,##__VA_ARGS__)
 #define warn(s,...) ((++errs), fprintf(stderr,s,##__VA_ARGS__))
@@ -81,13 +83,6 @@ public:
 	bool parse_bam(const char *in);
 	bool parse_sam(FILE *f);
 };
-
-class line {
-public:
-	line() {s=NULL; n=0; a=0;}
-        char *s; int n; size_t a;
-};
-int read_line(FILE *in, line &l); 
 
 #define T_A 0
 #define T_C 1
@@ -595,10 +590,6 @@ bool sstats::parse_bam(const char *in) {
 		dostats(al.Name,al.Length,al.AlignmentFlag,al.RefID>=0?references.at(al.RefID).RefName:"",al.Position+1,al.MapQuality, al.InsertSize, al.QueryBases, al.Qualities, nm, ins, del);
 	}
 	return true;
-}
-
-int read_line(FILE *in, line &l) {
-        return (l.n = getline(&l.s, &l.a, in));
 }
 
 void usage(FILE *f) {
