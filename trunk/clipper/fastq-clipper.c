@@ -37,6 +37,8 @@ See "void usage" below for usage.
 #include <assert.h>
 #include <math.h>
 
+#include "fastq-lib.h"
+
 #define MAX_ADAPTER_NUM 20
 #define MAX_ADAPTER_LEN 160
 
@@ -232,20 +234,6 @@ int main (int argc, char **argv) {
 	fprintf(fstat, "Trimmed: %d\n", ntrim);
 	fprintf(fstat, "Errors: %d\n", nerr);
 	return 0;
-}
-
-// returns number of differences
-inline int hd(char *a, char *b, int n) {
-	int d=0;
-	//if (debug) fprintf(stderr, "hd: %s,%s ", a, b);
-	while (*a && *b && n > 0) {
-		if (*a != *b) ++d;
-		--n;
-		++a;
-		++b;
-	}
-	//if (debug) fprintf(stderr, ", %d/%d\n", d, n);
-	return d+n;
 }
 
 void usage(FILE *f) {

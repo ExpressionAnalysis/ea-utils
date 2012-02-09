@@ -39,6 +39,10 @@ THE SOFTWARE.
 #include <search.h>
 #include <limits.h>
 
+#if defined(__APPLE__)
+	#define getopt(a,b,c) getopt_long(a,b,c,NULL,NULL)
+#endif
+
 // misc useful macros
 #define max(a,b) ((a)>(b)?(a):(b))
 #define min(a,b) ((a)<(b)?(a):(b))
@@ -63,7 +67,7 @@ struct fq {
 
 
 // not GNU?  no getline...
-#ifndef  __GNUC__
+#if !defined( __GNUC__) || defined(WIN32) || defined(__APPLE__)
 	ssize_t getline(char **lineptr, size_t *n, FILE *stream);
 #endif
 
