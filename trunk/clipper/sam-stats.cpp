@@ -383,7 +383,7 @@ int main(int argc, char **argv) {
 						string sig;
 						int d;
 						for (d=0;d<histnum;++d) {
-							sig += ('0' + (int) (log(v.dist[d])/logb));
+							sig += ('0' + (v.dist[d] ? (int) (log(v.dist[d])/logb) : 0));
 						}
 						fprintf(o,"%%%s\t%.2f\t%s\n", vit->c_str(), 100.0*((double)v.mapb/s.dat.lensum), sig.c_str());
 					} else {
