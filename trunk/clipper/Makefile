@@ -43,4 +43,4 @@ $(PKG).${VER}-${REL}.tar.gz: $(PKG).tar.gz
 
 # this requires bamtools and google's sparsehash headers
 sam-stats: sam-stats.cpp
-	$(CC) $(CFLAGS) -lbamtools -o $@ $<
+	$(CC) $(CFLAGS) fastq-lib.cpp -lbamtools -o $@ $<
