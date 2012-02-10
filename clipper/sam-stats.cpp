@@ -503,7 +503,7 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 }
 
 bool sstats::parse_sam(FILE *f) {
-	line l;
+	line l; meminit(l);
 	while (read_line(f, l)>0)  {
 		char *sp;
 		if (l.s[0]=='@') {
