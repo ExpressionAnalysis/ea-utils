@@ -69,6 +69,7 @@ public:
 		long long int basecnt[5];
 		int del, ins;		// length total dels/ins found
 		bool pe;		// paired-end ? 0 or 1	
+		int disc;
 		int dupmax;		// max dups found
 	} dat;
 	vector<int> vmapq;		// all map qualities
@@ -77,7 +78,7 @@ public:
 	google::sparse_hash_map<std::string, int> dups;		// alignments by read-id (not necessary for some pipes)
 
 	// file-format neutral ... called per read
-	void dostats(string name, int rlen, int bits, const string &ref, int pos, int mapq, int nmate, const string &seq, const string &qual, int nm, int del, int ins);
+	void dostats(string name, int rlen, int bits, const string &ref, int pos, int mapq, const string &materef, int nmate, const string &seq, const string &qual, int nm, int del, int ins);
 
 	// read a bam/sam file and call dostats over and over
 	bool parse_bam(const char *in);
@@ -293,6 +294,9 @@ int main(int argc, char **argv) {
 		if (s.dat.pe) {
 			fprintf(o, "library\tpaired-end\n");
 		}
+		if (s.dat.disc > 0) {
+			fprintf(o, "discordant mates\t%d\n", s.dat.disc);
+		}
 
 		if (s.dat.mapn > 0) {
 			fprintf(o, "bsize\t%d\n", qualreads);
@@ -402,12 +406,13 @@ int main(int argc, char **argv) {
 #define S_POS 3
 #define S_MAPQ 4
 #define S_CIG 5
+#define S_MATEREF 6
 #define S_MATE 8
 #define S_READ 9
 #define S_QUAL 10
 #define S_TAG 11
 
-void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos, int mapq, int nmate, const string &seq, const string &qual, int nm, int del, int ins) {
+void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos, int mapq, const string &materef, int nmate, const string &seq, const string &qual, int nm, int del, int ins) {
 
 	++dat.n;
 
@@ -457,6 +462,11 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 	if (nmate>0) {
 		visize.push_back(nmate);
 		dat.pe=1;
+	}
+	if (materef.size() > 0) {
+		if (materef != ref) {
+			dat.disc++;
+		}
 	}
 
 	if (dat.mapn <= qualreads) {
@@ -554,7 +564,7 @@ bool sstats::parse_sam(FILE *f) {
 			p=sp;
 		}
 		if (d[S_CIG][0] == '*') d[S_POS] = (char *) (char *) (char *) (char *) (char *) (char *) (char *) (char *) (char *) "-1";
-		dostats(d[S_ID],strlen(d[S_READ]),atoi(d[S_BITS]),d[S_NMO],atoi(d[S_POS]),atoi(d[S_MAPQ]),atoi(d[S_MATE]),d[S_READ],d[S_QUAL],nm, ins, del);
+		dostats(d[S_ID],strlen(d[S_READ]),atoi(d[S_BITS]),d[S_NMO],atoi(d[S_POS]),atoi(d[S_MAPQ]),d[S_MATEREF],atoi(d[S_MATE]),d[S_READ],d[S_QUAL],nm, ins, del);
 	}
 	return true;
 }
@@ -587,7 +597,7 @@ bool sstats::parse_bam(const char *in) {
 		if (al.CigarData.size() == 0) {
 			al.Position=-1;
 		}
-		dostats(al.Name,al.Length,al.AlignmentFlag,al.RefID>=0?references.at(al.RefID).RefName:"",al.Position+1,al.MapQuality, al.InsertSize, al.QueryBases, al.Qualities, nm, ins, del);
+		dostats(al.Name,al.Length,al.AlignmentFlag,al.RefID>=0?references.at(al.RefID).RefName:"",al.Position+1,al.MapQuality, al.MateRefID>=0?references.at(al.MateRefID).RefName:"", al.InsertSize, al.QueryBases, al.Qualities, nm, ins, del);
 	}
 	return true;
 }
