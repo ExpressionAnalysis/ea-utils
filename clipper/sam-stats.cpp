@@ -18,7 +18,7 @@
 
 #include "fastq-lib.h"
 
-const char * VERSION = "1.2";
+const char * VERSION = "1.21";
 
 using namespace BamTools;
 using namespace std;
@@ -70,6 +70,7 @@ public:
 		int del, ins;		// length total dels/ins found
 		bool pe;		// paired-end ? 0 or 1	
 		int disc;
+		int disc_pos;
 		int dupmax;		// max dups found
 	} dat;
 	vector<int> vmapq;		// all map qualities
@@ -297,6 +298,9 @@ int main(int argc, char **argv) {
 		if (s.dat.disc > 0) {
 			fprintf(o, "discordant mates\t%d\n", s.dat.disc);
 		}
+		if (s.dat.disc_pos > 0) {
+			fprintf(o, "distant mates\t%d\n", s.dat.disc_pos);
+		}
 
 		if (s.dat.mapn > 0) {
 			fprintf(o, "bsize\t%d\n", qualreads);
@@ -463,9 +467,14 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 		visize.push_back(nmate);
 		dat.pe=1;
 	}
-	if (materef.size() > 0) {
-		if (materef != ref) {
+	if (dat.pe) {
+		if (materef != "=" && materef != ref) {
+			printf("disc:%s\t%s\n",materef.c_str(), ref.c_str());
 			dat.disc++;
+		} else {
+			if (abs(nmate) > 50000) {
+				dat.disc_pos++;
+			}
 		}
 	}
 
@@ -627,9 +636,10 @@ void usage(FILE *f) {
 "Complete Stats:\n"
 "\n"
 "  <STATS>           : mean, max, stdev, median, Q1 (25 percentile), Q3\n"
-"  reads             : # of entries in the file\n"
+"  reads             : # of entries in the sam file, might not be # reads\n"
 "  phred             : phred scale used\n"
-"  mapped reads      : number of aligned reads\n"
+"  bsize             : # reads used for qual stats\n"
+"  mapped reads      : number of aligned reads (unique probe id sequences)\n"
 "  mapped bases      : total of the lengths of the aligned reads\n"
 "  forward           : number of forward-aligned reads\n"
 "  reverse           : number of reverse-aligned reads\n"
