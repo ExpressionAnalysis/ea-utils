@@ -467,14 +467,13 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 		visize.push_back(nmate);
 		dat.pe=1;
 	}
-	if (dat.pe) {
-		if (materef != "=" && materef != ref) {
-			printf("disc:%s\t%s\n",materef.c_str(), ref.c_str());
-			dat.disc++;
-		} else {
-			if (abs(nmate) > 50000) {
-				dat.disc_pos++;
-			}
+
+	if (materef.size() && (materef != "=" && materef != "*" && materef != ref)) {
+		printf("disc:%s\t%s\n",materef.c_str(), ref.c_str());
+		dat.disc++;
+	} else {
+		if (abs(nmate) > 50000) {
+			dat.disc_pos++;
 		}
 	}
 
