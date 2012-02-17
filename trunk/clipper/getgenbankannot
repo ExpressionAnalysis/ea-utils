@@ -1,0 +1,67 @@
+#!/usr/bin/perl
+
+use strict;
+use Getopt::Long;
+
+my %opt;
+$opt{tmp} = "/mnt/scratch/tmp/genbank";
+GetOptions(\%opt, "field=s@", "xml", "tmp", "gene");
+
+die "usage: getgenbankannot <genbankid>\n" unless @ARGV;
+
+my $id = shift @ARGV;
+
+mkdir($opt{tmp}); chmod(0777, $opt{tmp});
+
+my $p;
+if ($id =~ /^\d+$/) {
+    $p="$opt{tmp}/$id.gene";
+    if ( ! -s $p ) {
+        system("wget -q -O - 'http://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=gene&id=$id&rettype=gb' > $p");
+    }
+} else {
+	$p="$opt{tmp}/$id.gb";
+	if ( ! -s $p ) {
+		system("wget -q -O - 'http://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=nucleotide&id=$id&rettype=gb' > $p");
+	}
+}
+
+if ($id =~ /^\d+$/) {
+	my @d=slurp($p)=~m/<p class="([^"]+)"[^<>]*>(.*?)<\/p>/g;
+	for (my $i=0;$i<@d;$i+=2) {
+		$d[$i+1] =~ s/<[^<>]*?>//g;
+		$d[$i+1] =~ s/\s+$//;
+		next unless $d[$i];
+		next unless $d[$i+1];
+		print "$d[$i]\t$d[$i+1]\n";
+	}
+	for (xmltag(slurp($p),'dl')) {
+		my $n=xmltag($_, "dt");
+		$n =~ s/\s*:\s*//;
+		$n = lc($n);
+		my $v=xmltag($_, "dd");
+		print "$n\t$v\n";
+	}
+} else {
+	for (xmltag(slurp($p),'GBQualifier')) {
+		my $n=xmltag($_, "GBQualifier_name");
+		my $v=xmltag($_, "GBQualifier_value");
+		print "$n\t$v\n";
+	}
+}
+
+
+sub slurp {
+	local $/=undef;
+	open SL, $p;
+	return <SL>;
+}
+
+sub xmltag {
+	my ($x, $t) = @_;
+	my @x = $x =~ m{<$t[^<>]*>(.+?)</$t>}gs;
+	map s/^\s+//s, @x;
+	map s/\s+$//s, @x;
+	return wantarray ? @x : $x[0];
+}
+
