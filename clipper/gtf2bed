@@ -35,10 +35,6 @@ while (<IN>) {
 
 	next unless $id;
 
-	# optional... sort by exon number if specified
-	($num) = $f[8]=~ /exon_number "([^"]+)"/;
-	$f[9]=$num;
-
 	if ($f[2] eq 'exon') {
 		die "no position at exon on line $." if ! $f[3];
 		push @{$exons{$id}}, \@f;
