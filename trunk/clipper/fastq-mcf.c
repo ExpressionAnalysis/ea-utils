@@ -66,7 +66,7 @@ int warncount = 0;
 int main (int argc, char **argv) {
 	char c;
 	bool eol;
-	int nmin = 1, nkeep = 15, nmax=0;
+	int nmin = 1, nkeep = 19, nmax=0;
 	float minpct = 0.25;
 	int pctdiff = 20;
 	int sampcnt = 100000;			// # of reads to sample to determine adapter profile, and base skewing
@@ -92,61 +92,61 @@ int main (int argc, char **argv) {
 	int o_n = 0;
 	int e_n = 0;
 	bool skipb = 0;
-	
+
 	while (	(c = getopt_long(argc, argv, "-nf0uUVSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:",NULL,NULL)) != -1) {
 		switch (c) {
-		case '\1': 
-			if (!afil) 
-				afil = optarg; 
-			else if (i_n<MAX_FILES) 
-				ifil[i_n++] = optarg; 
-			else {
-				usage(stderr, "Too many input files."); return 1;
-			}
-			break;
-		case 't': minpct = atof(optarg); break;
-		case 'm': nmin = atoi(optarg); break;
-		case 'l': nkeep = atoi(optarg); break;
-		case 'L': nmax = atoi(optarg); break;
-		case '0': nmax=0; skewpct=0; pctns=0; rmns=0; qthr=0; nkeep=0; ilv3=-1;  break;
-		case 'u': ilv3=1; break;
-		case 'U': ilv3=0; break;
-		case 'f': force = true; break;
-		case 'k': skewpct = atof(optarg); break;
-		case 'q': qthr = atoi(optarg); break;
-		case 'w': qwin = atoi(optarg); break;
-		case 'C': sampcnt = atoi(optarg); break;
-		case 'x': pctns = atof(optarg); break;
-		case 'R': rmns = false; break;
-		case 'V': printf("Revision: %d\n", atoi(strchr(SVNREV, ':')+1)); return 0; break;
-		case 'p': pctdiff = atoi(optarg); break;
-		case 'P': phred = (char) atoi(optarg); break;
-		case 'h': usage(stdout); return 1; 
-		case 'o': if (!o_n < MAX_FILES) 
-				ofil[o_n++] = optarg;
-			  break;
-		case 's': scale = atof(optarg); break;
-		case 'S': skipb = 1; break;
-		case 'i': if (i_n<MAX_FILES)
-				ifil[i_n++] = optarg; 
-			  else
-				return usage(stderr, "Too many input files."), 1;
-		break;
-		case 'n': noclip = 1; break;
-		case 'd': ++debug; break;
-		case 'b': end[e_n++] = 'b'; break;
-		case 'e': end[e_n++] = 'e'; break;
-		case '?': 
-		     if (strchr("polsmtkx", optopt))
-		       fprintf (stderr, "Option -%c requires an argument.\n", optopt);
-		     else if (isprint(optopt))
-		       fprintf (stderr, "Unknown option `-%c'.\n", optopt);
-		     else
-		       fprintf (stderr,
-				"Unknown option character `\\x%x'.\n",
-				optopt);
-		     usage(stderr);
-             	     return 1;
+			case '\1': 
+				if (!afil) 
+					afil = optarg; 
+				else if (i_n<MAX_FILES) 
+					ifil[i_n++] = optarg; 
+				else {
+					usage(stderr, "Too many input files."); return 1;
+				}
+				break;
+			case 't': minpct = atof(optarg); break;
+			case 'm': nmin = atoi(optarg); break;
+			case 'l': nkeep = atoi(optarg); break;
+			case 'L': nmax = atoi(optarg); break;
+			case '0': nmax=0; skewpct=0; pctns=0; rmns=0; qthr=0; nkeep=0; ilv3=-1;  break;
+			case 'u': ilv3=1; break;
+			case 'U': ilv3=0; break;
+			case 'f': force = true; break;
+			case 'k': skewpct = atof(optarg); break;
+			case 'q': qthr = atoi(optarg); break;
+			case 'w': qwin = atoi(optarg); break;
+			case 'C': sampcnt = atoi(optarg); break;
+			case 'x': pctns = atof(optarg); break;
+			case 'R': rmns = false; break;
+			case 'V': printf("Revision: %d\n", atoi(strchr(SVNREV, ':')+1)); return 0; break;
+			case 'p': pctdiff = atoi(optarg); break;
+			case 'P': phred = (char) atoi(optarg); break;
+			case 'h': usage(stdout); return 1; 
+			case 'o': if (!o_n < MAX_FILES) 
+						  ofil[o_n++] = optarg;
+					  break;
+			case 's': scale = atof(optarg); break;
+			case 'S': skipb = 1; break;
+			case 'i': if (i_n<MAX_FILES)
+						  ifil[i_n++] = optarg; 
+					  else
+						  return usage(stderr, "Too many input files."), 1;
+					  break;
+			case 'n': noclip = 1; break;
+			case 'd': ++debug; break;
+			case 'b': end[e_n++] = 'b'; break;
+			case 'e': end[e_n++] = 'e'; break;
+			case '?': 
+					  if (strchr("polsmtkx", optopt))
+						  fprintf (stderr, "Option -%c requires an argument.\n", optopt);
+					  else if (isprint(optopt))
+						  fprintf (stderr, "Unknown option `-%c'.\n", optopt);
+					  else
+						  fprintf (stderr,
+								  "Unknown option character `\\x%x'.\n",
+								  optopt);
+					  usage(stderr);
+					  return 1;
 		}
 	}
 
@@ -218,95 +218,95 @@ int main (int argc, char **argv) {
 	int maxns = 0;						// max sequence length
 	int avgns[MAX_FILES]; meminit(avgns);			// average sequence length per file
 	// read length
-        for (i=0;i<i_n;++i) {
+	for (i=0;i<i_n;++i) {
 
-            char *s = NULL; size_t na = 0; int nr = 0, ns = 0, totn[MAX_FILES]; meminit(totn);
-	    char *q = NULL; size_t naq = 0; int nq =0;
-	    int j;
-	    int ilv3det=2;
+		char *s = NULL; size_t na = 0; int nr = 0, ns = 0, totn[MAX_FILES]; meminit(totn);
+		char *q = NULL; size_t naq = 0; int nq =0;
+		int j;
+		int ilv3det=2;
 
 
-	    // jump a third of the way in
-            struct stat st;
-            stat(ifil[i], &st);
+		// jump a third of the way in
+		struct stat st;
+		stat(ifil[i], &st);
 
-            while (getline(&s, &na, fin[i]) > 0) {
-                if (*s == '@')  {
-			// look for illumina purity filtering flags
-			if (ilv3det==2) {
-				ilv3det=0;
-				const char *p=strchr(s, ':');
-				if (p) {
-					++p;
-					if (isdigit(*p)) {
-						p=strchr(s, ' ');
-						if (p) {
-							++p;
-							if (isdigit(*p)) {
+		while (getline(&s, &na, fin[i]) > 0) {
+			if (*s == '@')  {
+				// look for illumina purity filtering flags
+				if (ilv3det==2) {
+					ilv3det=0;
+					const char *p=strchr(s, ':');
+					if (p) {
+						++p;
+						if (isdigit(*p)) {
+							p=strchr(s, ' ');
+							if (p) {
 								++p;
-								if (*p ==':') {
+								if (isdigit(*p)) {
 									++p;
-									if (*p =='Y') {
-										// filtering found
-										ilv3det=1;
-									} else if (*p =='N') {
-										// still illumina
-										ilv3det=2;
+									if (*p ==':') {
+										++p;
+										if (*p =='Y') {
+											// filtering found
+											ilv3det=1;
+										} else if (*p =='N') {
+											// still illumina
+											ilv3det=2;
+										}
 									}
 								}
 							}
 						}
 					}
 				}
-			}
 
-                        if ((ns=getline(&s, &na, fin[i])) <=0) {
-				// reached EOF
-				if (debug) fprintf(stderr, "Dropping out of sampling loop\n");
-                                break;
-			}
+				if ((ns=getline(&s, &na, fin[i])) <=0) {
+					// reached EOF
+					if (debug) fprintf(stderr, "Dropping out of sampling loop\n");
+					break;
+				}
 
-			nq=getline(&q, &naq, fin[i]);
-			nq=getline(&q, &naq, fin[i]);		// qual is 2 lines down
+				nq=getline(&q, &naq, fin[i]);
+				nq=getline(&q, &naq, fin[i]);		// qual is 2 lines down
 
-			// skip poor quals/lots of N's when doing sampling
-			if (st.st_size > (sampcnt * 500) && poorqual(i, ns, s, q))
-				continue;
+				// skip poor quals/lots of N's when doing sampling
+				if (st.st_size > (sampcnt * 500) && poorqual(i, ns, s, q))
+					continue;
 
-			if (phred == 0) {
-				--nq;
-				for (j=0;j<nq;++j) {
-					if (q[j] < 64) {
-						if (debug) fprintf(stderr, "Using phred 33, because saw: %c\n", q[j]);
-						// default to sanger 33, if you see a qual < 64
-						phred = 33;
-						break;
+				if (phred == 0) {
+					--nq;
+					for (j=0;j<nq;++j) {
+						if (q[j] < 64) {
+							if (debug) fprintf(stderr, "Using phred 33, because saw: %c\n", q[j]);
+							// default to sanger 33, if you see a qual < 64
+							phred = 33;
+							break;
+						}
 					}
 				}
-			}
-                        --ns;                                   // don't count newline for read len
-                        ++nr;
-	                avgns[i] += ns;
-			if (ns > maxns) maxns = ns;
+				--ns;                                   // don't count newline for read len
+				++nr;
+				avgns[i] += ns;
+				if (ns > maxns) maxns = ns;
 
-			// just 10000 reads for readlength sampling
-			if (nr >= 10000) {	
-				if (debug) fprintf(stderr, "Read 10000\n");
+				// just 10000 reads for readlength sampling
+				if (nr >= 10000) {	
+					if (debug) fprintf(stderr, "Read 10000\n");
+					break;
+				}
+			} else {
+				fprintf(stderr, "Invalid FASTQ format : %s\n", ifil[i]);
 				break;
 			}
-		} else {
-			fprintf(stderr, "Invalid FASTQ format : %s\n", ifil[i]);
-			break;
 		}
-	    }
-	    if (ilv3det == 1) {
-		ilv3=1;
-	    }
-            if (debug) fprintf(stderr,"Ilv3det: %d\n", ilv3det);
-	    if (s) free(s);
-	    if (q) free(q);
-	    if (nr)
-		    avgns[i] = avgns[i]/nr;
+		if (ilv3det == 1 && (ilv3 == -1)) {
+			ilv3=1;
+		}
+		if (debug) fprintf(stderr,"Ilv3det: %d\n", ilv3det);
+		if (s) free(s);
+		if (q) free(q);
+		if (nr)
+			avgns[i] = avgns[i]/nr;
 	}
 
 	if (ilv3 == -1) {
@@ -328,13 +328,13 @@ int main (int argc, char **argv) {
 		}
 	}
 
-        for (i=0;i<i_n;++i) {
-                if (gzin[i]) {
-                        fin[i]=gzopen(ifil[i], "r", &gzin[i]);
-                } else {
-                        fseek(fin[i],0,0);
-                }
-        }
+	for (i=0;i<i_n;++i) {
+		if (gzin[i]) {
+			fin[i]=gzopen(ifil[i], "r", &gzin[i]);
+		} else {
+			fseek(fin[i],0,0);
+		}
+	}
 
 	if (debug) printf("Max ns: %d, Avg[0]: %d\n", maxns, avgns[0]);
 
@@ -345,107 +345,107 @@ int main (int argc, char **argv) {
 	int nsampcnt = 0;
 	for (i=0;i<i_n;++i) {
 
-	    struct stat st;
-	    stat(ifil[i], &st);
+		struct stat st;
+		stat(ifil[i], &st);
 
-	    // todo, use readfq
-	    char *s = NULL; size_t na = 0; int ns = 0, nr = 0;
-	    char *q = NULL; size_t naq = 0; int nq =0;
-	    char *d = NULL; size_t nad = 0; int nd =0;
+		// todo, use readfq
+		char *s = NULL; size_t na = 0; int ns = 0, nr = 0;
+		char *q = NULL; size_t naq = 0; int nq =0;
+		char *d = NULL; size_t nad = 0; int nd =0;
 
-            while ((nd=getline(&d, &nad, fin[i])) > 0) {
-		if (*d == '@')  {
-			if ((ns=getline(&s, &na, fin[i])) <=0) 
-				break;
-			nq=getline(&q, &naq, fin[i]);
-			nq=getline(&q, &naq, fin[i]);		// qual is 2 lines down
+		while ((nd=getline(&d, &nad, fin[i])) > 0) {
+			if (*d == '@')  {
+				if ((ns=getline(&s, &na, fin[i])) <=0) 
+					break;
+				nq=getline(&q, &naq, fin[i]);
+				nq=getline(&q, &naq, fin[i]);		// qual is 2 lines down
 
-			--nq; --ns;				// don't count newline for read len
+				--nq; --ns;				// don't count newline for read len
 
-			// skip poor quals/lots of N's when doing sampling (otherwise you'll miss some)
-			if ((st.st_size > (sampcnt * 500)) && poorqual(i, ns, s, q))
-				continue;
+				// skip poor quals/lots of N's when doing sampling (otherwise you'll miss some)
+				if ((st.st_size > (sampcnt * 500)) && poorqual(i, ns, s, q))
+					continue;
 
-			if (nq != ns) {
-				if (warncount < MAXWARN) {
-					fprintf(stderr, "Warning, corrupt quality for sequence: %s", s);
-					++warncount;
+				if (nq != ns) {
+					if (warncount < MAXWARN) {
+						fprintf(stderr, "Warning, corrupt quality for sequence: %s", s);
+						++warncount;
+					}
+					continue;
 				}
-				continue;
-			}
 
-			if (i > 0 && avgns[i] < 11) 			// reads of avg length < 11 ? barcode lane, skip it
-				continue;
+				if (i > 0 && avgns[i] < 11) 			// reads of avg length < 11 ? barcode lane, skip it
+					continue;
 
-			if (ilv3) {					// illumina purity filtering
-				char * p = strchr(d, ' ');
-				if (p) {
-					p+=2;
-					if (*p==':') {
-						++p;
-						if (*p == 'Y') {
-							continue;
+				if (ilv3) {					// illumina purity filtering
+					char * p = strchr(d, ' ');
+					if (p) {
+						p+=2;
+						if (*p==':') {
+							++p;
+							if (*p == 'Y') {
+								continue;
+							}
 						}
 					}
 				}
-			}
 
 				++nr;
 
-			// to be safe, we don't assume reads are fixed-length, not any slower, just a little more code
-			int b;
-			for (b = 0; b < ns/2 && b < maxns; ++b) {
-				++bcnt[i][0][b][char2bp(s[b])];		// count from begin
-				++bcnt[i][0][b][B_CNT];			// count of samples at position
-				++bcnt[i][1][b][char2bp(s[ns-b-1])];	// count from end
-				++bcnt[i][1][b][B_CNT];			// count of samples at offset-from-end position
+				// to be safe, we don't assume reads are fixed-length, not any slower, just a little more code
+				int b;
+				for (b = 0; b < ns/2 && b < maxns; ++b) {
+					++bcnt[i][0][b][char2bp(s[b])];		// count from begin
+					++bcnt[i][0][b][B_CNT];			// count of samples at position
+					++bcnt[i][1][b][char2bp(s[ns-b-1])];	// count from end
+					++bcnt[i][1][b][B_CNT];			// count of samples at offset-from-end position
+				}
+				qcnt[i][0]+=((q[0]-phred)<qthr);		// count of q<thr for last (first trimmable) base
+				qcnt[i][1]+=((q[ns-1]-phred)<qthr);	
+				//fprintf(stderr,"qcnt i%d e0=%d, e1=%d\n", i, qcnt[i][0], qcnt[i][1]);
+
+				int a;
+				char buf[SCANLEN+1];
+				strncpy(buf, s, SCANLEN);
+				for(a=0;a<acnt;++a) {
+					char *p;
+					// search whole seq for 15 char "end" of adap string
+					if (p = strstr(s+1, ad[a].escan)) { 
+						if (debug > 1) fprintf(stderr, "  END S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", s, ad[a].id, ad[a].escan, (int) (p-s), ns, (p-s) == ns-SCANLEN);
+						if ((p-s) == ns-SCANLEN) 
+							++ad[a].ecntz[i];
+						++ad[a].ecnt[i];
+					}
+					// search 15 char begin of seq in longer adap string
+					int slen;
+					if (SCANLEN <= ad[a].nseq) {
+						slen = SCANLEN;
+						p = strstr(ad[a].seq, buf);
+					} else {
+						slen = ad[a].nseq;
+						if (!strncmp(ad[a].seq,buf,ad[a].nseq)) 
+							p=ad[a].seq;
+						else
+							p=NULL;
+					}
+					if (p) { 
+						if (debug > 1) fprintf(stderr, "BEGIN S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", buf, ad[a].id, ad[a].seq, (int) (p-ad[a].seq), ns, (p-ad[a].seq )  == ad[a].nseq-slen);
+						if (p-ad[a].seq == ad[a].nseq-slen) 
+							++ad[a].bcntz[i];
+						++ad[a].bcnt[i];
+					}
+				}
 			}
-			qcnt[i][0]+=((q[0]-phred)<qthr);		// count of q<thr for last (first trimmable) base
-			qcnt[i][1]+=((q[ns-1]-phred)<qthr);	
-			//fprintf(stderr,"qcnt i%d e0=%d, e1=%d\n", i, qcnt[i][0], qcnt[i][1]);
-			
-			int a;
-			char buf[SCANLEN+1];
-			strncpy(buf, s, SCANLEN);
-			for(a=0;a<acnt;++a) {
-				char *p;
-				// search whole seq for 15 char "end" of adap string
-				if (p = strstr(s+1, ad[a].escan)) { 
-					if (debug > 1) fprintf(stderr, "  END S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", s, ad[a].id, ad[a].escan, (int) (p-s), ns, (p-s) == ns-SCANLEN);
-					if ((p-s) == ns-SCANLEN) 
-						++ad[a].ecntz[i];
-					++ad[a].ecnt[i];
-				}
-				// search 15 char begin of seq in longer adap string
-				int slen;
-				if (SCANLEN <= ad[a].nseq) {
-					slen = SCANLEN;
-					p = strstr(ad[a].seq, buf);
-				} else {
-					slen = ad[a].nseq;
-					if (!strncmp(ad[a].seq,buf,ad[a].nseq)) 
-						p=ad[a].seq;
-					else
-						p=NULL;
-				}
-				if (p) { 
-					if (debug > 1) fprintf(stderr, "BEGIN S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", buf, ad[a].id, ad[a].seq, (int) (p-ad[a].seq), ns, (p-ad[a].seq )  == ad[a].nseq-slen);
-					if (p-ad[a].seq == ad[a].nseq-slen) 
-						++ad[a].bcntz[i];
-					++ad[a].bcnt[i];
-				}
-			}
+			if (nr >= sampcnt)		// enough samples 
+				break;
 		}
-		if (nr >= sampcnt)		// enough samples 
-			break;
-            }
-	    if (s) free(s);
-	    if (d) free(d);
-	    if (q) free(q);
-	    if (i == 0 || avgns[i] >= 11) {
-		    if (nsampcnt == 0 || nr < nsampcnt)			// fewer than max, set for thresholds
-			nsampcnt=nr;
-	    }
+		if (s) free(s);
+		if (d) free(d);
+		if (q) free(q);
+		if (i == 0 || avgns[i] >= 11) {
+			if (nsampcnt == 0 || nr < nsampcnt)			// fewer than max, set for thresholds
+				nsampcnt=nr;
+		}
 	}
 
 	if (nsampcnt == 0) {
@@ -460,56 +460,56 @@ int main (int argc, char **argv) {
 	int sktrim[i_n][2]; meminit(sktrim);
 	int needqtrim=0;
 	if (sampcnt > 0 && skewpct > 0) {
-	for (i=0;i<i_n;++i) {
-		if (avgns[i] < 11) 			// reads of avg length < 11 ? barcode lane, skip it
-			continue;
-		int e;
-		for (e = 0; e < 2; ++e) {
-			// 5% qual less than low-threshold?  need qualtrim
-			if (qthr > 0 && (100.0*qcnt[i][e])/sampcnt > 5) {
-				needqtrim = 1;
-			}
-
-			int p;
-			for (p = 0; p < maxns/2; ++p) {
-				int b;
-
-				int skth = (int) ( (float) bcnt[i][e][p][B_CNT] * ( skewpct / 100.0 ) ) ;	// skew threshold
-				int thr_n = (int) ( (float) bcnt[i][e][p][B_CNT] * ( pctns / 100.0 ) );		// n-threshold
-	
-				if (debug > 1) 
-					fprintf(stderr,"Sk Prof [%d, %d]: skth=%d, bcnt=%d, ncnt=%d, a=%d, c=%d, g=%d, t=%d\n", e, p, skth, 
-						bcnt[i][e][p][B_CNT], bcnt[i][e][p][B_N], bcnt[i][e][p][B_A], 
-						bcnt[i][e][p][B_C], bcnt[i][e][p][B_G], bcnt[i][e][p][B_T]);
-
-				if (skth < 10)						// too few samples to detect skew
-					continue;
-
-				int tr = 0;
-				for (b = 0; b < 4; ++b) {
-					if (bcnt[i][e][p][b] < skth) {			// too few bases of this type
-						tr=1;
-						if (debug > 1) 
-							fprintf(stderr, "Skew at i:%d e:%d p:%d b:%d\n", i, e, p, b);
-						break;
-					}
+		for (i=0;i<i_n;++i) {
+			if (avgns[i] < 11) 			// reads of avg length < 11 ? barcode lane, skip it
+				continue;
+			int e;
+			for (e = 0; e < 2; ++e) {
+				// 5% qual less than low-threshold?  need qualtrim
+				if (qthr > 0 && (100.0*qcnt[i][e])/sampcnt > 5) {
+					needqtrim = 1;
 				}
-				if (bcnt[i][e][p][B_N] > thr_n) {			// too many n's
+
+				int p;
+				for (p = 0; p < maxns/2; ++p) {
+					int b;
+
+					int skth = (int) ( (float) bcnt[i][e][p][B_CNT] * ( skewpct / 100.0 ) ) ;	// skew threshold
+					int thr_n = (int) ( (float) bcnt[i][e][p][B_CNT] * ( pctns / 100.0 ) );		// n-threshold
+
 					if (debug > 1) 
-						fprintf(stderr, "Too many N's at i:%d e:%d p:%d b:%d ( %d > %d )\n", i, e, p, b, bcnt[i][e][p][B_N], thr_n);
-					tr=1;
-				}
+						fprintf(stderr,"Sk Prof [%d, %d]: skth=%d, bcnt=%d, ncnt=%d, a=%d, c=%d, g=%d, t=%d\n", e, p, skth, 
+								bcnt[i][e][p][B_CNT], bcnt[i][e][p][B_N], bcnt[i][e][p][B_A], 
+								bcnt[i][e][p][B_C], bcnt[i][e][p][B_G], bcnt[i][e][p][B_T]);
 
-				if (tr) {
-					if (p == sktrim[i][e]) {				// adjacent, so increase trim
-						++sktrim[i][e];
-					} else {
-						fprintf(fstat, "Within-read Skew: Position %d from the %s of reads is skewed!\n", p, e==0?"start":"end");
+					if (skth < 10)						// too few samples to detect skew
+						continue;
+
+					int tr = 0;
+					for (b = 0; b < 4; ++b) {
+						if (bcnt[i][e][p][b] < skth) {			// too few bases of this type
+							tr=1;
+							if (debug > 1) 
+								fprintf(stderr, "Skew at i:%d e:%d p:%d b:%d\n", i, e, p, b);
+							break;
+						}
+					}
+					if (bcnt[i][e][p][B_N] > thr_n) {			// too many n's
+						if (debug > 1) 
+							fprintf(stderr, "Too many N's at i:%d e:%d p:%d b:%d ( %d > %d )\n", i, e, p, b, bcnt[i][e][p][B_N], thr_n);
+						tr=1;
+					}
+
+					if (tr) {
+						if (p == sktrim[i][e]) {				// adjacent, so increase trim
+							++sktrim[i][e];
+						} else {
+							fprintf(fstat, "Within-read Skew: Position %d from the %s of reads is skewed!\n", p, e==0?"start":"end");
+						}
 					}
 				}
 			}
 		}
-	}
 	}
 
 	int e;
@@ -542,35 +542,35 @@ int main (int argc, char **argv) {
 	for(a=0;a<acnt;++a) {
 		int any=0;
 		for (i=0;i<i_n;++i) {
-		    if (ad[a].ecnt[i] > athr || ad[a].bcnt[i] > athr) {
-			int cnt;
-			if (debug) fprintf(stderr, "EC: %d, BC:%d, ECZ: %d, BCZ: %d\n", ad[a].ecnt[i], ad[a].bcnt[i], ad[a].ecntz[i], ad[a].bcntz[i]);
-			// heavily weighted toward start/end maches
-			if ((ad[a].ecnt[i] + 10*ad[a].ecntz[i]) >= (ad[a].bcnt[i] + 10*ad[a].bcntz[i])) {
-				ad[a].end[i]='e';
-				cnt = ad[a].ecnt[i];
-			} else {
-				ad[a].end[i]='b';
-				cnt = ad[a].bcnt[i];
-			}
-			
-			// user supplied end.... don't clip elsewhere
-			if (end[i] && ad[a].end[i] != end[i])
-				continue;
+			if (ad[a].ecnt[i] > athr || ad[a].bcnt[i] > athr) {
+				int cnt;
+				if (debug) fprintf(stderr, "EC: %d, BC:%d, ECZ: %d, BCZ: %d\n", ad[a].ecnt[i], ad[a].bcnt[i], ad[a].ecntz[i], ad[a].bcntz[i]);
+				// heavily weighted toward start/end maches
+				if ((ad[a].ecnt[i] + 10*ad[a].ecntz[i]) >= (ad[a].bcnt[i] + 10*ad[a].bcntz[i])) {
+					ad[a].end[i]='e';
+					cnt = ad[a].ecnt[i];
+				} else {
+					ad[a].end[i]='b';
+					cnt = ad[a].bcnt[i];
+				}
 
-			if (scale >= 100) 
-				ad[a].thr[i] = ad[a].nseq;
-			else
-				ad[a].thr[i] = min(ad[a].nseq,max(nmin,(int) (-log(cnt / (float) sampcnt)/log(scale))));
+				// user supplied end.... don't clip elsewhere
+				if (end[i] && ad[a].end[i] != end[i])
+					continue;
 
-			fprintf(fstat, "Adapter %s (%s): counted %d at the '%s' of '%s', clip set to %d", ad[a].id, ad[a].seq, cnt, ad[a].end[i] == 'e' ? "end" : "start", ifil[i], ad[a].thr[i]);
-			if (abs((ad[a].bcnt[i]-ad[a].ecnt[i])) < athr/4) {
-				fprintf(fstat, ", warning end was not reliable\n", ad[a].id, ad[a].seq);
-			} else {
-				fputc('\n', fstat);
+				if (scale >= 100) 
+					ad[a].thr[i] = ad[a].nseq;
+				else
+					ad[a].thr[i] = min(ad[a].nseq,max(nmin,(int) (-log(cnt / (float) sampcnt)/log(scale))));
+
+				fprintf(fstat, "Adapter %s (%s): counted %d at the '%s' of '%s', clip set to %d", ad[a].id, ad[a].seq, cnt, ad[a].end[i] == 'e' ? "end" : "start", ifil[i], ad[a].thr[i]);
+				if (abs((ad[a].bcnt[i]-ad[a].ecnt[i])) < athr/4) {
+					fprintf(fstat, ", warning end was not reliable\n", ad[a].id, ad[a].seq);
+				} else {
+					fputc('\n', fstat);
+				}
+				++any;
 			}
-			++any;
-		    }
 		}
 		if (!any) 
 			continue;
@@ -603,7 +603,7 @@ int main (int argc, char **argv) {
 			fout[i]=stdout;
 		} else {
 			fout[i]=gzopen(ofil[i], "w", &gzout[i]);
-                }
+		}
 	}
 
 	FILE *fskip[MAX_FILES]; meminit(fskip);
@@ -633,7 +633,7 @@ int main (int argc, char **argv) {
 	}
 
 	struct fq fq[MAX_FILES];	
-        memset(&fq, 0, sizeof(fq));
+	memset(&fq, 0, sizeof(fq));
 
 	int nrec=0;
 	int nerr=0;
@@ -697,168 +697,167 @@ int main (int argc, char **argv) {
 		bool skip = 0;							// skip whole record?
 		int f;	
 		for (f=0;f<i_n;++f) {
-		    dotrim[f][0] = sktrim[f][0];					// default, trim to detected skew levels
-		    dotrim[f][1] = sktrim[f][1];
-		    if (avgns[f] < 11)  
-	 			// reads of avg length < 11 ? barcode lane, skip it
+			dotrim[f][0] = sktrim[f][0];					// default, trim to detected skew levels
+			dotrim[f][1] = sktrim[f][1];
+			if (avgns[f] < 11)  
+				// reads of avg length < 11 ? barcode lane, skip it
 				continue;
 
-		    if (rmns) {
-			    for (i=dotrim[f][0];i<(fq[f].seq.n);++i) {
-			    		// trim N's from the front
+			if (rmns) {
+				for (i=dotrim[f][0];i<(fq[f].seq.n);++i) {
+					// trim N's from the front
 					if (fq[f].seq.s[i] == 'N') 
 						dotrim[f][0] = i + 1;
 					else
 						break;
-			    }
-			    for (i=dotrim[f][1];i<(fq[f].seq.n);++i) {
+				}
+				for (i=dotrim[f][1];i<(fq[f].seq.n);++i) {
 					// trim N's from the end
 					if (fq[f].seq.s[fq[f].seq.n-i-1] == 'N')
 						dotrim[f][1] = i + 1;
 					else 
 						break;
-			    }
-		    }
-
-                    if (qthr > 0) {
-			    bool istrimq = false;
-
-                            // trim qual from the begin
-			    for (i=dotrim[f][0];i<(fq[f].seq.n);++i) {
-				if (qwin > 1 && (meanq(fq[f].qual.s,fq[f].seq.n,i,qwin)-phred) < qthr) {
-					++trimqb[f];
-					istrimq = true;
-					dotrim[f][0] = i + 1;
-				} else if ((fq[f].qual.s[i]-phred) < qthr) {
-					++trimqb[f];
-					istrimq = true;
-					dotrim[f][0] = i + 1;
-				} else
-					break;
-			    }
-
-                            for (i=dotrim[f][1];i<(fq[f].seq.n);++i) {
-                                if (qwin > 1 && (meanq(fq[f].qual.s,fq[f].seq.n,fq[f].seq.n-i-1,qwin)-phred) < qthr) {
-                                        ++trimqb[f];
-                                        istrimq = true;
-                                        dotrim[f][1] = i + 1;
-				} else if ((fq[f].qual.s[fq[f].seq.n-i-1]-phred) < qthr) {
-					++trimqb[f];
-					istrimq = true;
-					dotrim[f][1] = i + 1;
-				} else 
-					break;
-                            }
-			    
-			    if (istrimq) ++trimql[f];
-                    }
-
-		    int bestscore_e = INT_MAX, bestoff_e = 0, bestlen_e = 0; 
-		    int bestscore_b = INT_MAX, bestoff_b = 0, bestlen_b = 0; 
-
-		    for (i =0; i < acnt; ++i) {
-		    	if (debug) fprintf(stderr, "seq[%d]: %s %d\n", f, fq[f].seq.s, fq[f].seq.n);
-
-			if (!ad[i].end[f])
-				continue;
-
-			int nmatch = ad[i].thr[f];
-			if (!nmatch) nmatch = ad[i].nseq;			// full match required if nmin == 0
-	
-			// how far in to search for a match?
-			int mx = ad[i].nseq;
-			if (xmax) {
-				 mx = fq[f].seq.n;
-				 if (xmax > 0 && (xmax+ad[i].nseq) < mx)
-					mx = xmax+ad[i].nseq;			// xmax is added to adapter length
+				}
 			}
 
-			if (debug)
-				fprintf(stderr, "adapter: %s, adlen: %d, nmatch: %d, mx: %d\n", ad[i].seq, ad[i].nseq, nmatch, mx);
+			if (qthr > 0) {
+				bool istrimq = false;
 
-			if (ad[i].end[f] == 'e') {
-			    int off;
-			    for (off = nmatch; off <= mx; ++off) {		// off is distance from tail of sequence
-				char *seqtail = fq[f].seq.s+fq[f].seq.n-off; 	// search at tail
-				int ncmp = off<ad[i].nseq ? off : ad[i].nseq;
-				int mind = (pctdiff * ncmp) / 100;
-				int d = hd(ad[i].seq,seqtail,ncmp);		// # differences
-				if (debug>1)
-					fprintf(stderr, "tail: %s, bestoff: %d, off: %d, ncmp: %d, mind: %d, hd %d\n", seqtail, bestoff_e, off, ncmp, mind, d);
-				if (d <= mind) {
-					// squared-distance over length
-					int score = (1000*(d*d+1))/ncmp;
-					if (score <= bestscore_e) {			// better score?
-						bestscore_e = score;			// save max score
-						bestoff_e = off;			// offset at max
-						bestlen_e = ncmp;			// cmp length at max
-					}
-					if (d == 0 && (ncmp == ad[i].nseq)) {
+				// trim qual from the begin
+				for (i=dotrim[f][0];i<(fq[f].seq.n);++i) {
+					if (qwin > 1 && (meanq(fq[f].qual.s,fq[f].seq.n,i,qwin)-phred) < qthr) {
+						++trimqb[f];
+						istrimq = true;
+						dotrim[f][0] = i + 1;
+					} else if ((fq[f].qual.s[i]-phred) < qthr) {
+						++trimqb[f];
+						istrimq = true;
+						dotrim[f][0] = i + 1;
+					} else
 						break;
+				}
+
+				for (i=dotrim[f][1];i<(fq[f].seq.n);++i) {
+					if (qwin > 1 && (meanq(fq[f].qual.s,fq[f].seq.n,fq[f].seq.n-i-1,qwin)-phred) < qthr) {
+						++trimqb[f];
+						istrimq = true;
+						dotrim[f][1] = i + 1;
+					} else if ((fq[f].qual.s[fq[f].seq.n-i-1]-phred) < qthr) {
+						++trimqb[f];
+						istrimq = true;
+						dotrim[f][1] = i + 1;
+					} else 
+						break;
+				}
+				if (istrimq) ++trimql[f];
+			}
+
+			int bestscore_e = INT_MAX, bestoff_e = 0, bestlen_e = 0; 
+			int bestscore_b = INT_MAX, bestoff_b = 0, bestlen_b = 0; 
+
+			for (i =0; i < acnt; ++i) {
+				if (debug) fprintf(stderr, "seq[%d]: %s %d\n", f, fq[f].seq.s, fq[f].seq.n);
+
+				if (!ad[i].end[f])
+					continue;
+
+				int nmatch = ad[i].thr[f];
+				if (!nmatch) nmatch = ad[i].nseq;			// full match required if nmin == 0
+
+				// how far in to search for a match?
+				int mx = ad[i].nseq;
+				if (xmax) {
+					mx = fq[f].seq.n;
+					if (xmax > 0 && (xmax+ad[i].nseq) < mx)
+						mx = xmax+ad[i].nseq;			// xmax is added to adapter length
+				}
+
+				if (debug)
+					fprintf(stderr, "adapter: %s, adlen: %d, nmatch: %d, mx: %d\n", ad[i].seq, ad[i].nseq, nmatch, mx);
+
+				if (ad[i].end[f] == 'e') {
+					int off;
+					for (off = nmatch; off <= mx; ++off) {		// off is distance from tail of sequence
+						char *seqtail = fq[f].seq.s+fq[f].seq.n-off; 	// search at tail
+						int ncmp = off<ad[i].nseq ? off : ad[i].nseq;
+						int mind = (pctdiff * ncmp) / 100;
+						int d = hd(ad[i].seq,seqtail,ncmp);		// # differences
+						if (debug>1)
+							fprintf(stderr, "tail: %s, bestoff: %d, off: %d, ncmp: %d, mind: %d, hd %d\n", seqtail, bestoff_e, off, ncmp, mind, d);
+						if (d <= mind) {
+							// squared-distance over length
+							int score = (1000*(d*d+1))/ncmp;
+							if (score <= bestscore_e) {			// better score?
+								bestscore_e = score;			// save max score
+								bestoff_e = off;			// offset at max
+								bestlen_e = ncmp;			// cmp length at max
+							}
+							if (d == 0 && (ncmp == ad[i].nseq)) {
+								break;
+							}
+						}
+					}
+				} else {
+					int off;
+					for (off = nmatch; off <= mx; ++off) {              // off is distance from start of sequence
+						int ncmp = off<ad[i].nseq ? off : ad[i].nseq;	// number we are comparing
+						char *matchtail = ad[i].seq+ad[i].nseq-ncmp;    // tail of adapter
+						char *seqstart = fq[f].seq.s+off-ncmp;		// offset into sequence (if any)
+						int mind = (pctdiff * ncmp) / 100;
+						int d = hd(matchtail,seqstart,ncmp);            // # differences
+						if (debug>1)
+							fprintf(stderr, "bestoff: %d, off: %d, ncmp: %d, mind: %d, hd %d\n", bestoff_e, off, ncmp, mind, d);
+
+						if (d <= mind) {
+							int score = (1000*(d*d+1))/ncmp;
+							if (score <= bestscore_b) {                       // better score?
+								bestscore_b = score;                      // save max score
+								bestoff_b = off;                          // offset at max
+								bestlen_b = ncmp;                         // cmp length at max
+							}
+							if (d == 0 && (ncmp == ad[i].nseq)) {
+								break;
+							}
+						}
 					}
 				}
-			    }
-			} else {
-                            int off;
-                            for (off = nmatch; off <= mx; ++off) {              // off is distance from start of sequence
-                                int ncmp = off<ad[i].nseq ? off : ad[i].nseq;	// number we are comparing
-                                char *matchtail = ad[i].seq+ad[i].nseq-ncmp;    // tail of adapter
-                                char *seqstart = fq[f].seq.s+off-ncmp;		// offset into sequence (if any)
-                                int mind = (pctdiff * ncmp) / 100;
-                                int d = hd(matchtail,seqstart,ncmp);            // # differences
-                                if (debug>1)
-                                        fprintf(stderr, "bestoff: %d, off: %d, ncmp: %d, mind: %d, hd %d\n", bestoff_e, off, ncmp, mind, d);
-
-                                if (d <= mind) {
-                                        int score = (1000*(d*d+1))/ncmp;
-                                        if (score <= bestscore_b) {                       // better score?
-                                                bestscore_b = score;                      // save max score
-                                                bestoff_b = off;                          // offset at max
-                                                bestlen_b = ncmp;                         // cmp length at max
-                                        }
-                                        if (d == 0 && (ncmp == ad[i].nseq)) {
-                                                break;
-                                        }
-                                }
-                            }
 			}
-		    }
-		    // lengthen trim based on best level
-		    if (bestoff_b > dotrim[f][0])
-			dotrim[f][0]=bestoff_b;
+			// lengthen trim based on best level
+			if (bestoff_b > dotrim[f][0])
+				dotrim[f][0]=bestoff_b;
 
-		    if (bestoff_e > dotrim[f][1])
-			dotrim[f][1]=bestoff_e;
+			if (bestoff_e > dotrim[f][1])
+				dotrim[f][1]=bestoff_e;
 
-		    int totclip = min(fq[f].seq.n,dotrim[f][0] + dotrim[f][1]);
+			int totclip = min(fq[f].seq.n,dotrim[f][0] + dotrim[f][1]);
 
-		    if (debug) printf("totclip %d\n", totclip);
-		    
-		    if (totclip > 0) {
-		    	if ( (fq[f].seq.n-totclip) < nkeep) {
+			if (debug) printf("totclip %d\n", totclip);
+
+			if (totclip > 0) {
+				if ( (fq[f].seq.n-totclip) < nkeep) {
 					// skip all reads if one is severely truncated ??
 					// maybe not... ?
 					skip = 1;
 					break;
-			}
+				}
 
-			// count number of adapters clipped, not the number of rows trimmed
-			if (bestoff_b > 0 || bestoff_e > 0) 
-				++ntrim[f];
+				// count number of adapters clipped, not the number of rows trimmed
+				if (bestoff_b > 0 || bestoff_e > 0) 
+					++ntrim[f];
 
-			// save some stats
-			if (bestoff_b > 0) {
-				cnttrim[f][0]++;
-				tottrim[f][0]+=bestoff_b;
-				ssqtrim[f][0]+=bestoff_b*bestoff_b;
-			}
-			if (bestoff_e > 0) {
-				cnttrim[f][1]++;
-				tottrim[f][1]+=bestoff_e;
-				ssqtrim[f][1]+=bestoff_e*bestoff_e;
-			}
+				// save some stats
+				if (bestoff_b > 0) {
+					cnttrim[f][0]++;
+					tottrim[f][0]+=bestoff_b;
+					ssqtrim[f][0]+=bestoff_b*bestoff_b;
+				}
+				if (bestoff_e > 0) {
+					cnttrim[f][1]++;
+					tottrim[f][1]+=bestoff_e;
+					ssqtrim[f][1]+=bestoff_e*bestoff_e;
+				}
 
-		    }
+			}
 		}
 
 		if (!skip) {
@@ -869,13 +868,13 @@ int main (int argc, char **argv) {
 					fq[f].seq.s[fq[f].seq.n -=dotrim[f][1]]='\0';
 					fq[f].qual.s[fq[f].qual.n-=dotrim[f][1]]='\0';
 				}
-                                if (dotrim[f][0] > 0) {
-                                        if (debug) printf("trimming %d from begin\n", dotrim[f][0]);
-                                        memmove(fq[f].seq.s ,fq[f].seq.s +dotrim[f][0],fq[f].seq.n -=dotrim[f][0]);
-                                        memmove(fq[f].qual.s,fq[f].qual.s+dotrim[f][0],fq[f].qual.n-=dotrim[f][0]);
-                                        fq[f].seq.s[fq[f].seq.n]='\0';
-                                        fq[f].qual.s[fq[f].qual.n]='\0';
-                                }
+				if (dotrim[f][0] > 0) {
+					if (debug) printf("trimming %d from begin\n", dotrim[f][0]);
+					memmove(fq[f].seq.s ,fq[f].seq.s +dotrim[f][0],fq[f].seq.n -=dotrim[f][0]);
+					memmove(fq[f].qual.s,fq[f].qual.s+dotrim[f][0],fq[f].qual.n-=dotrim[f][0]);
+					fq[f].seq.s[fq[f].seq.n]='\0';
+					fq[f].qual.s[fq[f].qual.n]='\0';
+				}
 				if (nmax > 0) {
 					fq[f].seq.s[nmax]='\0';
 					fq[f].qual.s[nmax]='\0';
@@ -893,11 +892,11 @@ int main (int argc, char **argv) {
 		}
 	}
 
-        for (i=0;i<i_n;++i) {
+	for (i=0;i<i_n;++i) {
 		if (fout[i])  { if (gzout[i])  pclose(fout[i]);  else fclose(fout[i]); }
-                if (fin[i])   { if (gzin[i])   pclose(fin[i]);   else fclose(fin[i]); }
-                if (fskip[i]) { if (gzskip[i]) pclose(fskip[i]); else fclose(fskip[i]); }
-        }
+		if (fin[i])   { if (gzin[i])   pclose(fin[i]);   else fclose(fin[i]); }
+		if (fskip[i]) { if (gzskip[i]) pclose(fskip[i]); else fclose(fskip[i]); }
+	}
 
 	fprintf(fstat, "Total reads: %d\n", nrec);
 	fprintf(fstat, "Too short after clip: %d\n", ntooshort);
@@ -911,19 +910,19 @@ int main (int argc, char **argv) {
 			}
 		}
 		if (trimql[f] > 0) {
-				fprintf(fstat, "Trimmed %d reads by an average of %.2f bases on quality < %d\n", trimql[f], (float) trimqb[f]/trimql[f], qthr);
+			fprintf(fstat, "Trimmed %d reads by an average of %.2f bases on quality < %d\n", trimql[f], (float) trimqb[f]/trimql[f], qthr);
 		}
 	} else
-	for (f=0;f<i_n;++f) {
-		for (e=0;e<2;++e) {
-			if (cnttrim[f][e]>0) {
-				fprintf(fstat, "Clipped '%s' reads (%s): Count %d, Mean: %.2f, Sd: %.2f\n", e==0?"start":"end", ifil[f], cnttrim[f][e], (double) tottrim[f][e] / cnttrim[f][e], stdev(cnttrim[f][e], tottrim[f][e], ssqtrim[f][e]));
+		for (f=0;f<i_n;++f) {
+			for (e=0;e<2;++e) {
+				if (cnttrim[f][e]>0) {
+					fprintf(fstat, "Clipped '%s' reads (%s): Count %d, Mean: %.2f, Sd: %.2f\n", e==0?"start":"end", ifil[f], cnttrim[f][e], (double) tottrim[f][e] / cnttrim[f][e], stdev(cnttrim[f][e], tottrim[f][e], ssqtrim[f][e]));
+				}
+			}
+			if (trimql[f] > 0) {
+				fprintf(fstat, "Trimmed %d reads (%s) by an average of %.2f bases on quality < %d\n", trimql[f], ifil[f], (float) trimqb[f]/trimql[f], qthr);
 			}
 		}
-		if (trimql[f] > 0) {
-				fprintf(fstat, "Trimmed %d reads (%s) by an average of %.2f bases on quality < %d\n", trimql[f], ifil[f], (float) trimqb[f]/trimql[f], qthr);
-		}
-	}
 	if (nilv3pf > 0) {
 		fprintf(fstat, "Filtered %d reads on purity flag\n", nilv3pf);
 	}
