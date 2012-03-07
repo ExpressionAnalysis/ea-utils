@@ -32,6 +32,7 @@ See "void usage" below for usage.
 #define SCANLEN 15
 #define SCANMIDP ((int) SCANLEN/2)
 #define MAX_FILES 3
+#define MAX_REF 10
 #define B_A     0
 #define B_C     1
 #define B_G     2
@@ -63,12 +64,16 @@ void saveskip(FILE **fout, int fo_n, struct fq *fq);
 void usage(FILE *f, const char *msg=NULL);
 int debug=0;
 int warncount = 0;
+
+const char *cmd_align_se = "bowtie -S %i -f %1";
+const char *cmd_align_pe = "bowtie -S %i -1 %1 -2 %2";
+
 int main (int argc, char **argv) {
 	char c;
 	bool eol;
 	int nmin = 1, nkeep = 19, nmax=0;
 	float minpct = 0.25;
-	int pctdiff = 20;
+	int pctdiff = 10;
 	int sampcnt = 100000;			// # of reads to sample to determine adapter profile, and base skewing
 	int xmax = -1;
 	float scale = 2.2;
@@ -92,8 +97,10 @@ int main (int argc, char **argv) {
 	int o_n = 0;
 	int e_n = 0;
 	bool skipb = 0;
+	char *fref[MAX_REF]; meminit(fref); 
+	int fref_n = 0;
 
-	while (	(c = getopt_long(argc, argv, "-nf0uUVSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:",NULL,NULL)) != -1) {
+	while (	(c = getopt_long(argc, argv, "-nf0uUVSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:",NULL,NULL)) != -1) {
 		switch (c) {
 			case '\1': 
 				if (!afil) 
@@ -116,6 +123,7 @@ int main (int argc, char **argv) {
 			case 'q': qthr = atoi(optarg); break;
 			case 'w': qwin = atoi(optarg); break;
 			case 'C': sampcnt = atoi(optarg); break;
+			case 'F': fref[fref_n++] = optarg; break;
 			case 'x': pctns = atof(optarg); break;
 			case 'R': rmns = false; break;
 			case 'V': printf("Revision: %d\n", atoi(strchr(SVNREV, ':')+1)); return 0; break;
@@ -977,27 +985,51 @@ void usage(FILE *f, const char *msg) {
 "required for each.  IE: -o read1.clip.q -o read2.clip.fq\n"
 "\n"
 "Options:\n"
-"	-h      This help\n"
-"	-o FIL  Output file (stats to stdout)\n"
-"	-s N.N  Log scale for clip pct to threshold (2.5)\n"
-"	-t N    %% occurance threshold before clipping (0.25)\n"
-"	-m N    Minimum clip length, overrides scaled auto (1)\n"
-"	-p N    Maximum adapter difference percentage (20)\n"
-"	-l N    Minimum remaining sequence length (15)\n"
-"	-L N    Maximum sequence length (none)\n"
-"	-k N    sKew percentage causing trimming (2)\n"
-"	-q N    quality threshold causing trimming (10)\n"
-"	-w N    window-size for quality trimming (1)\n"
-"	-f      force output, even if not much will be done\n"
-"	-0      Set all trimming parameters to zero\n"
-"	-U|u    Force disable/enable illumina PF filtering\n"
-"	-P N    phred-scale (64)\n"
-"	-x N    'N' (Bad read) percentage causing trimming (10)\n"
-"	-R      Don't remove N's from the fronts/ends of reads\n"
-"	-n      Don't clip, just output what would be done\n"
-"	-C N    Number of reads to use for subsampling (100k)\n"
-"	-S FIL  Save clipped reads to file\n"
-"	-d      Output lots of random debugging stuff\n"
+"    -h      This help\n"
+"    -o FIL  Output file (stats to stdout)\n"
+"    -s N.N  Log scale for clip pct to threshold (2.2)\n"
+"    -t N    %% occurance threshold before clipping (0.25)\n"
+"    -m N    Minimum clip length, overrides scaled auto (1)\n"
+"    -p N    Maximum adapter difference percentage (20)\n"
+"    -l N    Minimum remaining sequence length (15)\n"
+"    -L N    Maximum sequence length (none)\n"
+"    -k N    sKew percentage causing trimming (2)\n"
+"    -q N    quality threshold causing trimming (10)\n"
+"    -w N    window-size for quality trimming (1)\n"
+"    -f      force output, even if not much will be done\n"
+"    -F FIL  remove sequences that align to FIL\n"
+"    -0      Set all trimming parameters to zero\n"
+"    -U|u    Force disable/enable illumina PF filtering\n"
+"    -P N    phred-scale (auto)\n"
+"    -x N    'N' (Bad read) percentage causing trimming (10)\n"
+"    -R      Don't remove N's from the fronts/ends of reads\n"
+"    -n      Don't clip, just output what would be done\n"
+"    -C N    Number of reads to use for subsampling (100k)\n"
+"    -S FIL  Save clipped reads to file\n"
+"    -d      Output lots of random debugging stuff\n"
+"Config:\n"
+"\n"
+"Some options are best set globally, such as the aligner to use\n"
+"for filtering, these can be ENV vars, or in /etc/ea-utils.conf:\n"
+"\n"
+"Command line options, if specified, always override config vars.\n"
+"\n"
+"When uses as environment vars, they are all caps, and with\n"
+"EAUTILS_ as the prefix (IE: EAUTILS_PHRED=33)\n"
+"\n"
+"    phred           (auto)\n"
+"    sample_reads    100000\n"
+"    scale_clip_len  2.2\n"
+"    trim_skew       2\n"
+"    trim_quality    10\n"
+"    min_clip_len    0\n"
+"    min_seq_remain  15\n"
+"    max_adap_diff   20\n"
+"    cmd_align_se    bowtie -S %i -f %1\n"
+"    cmd_align_pe    bowtie -S %i -1 %1 -2 %2\n"
+"\n"
+"Command lines must return SAM formatted lines, %i is the filter FIL,\n"
+"%1 and %2 are the first and second fastq's\n"
 "\n"
 "Increasing the scale makes recognition-lengths longer, a scale\n"
 "of 100 will force full-length recognition.\n"
