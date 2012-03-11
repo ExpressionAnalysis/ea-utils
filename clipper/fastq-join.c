@@ -214,7 +214,6 @@ int main (int argc, char **argv) {
                         d=hd(fq[0].seq.s+fq[0].seq.n-i, rc.seq.s, i);
 			if (d <= mind) {
 				// squared-distance over length, probably can be proven better (like pearson's)
-				// by someone who needs to write a paper
 				int score = (1000*(d*d+1))/i;	
 				if (score < bestscore) {
 					bestscore=score;
@@ -315,7 +314,7 @@ void usage(FILE *f) {
 "-o FIL		See 'Output' below\n"
 "-v C		Verifies that the 2 files probe id's match up to char C\n"
 "		  use '/' for Illumina reads\n"
-"-p N		N-percent maximum difference (.20)\n"
+"-p N		N-percent maximum difference (20)\n"
 "-m N		N-minimum overlap (6)\n"
 "-r FIL		Verbose stitch length report\n"
 "\n"
