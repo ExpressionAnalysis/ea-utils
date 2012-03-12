@@ -42,7 +42,7 @@
 
 #include "fastq-lib.h"
 
-const char * VERSION = "1.21";
+const char * VERSION = "1.30";
 
 using namespace BamTools;
 using namespace std;
@@ -117,9 +117,9 @@ public:
 #define T_N 4
 
 
-int qualreads = 1000000;
 int dupreads = 1000000;
 bool trackdup=0;
+int basemap[255];
 int main(int argc, char **argv) {
 	const char *ext = NULL;
 	bool multi=0, newonly=0, inbam=0;
@@ -130,7 +130,6 @@ int main(int argc, char **argv) {
                 case 'd': ++debug; break;
                 case 'D': ++trackdup; break;
                 case 'B': inbam=1; break;
-                case 'b': qualreads=atoi(optarg); break;
                 case 'H': histnum=atoi(optarg); break;
                 case 'x': ext=optarg; break;
                 case 'M': newonly=1; break;
@@ -161,6 +160,23 @@ int main(int argc, char **argv) {
 
 	if (multi && !ext) 
 		ext = "stats";
+
+	char cb; int j;
+	for (cb=0;cb<256;++cb) {
+		switch(cb) {
+			case 'A': case 'a':
+				j=T_A; break;
+			case 'C': case 'c':
+				j=T_C; break;
+			case 'G': case 'g':
+				j=T_G; break;
+			case 'T': case 't':
+				j=T_T; break;
+			default:
+				j=T_N; break;
+		}
+		basemap[cb]=j;
+	}
 
 	debugout("argc:%d, argv[1]:%s, multi:%d, ext:%s\n", argc,argv[optind],multi,ext);
 	const char *p;
@@ -327,7 +343,6 @@ int main(int argc, char **argv) {
 		}
 
 		if (s.dat.mapn > 0) {
-			fprintf(o, "bsize\t%d\n", qualreads);
 			fprintf(o, "phred\t%d\n", phred);
 			fprintf(o, "forward\t%d\n", s.dat.nfor);
 			fprintf(o, "reverse\t%d\n", s.dat.nrev);
@@ -493,7 +508,7 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 	}
 
 	if (materef.size() && (materef != "=" && materef != "*" && materef != ref)) {
-		printf("disc:%s\t%s\n",materef.c_str(), ref.c_str());
+//		printf("disc:%s\t%s\n",materef.c_str(), ref.c_str());
 		dat.disc++;
 	} else {
 		if (abs(nmate) > 50000) {
@@ -501,28 +516,14 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 		}
 	}
 
-	if (dat.mapn <= qualreads) {
-		int i, j;
-		for (i=0;i<qual.length();++i) {
-			if (qual[i]>dat.qualmax) dat.qualmax=qual[i];
-			if (qual[i]<dat.qualmin) dat.qualmin=qual[i];
-			dat.qualsum+=qual[i];
-			dat.qualssq+=qual[i]*qual[i];
-			switch(seq[i]) {
-				case 'A': case 'a':
-					j=T_A; break;
-				case 'C': case 'c':
-					j=T_C; break;
-				case 'G': case 'g':
-					j=T_G; break;
-				case 'T': case 't':
-					j=T_T; break;
-				default:
-					j=T_N; break;
-			}
-			++dat.basecnt[j];
-			++dat.nbase;
-		}
+	int i, j;
+	for (i=0;i<qual.length();++i) {
+		if (qual[i]>dat.qualmax) dat.qualmax=qual[i];
+		if (qual[i]<dat.qualmin) dat.qualmin=qual[i];
+		dat.qualsum+=qual[i];
+		dat.qualssq+=qual[i]*qual[i];
+		++dat.basecnt[basemap[seq[i]]];
+		++dat.nbase;
 	}
 	if (trackdup) {
 		size_t p;
@@ -711,7 +712,7 @@ double quantile(const std::vector<int> &vec, double p) {
         int it = (int) t;
         int v=vec[it];
         if (t > (double)it) {
-                return (v + p * (vec[it+1] - v));
+                return (v + (t-it) * (vec[it+1] - v));
         } else {
                 return v;
         }
