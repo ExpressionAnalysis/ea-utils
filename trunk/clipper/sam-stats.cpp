@@ -42,7 +42,7 @@
 
 #include "fastq-lib.h"
 
-const char * VERSION = "1.30";
+const char * VERSION = "1.31";
 
 using namespace BamTools;
 using namespace std;
@@ -86,7 +86,8 @@ public:
 		int lenmin, lenmax; double lensum, lenssq;	// read length stats
 		double mapsum, mapssq;	// map quality sum/ssq 
 		double nmnz, nmsum;	// # of mismatched reads, sum of mismatch lengths 
-		int nbase, qualmax, qualmin;	// num bases samples, min/max qual 
+		long long int nbase;
+		int qualmax, qualmin;	// num bases samples, min/max qual 
 		double qualsum, qualssq;	// sum quals, sum-squared qual
 		int nrev, nfor;		// rev reads, for reads
 		double tmapb;		// number of mapped bases
@@ -119,7 +120,7 @@ public:
 
 int dupreads = 1000000;
 bool trackdup=0;
-int basemap[255];
+int basemap[256];
 int main(int argc, char **argv) {
 	const char *ext = NULL;
 	bool multi=0, newonly=0, inbam=0;
@@ -161,7 +162,7 @@ int main(int argc, char **argv) {
 	if (multi && !ext) 
 		ext = "stats";
 
-	char cb; int j;
+	int cb,j;
 	for (cb=0;cb<256;++cb) {
 		switch(cb) {
 			case 'A': case 'a':
@@ -459,7 +460,7 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 
 	++dat.n;
 
-	if (pos<=0) return;
+	if (pos<=0) return;				// not mapped
 
 	++dat.mapn;
 
@@ -478,8 +479,10 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 
 	vmapq.push_back(mapq);
 	
-	dat.nmsum += nm;
-	if (nm > 0) dat.nmnz += 1;
+	if (nm > 0) {
+		dat.nmnz += 1;
+		dat.nmsum += nm;
+	}
 	dat.del+=del;
 	dat.ins+=ins;
 
@@ -616,7 +619,7 @@ bool sstats::parse_bam(const char *in) {
 	}
 	BamAlignment al;
         while ( inbam.GetNextAlignment(al) ) {
-		int nm;
+		int nm=0;
 		al.GetTag("NM",nm);
 		int ins=0, del=0;
 		int i;
