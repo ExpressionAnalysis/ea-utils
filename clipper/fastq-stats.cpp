@@ -431,7 +431,7 @@ int main( int argc, char**argv ) {
 	}
 	if (uniq_dup && !nodup) {
 		printf("dups\t%d\n",ndups-uniq_dup);
-		printf("%%dups\t%.4f\n", ((double)(ndups-uniq_dup)/nreads)*100);
+		printf("%%dup\t%.4f\n", ((double)(ndups-uniq_dup)/nreads)*100);
 	    int uniq_dup = (int)dup_sort.size();
 	    printf("unique-dup seq\t%d\n", uniq_dup);
 		printf("min dup count\t%d\n", dup_sort.back().cnt);
