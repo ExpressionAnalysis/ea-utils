@@ -23,6 +23,15 @@ struct fq {
         line com;
         line qual;
 };
+
+class to_merge {
+public:
+	std::string sseq;
+	int cnt;
+	to_merge(std::string s, int c) {sseq=s; cnt=c;};
+	to_merge() {};
+};
+
 class ent {
 public:
 	std::string seq;
@@ -42,6 +51,9 @@ public:
         idseq(const std::string &s, const std::string &i) { seq=s; id=i; };
 };
 
+// get file extension
+const char *fext(const char *f);
+FILE *gzopen(const char *f, const char *m, bool*isgz);
 
 int read_line(FILE *in, struct line &l);                // 0=done, 1=ok, -1=err+continue
 int read_fq(FILE *in, int &lno, struct fq *fq);          // 0=done, 1=ok, -1=err+continue
@@ -52,74 +64,77 @@ int read_fa(FILE *in, int &lno, struct fq *fq);          // 0=done, 1=ok, -1=err
 void usage(FILE *f);
 double quantile(std::vector<int> vec, double p);
 #define meminit(l) (memset(&l,0,sizeof(l)))
-FILE *openordie(const char *nam, const char * mode, FILE *def, const char *errstr);
+FILE *openordie(const char *nam, const char * mode, FILE *def, const char *errstr, bool *isgz=NULL);
 
 std::string string_format(const std::string &fmt, ...);
 bool file_newer(const char *f1, const char *f2);
 std::vector<std::string> split(char* str,const char* delim);
 
 int main (int argc, char **argv) {
-        char *in = NULL;
-        char *out = NULL;
-        char *stat = NULL;
-        char *ref = NULL;
-        char *pat = NULL;
-        char *excl = NULL;
+	char *in = NULL;
+	char *out = NULL;
+	char *stat = NULL;
+	char *ref = NULL;
+	char *pat = NULL;
+	char *excl = NULL;
 
 	int targ = 1000;
 	int thr = -1;
 	int mergs = 1;
 	int mergc = 0;
 	int mergn = 0;
+	bool debug = false;
 
 	char c;
-        while ( (c = getopt (argc, argv, "-hi:o:s:p:r:n:t:x:m:")) != -1) {
-                switch (c) {
-                case '\1':
-                        if (!in)
-                                in=optarg;
-                        else {
-                                fprintf(stderr, "Unknown parameter '%s'.\n", optarg);
-                                exit(1);
-			}
-                case 'i':
-                        in = optarg; break;
-                case 'o':
-                        out = optarg; break;
-                case 's':
-                        stat = optarg; break;
-                case 'm':
-                        mergs = atoi(optarg); break;
-                case 'r':
-                        ref = optarg; break;
-                case 'p':
-                        pat = optarg; break;
-                case 'x':
-                        excl = optarg; break;
-                case 'n':
-                        targ = atoi(optarg); break;
-                case 't':
-                        thr = atoi(optarg); break;
-                case 'h':
-                        usage(stdout);
-			exit(0);
-                case '?':
-                     if (strchr("iosrn", optopt))
-                       fprintf (stderr, "Option -%c requires an argument.\n", optopt);
-                     else if (isprint(optopt))
-                       fprintf (stderr, "Unknown option `-%c'.\n", optopt);
-                     else
-                       fprintf (stderr,
-                                "Unknown option character `\\x%x'.\n",
-                                optopt);
-                     usage(stderr);
-                     return 1;
-                }
-        }
+	while ( (c = getopt (argc, argv, "-hdi:o:s:p:r:n:t:x:m:")) != -1) {
+		switch (c) {
+			case '\1':
+				if (!in)
+					in=optarg;
+				else {
+					fprintf(stderr, "Unknown parameter '%s'.\n", optarg);
+					exit(1);
+				}
+			case 'i':
+				in = optarg; break;
+			case 'o':
+				out = optarg; break;
+			case 's':
+				stat = optarg; break;
+			case 'm':
+				mergs = atoi(optarg); break;
+			case 'r':
+				ref = optarg; break;
+			case 'p':
+				pat = optarg; break;
+			case 'x':
+				excl = optarg; break;
+			case 'n':
+				targ = atoi(optarg); break;
+			case 't':
+				thr = atoi(optarg); break;
+			case 'd':
+				debug=true; break;
+			case 'h':
+				usage(stdout);
+				exit(0);
+			case '?':
+				if (strchr("iosrn", optopt))
+					fprintf (stderr, "Option -%c requires an argument.\n", optopt);
+				else if (isprint(optopt))
+					fprintf (stderr, "Unknown option `-%c'.\n", optopt);
+				else
+					fprintf (stderr,
+							"Unknown option character `\\x%x'.\n",
+							optopt);
+				usage(stderr);
+				return 1;
+		}
+	}
 
 	FILE *fin, *fout, *fstat, *fref = NULL, *fpat=NULL, *ftmp=NULL;
-
-	fin = openordie(in, "r", stdin, "Error opening file '%s': %s\n");
+	bool fingz;
+	fin = openordie(in, "r", stdin, "Error opening file '%s': %s\n", &fingz);
 	fout = openordie(out, "w", stdout, "Error writing to file '%s': %s\n");
 	fstat = openordie(stat, "w", stderr, "Error writing to file '%s': %s\n");
 
@@ -129,13 +144,13 @@ int main (int argc, char **argv) {
 	if (pat) 
 		fpat = openordie(pat, "r", NULL, "Error opening file '%s': %s\n");
 
-        google::sparse_hash_map<std::string, std::string> mmap;
-
+	google::sparse_hash_map<std::string, std::string> mmap;
 
 
 	int read_ok, nref=0, nrec = 0, lno = 0, npat=0; struct fq fq; meminit(fq);
 
 	if (fref) {
+		// read fasta referernce
 		lno = 0;
 		while (read_ok=read_fa(fref, lno, &fq)) {
 			++nref;
@@ -146,48 +161,52 @@ int main (int argc, char **argv) {
 		fprintf(fstat,"nrefseq\t%d\n", nref);
 	}
 
-        std::vector<idseq> pvec;
-        if (fpat) {
+	std::vector<idseq> pvec;
+	if (fpat) {
+		// patterns to search and exclude
 		lno = 0;
-                while (read_ok=read_fa(fpat, lno, &fq)) {
-                        ++npat;
-                        char * p=strchr(fq.id.s, ' ');
-                        if (p) *p='\0';
+		while (read_ok=read_fa(fpat, lno, &fq)) {
+			++npat;
+			char * p=strchr(fq.id.s, ' ');
+			if (p) *p='\0';
 			idseq np(fq.seq.s,fq.id.s+1);
-                        pvec.push_back(np);
-                }
-                fprintf(fstat,"npatseq\t%d\n", npat);
-        }
+			pvec.push_back(np);
+		}
+		fprintf(fstat,"npatseq\t%d\n", npat);
+	}
 
 
-        google::sparse_hash_map<std::string, int> pmap;
+	// map all sequences to the hash
+	google::sparse_hash_map<std::string, int> pmap;
 	lno = 0;
-        while (read_ok=read_fq(fin, lno, &fq)) {
+	while (read_ok=read_fq(fin, lno, &fq)) {
 		++nrec;
 //		fprintf(stderr, "read %d '%s'\n", nrec, fq.seq.s);
-		++pmap[fq.seq.s];
+		if (fq.seq.n > 1) {
+			++pmap[fq.seq.s];
+		}
 	}
 	if (thr<0) thr = (int)(log(1+nrec)/log(10));
 
-        std::vector<int> vec;
-        std::vector<int> lvec;
-        std::vector<ent> lis;
+	std::vector<int> vec;
+	std::vector<int> lvec;
+	std::vector<ent> lis;
 
 	std::string tmp;
 	if (excl) {
+		// make a temp file
 		if (in) {
 			tmp=string_format("%s.tmp.fq", in);
 		} else {
 			tmp=string_format("/tmp/mirna-quant-%d.tmp.fq", getpid());
 		}
-                ftmp = openordie(tmp.c_str(), "w", NULL, "Error opening file '%s': %s\n");
+        ftmp = openordie(tmp.c_str(), "w", NULL, "Error opening file '%s': %s\n");
 	}
 
 	if (npat > 0 || excl) {
 		// fill mmap with pattern matches, and fill tmp fastq with sequences
 		std::vector<idseq>::iterator pit;
-		int tot=0;
-        	google::sparse_hash_map<std::string,int>::iterator it = pmap.begin();
+      	google::sparse_hash_map<std::string,int>::iterator it = pmap.begin();
 		while (it != pmap.end()) {
 			if (excl) {
 				fputs("@\n", ftmp);
@@ -226,7 +245,7 @@ int main (int argc, char **argv) {
 		fprintf(stderr,"+%s\n",cmd.c_str());
 		FILE *aln;
 		if (!(aln=popen(cmd.c_str(),"r"))) {
-                        fprintf(stderr, "Can't run bowtie: $!\n", strerror(errno));
+			fprintf(stderr, "Can't run bowtie: $!\n", strerror(errno));
 			exit(1);
 		}
 		struct line l; meminit(l);
@@ -239,35 +258,49 @@ int main (int argc, char **argv) {
 				}
 			}
 		}
-		unlink(tmp);
+		unlink(tmp.c_str());
 	}	
 
 	if (mergs > 0) {	
+		if (debug) fprintf(stderr, "merge\n");
 		google::sparse_hash_map<std::string,int>::iterator it = pmap.begin();
 		google::sparse_hash_map<std::string,std::string>::iterator mit; 
 		std::string sseq;
+		std::string oseq;
+		std::vector<to_merge> merge_list;
 		while (it != pmap.end()) {
 			int i;
 			for (i=1;i<=mergs;++i) {
 				sseq = it->first;
-				sseq.erase(sseq.length()-i);
-				mit = mmap.find(sseq);
-				// merge named sequences
-				if (mit != mmap.end()) {
-					++mergn;
-					mergc+=it->second;
-					pmap[sseq]+=it->second;
-					pmap[it->first]=0;
-					break;
+				if (sseq.length() > i) {
+					oseq=sseq;
+					sseq.erase(sseq.length()-i);
+					if (debug) fprintf(stderr, "merge %s %s\n", oseq.c_str(), sseq.c_str());
+
+					// search for "close enough" ref seq
+					mit = mmap.find(sseq);
+					// merge named sequences
+					if (mit != mmap.end()) {
+						// not safe to search map while iterating!
+						if (debug) fprintf(stderr, "found: %d+%d\n", it->second, (int)pmap[oseq]);
+						++mergn;
+						mergc+=it->second;
+						merge_list.push_back(to_merge(sseq, it->second));
+						break;
+					}
 				}
 			}
 			++it;
+		}
+		int i;
+		for (i=0;i<merge_list.size();++i) {
+			pmap[merge_list[i].sseq]+=merge_list[i].cnt;
 		}
 	}
 
 	int tot = 0;
 	// build lists
-        google::sparse_hash_map<std::string,int>::iterator it = pmap.begin();
+	google::sparse_hash_map<std::string,int>::iterator it = pmap.begin();
 	while (it != pmap.end()) {
  		ent e(it->first,it->second);
 		lvec.push_back(it->first.size());
@@ -279,9 +312,9 @@ int main (int argc, char **argv) {
 		++it;
 	}
 	
-        std::sort(vec.begin(), vec.end());
-        std::sort(lvec.begin(), lvec.end());
-        std::sort(lis.begin(), lis.end(), ent::comp_cnt);
+	std::sort(vec.begin(), vec.end());
+	std::sort(lvec.begin(), lvec.end());
+	std::sort(lis.begin(), lis.end(), ent::comp_cnt);
 
 	fprintf(fstat, "reads\t%d\n", nrec);
 	fprintf(fstat, "threshold\t%d\n", thr);
@@ -366,21 +399,25 @@ double quantile(std::vector<int> vec, double p) {
 	int it = (int) t;
 	int v=vec[it];
 	if (t > (double)it) {
-		return (v + p * (vec[it+1] - v));
+		return (v + (t-it) * (vec[it+1] - v));
 	} else {
 		return v;
 	}
 }
 
-FILE *openordie(const char *nam, const char * mode, FILE *def, const char *errstr) {
+FILE *openordie(const char *nam, const char * mode, FILE *def, const char *errstr, bool *isgz) {
 	FILE *r;
-        if (!nam && def) r = def;
-        else {
-                r = fopen(nam, mode);
-                if (!r) {
-                        fprintf(stderr, errstr,nam, strerror(errno));
-                        exit(1);
-                }
+	if (!nam && def) r = def;
+	else {
+			if (isgz) {
+				r = gzopen(nam, mode, isgz);
+			} else {
+				r = fopen(nam, mode);
+			}
+			if (!r) {
+					fprintf(stderr, errstr,nam, strerror(errno));
+					exit(1);
+			}
 	}
 	return r;
 }
@@ -626,3 +663,41 @@ std::vector<std::string> split(char* str,const char* delim)
     }
     return result;
 }
+
+int gzclose(FILE *f, bool isgz) {
+    return isgz ? pclose(f) : fclose(f);
+}
+
+FILE *gzopen(const char *f, const char *m, bool*isgz) {
+    // maybe use zlib some day?
+        FILE *h;
+        if (!strcmp(fext(f),".gz")) {
+                char *tmp=(char *)malloc(strlen(f)+100);
+                if (strchr(m,'w')) {
+                        strcpy(tmp, "gzip --rsyncable > '");
+                        strcat(tmp, f);
+                        strcat(tmp, "'");
+                } else {
+                        strcpy(tmp, "gunzip -c '");
+                        strcat(tmp, f);
+                        strcat(tmp, "'");
+                }
+        h = popen(tmp, m);
+        *isgz=1;
+        free(tmp);
+        } else {
+                h = fopen(f, m);
+                *isgz=0;
+        }
+        if (!h) {
+                fprintf(stderr, "Error opening file '%s': %s\n",f, strerror(errno));
+                exit(1);
+        }
+        return h;
+}
+
+const char *fext(const char *f) {
+        const char *x=strrchr(f,'.');
+        return x ? x : "";
+}
+
