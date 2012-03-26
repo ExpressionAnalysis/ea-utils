@@ -208,10 +208,11 @@ int main (int argc, char **argv) {
 		int maxo = min(fq[0].seq.n, rc.seq.n);
 		int bestscore=INT_MAX;
 		int besto=-1;
-		for (i=mino; i < maxo; ++i) {
+		for (i=mino; i <= maxo; ++i) {
 			int mind = (pctdiff * i) / 100;
-                        int d;
-                        d=hd(fq[0].seq.s+fq[0].seq.n-i, rc.seq.s, i);
+            int d;
+            d=hd(fq[0].seq.s+fq[0].seq.n-i, rc.seq.s, i);
+			if (debug) fprintf(stderr, "hd: %d, %d\n", i, d);
 			if (d <= mind) {
 				// squared-distance over length, probably can be proven better (like pearson's)
 				int score = (1000*(d*d+1))/i;	
