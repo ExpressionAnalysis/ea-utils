@@ -865,12 +865,12 @@ int main (int argc, char **argv) {
 					ssqtrim[f][1]+=bestoff_e*bestoff_e;
 				}
 
+			} else {
+				// skip even if the original was too short
+				if (fq[f].seq.n < nkeep) 
+					skip = 1;
 			}
 		}
-
-		// skip even iff the original was too short
-		if (fq[f].seq.n < nkeep) 
-			skip = 1;
 
 		if (!skip) {
 			int f;
