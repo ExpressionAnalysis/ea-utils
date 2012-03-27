@@ -868,6 +868,10 @@ int main (int argc, char **argv) {
 			}
 		}
 
+		// skip even iff the original was too short
+		if (fq[f].seq.n < nkeep) 
+			skip = 1;
+
 		if (!skip) {
 			int f;
 			for (f=0;f<o_n;++f) {
