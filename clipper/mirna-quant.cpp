@@ -304,7 +304,7 @@ int main (int argc, char **argv) {
 	while (it != pmap.end()) {
  		ent e(it->first,it->second);
 		lvec.push_back(it->first.size());
-		if (it->second > thr) {
+		if (it->second >= thr) {
 			vec.push_back(it->second);
 			tot+=it->second;
 		}
