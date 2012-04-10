@@ -40,7 +40,7 @@ my $DEFAULT_MEM = 10000;
 my $TIMEFMT = 'command:%C\ncpu-real:%E\ncpu-user:%U\ncpu-sys:%S\nmem-max:%M\nmem-avg:%t\nctx-wait:%w\nfs-in:%I\nfs-out:%O';
 
 my ($daemon, $killjob, $editjob);
-my (%conf, %def);
+my (%conf, %def, @metrics, @labels);
 
 # defaults just run things locally, no master
 $def{config} = "/etc/grun.conf";		# config file
@@ -104,7 +104,7 @@ if ($conf{debug_memory}) {
 my $gjobid = slurp("$conf{spool}/nextid");
 
 if ($qinfo) {
-	# this is the code for grun -q
+# this is the code for grun -q
 
 	Getopt::Long::Configure qw(no_require_order no_ignore_case passthrough);
 	my %opt;
@@ -120,7 +120,7 @@ if ($qinfo) {
 	}
 	$cmd = $tmp;
 
-	# some commands default to localhost, others default to queue host... this is confusing... fix?
+# some commands default to localhost, others default to queue host... this is confusing... fix?
 
 	my @dest = $opt{hosts} ? expandnodes($opt{hosts}) : 
 		$cmd eq 'conf' ? [$conf{bind}, $conf{port}] : 
@@ -131,42 +131,42 @@ if ($qinfo) {
 	}
 
 	for my $d (@dest) {
-	my ($host, $port) = @$d;
+		my ($host, $port) = @$d;
 
-	if ($cmd eq 'file') {
-		my $cwd = cwd;
-		my @need;
-		for (@arg) {
-			next if -e $_;
-			if ($_ !~ /^\//) {
-				$_ = "$cwd/$_";	
+		if ($cmd eq 'file') {
+			my $cwd = cwd;
+			my @need;
+			for (@arg) {
+				next if -e $_;
+				if ($_ !~ /^\//) {
+					$_ = "$cwd/$_";	
 			}
 			push @need, $_;
+			}
+			sendcmd($host, $port, 'trace', 1) if ($conf{trace});
+			if (@need) {
+				my ($res, $error) = waitio({inplace=>$opt{inplace}}, $host, $port, "xcmd", 'file', @need);
+				die $error, "\n" if $error && !$opt{silent};
+				exit 1 if $error;
+			}
+			sendcmd($host, $port, 'trace', 0) if ($conf{trace});
+		} elsif ((!samehost($host,$conf{bind}) || (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|stat$/)))) {
+# this could get ugly, if called a lot, may want to make more efficient
+			sendcmd($host, $port, 'trace', 1) if ($conf{trace});
+			my ($res) = waitmsg($host, $port, "xcmd", $cmd, @arg, %opt);
+			print $res;
+			sendcmd($host, $port, 'trace', 0) if ($conf{trace});
+		} else {
+			if ($cmd eq 'stat') {
+				print shownodes(@arg);
+			}	
+			if ($cmd eq 'jobs') {
+				print showjobs(@arg);
+			}	
+			if ($cmd eq 'hist') {
+				print showhist(@arg);
+			}	
 		}
-		sendcmd($host, $port, 'trace', 1) if ($conf{trace});
-		if (@need) {
-			my ($res, $error) = waitio({inplace=>$opt{inplace}}, $host, $port, "xcmd", 'file', @need);
-			die $error, "\n" if $error && !$opt{silent};
-			exit 1 if $error;
-		}
-		sendcmd($host, $port, 'trace', 0) if ($conf{trace});
-	} elsif ((!samehost($host,$conf{bind}) || (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|stat$/)))) {
-		# this could get ugly, if called a lot, may want to make more efficient
-		sendcmd($host, $port, 'trace', 1) if ($conf{trace});
-		my ($res) = waitmsg($host, $port, "xcmd", $cmd, @arg, %opt);
-		print $res;
-		sendcmd($host, $port, 'trace', 0) if ($conf{trace});
-	} else {
-		if ($cmd eq 'stat') {
-			print shownodes(@arg);
-		}	
-		if ($cmd eq 'jobs') {
-			print showjobs(@arg);
-		}	
-		if ($cmd eq 'hist') {
-			print showhist(@arg);
-		}	
-	}
 	}
 	exit 0;
 }
@@ -178,14 +178,14 @@ if (open(IN, $conf{pid_file})) {
 }
 
 if ($killjob) {
-	# grun -k code
+# grun -k code
 	my $sig = 15;
 	my $kforce = 0;
 	Getopt::Long::Configure qw(no_require_order no_ignore_case);
-        GetOptions("signal|n=i"=>\$sig, "force"=>\$kforce) || die usage();
+	GetOptions("signal|n=i"=>\$sig, "force"=>\$kforce) || die usage();
 
 	if ($conf{trace}) {
-                sendcmd($conf{master}, $conf{master_port}, 'trace', 1);
+		sendcmd($conf{master}, $conf{master_port}, 'trace', 1);
 	}
 
 	my $exit = 0;
@@ -222,7 +222,7 @@ if ($editjob) {
 		$_=$ARGV[0];
 		for (split /,/, $_) {
 			my ($key, $val) = $_ =~ /^([^=]+)(?:=(.*))?$/;
-			my $nk = bestunique($key, qw(hold resume memory cpus state));
+			my $nk = bestunique($key, qw(hold resume memory cpus state), @metrics, @labels);
 			$key = $nk if $nk;
 			$key = 'state', $val = 'hold' if ($key eq 'hold');
 			$key = 'state', $val = 'resume' if ($key eq 'resume');
@@ -242,7 +242,7 @@ if ($editjob) {
 	my $ex = 0;
 	for my $jid (@jids) {
 		warn "Edit " . packdump(\%ed) . "\n";
-	        my ($err) = waitmsg($conf{master}, $conf{master_port}, 'jedit', $jid, %ed);
+		my ($err) = waitmsg($conf{master}, $conf{master_port}, 'jedit', $jid, %ed);
 		my $ok = ($err =~ /^Job.*edited/);
 		$err=~ s/\n$//;
 		warn "$err\n" if $ok;
@@ -271,7 +271,7 @@ $opt{wait} = 1;				# keep socket open until job is finished
 $opt{io} = 1;				# copy io back on the socket, implies wait
 
 Getopt::Long::Configure qw(require_order no_ignore_case passthrough);
-GetOptions(\%opt, "file=s", "memory|m=i", "hosts|h=s", "cpus|c=i", "io!", "wait!", "err|e=s", "out|o=s", "jobx|jobid|j=s", "verbose", "make|M", "debug|D", "env|E=s", "alert=s");
+GetOptions(\%opt, "file=s", "memory|m=i", "hosts|h=s", "cpus|c=i", "io!", "wait!", "err|e=s", "out|o=s", "jobx|jobid|j=s", "verbose", "make|M", "debug|D", "env|E=s", "alert=s", "param|p=s@");
 
 my $verbose = $opt{verbose}; delete $opt{verbose};
 my $make = $opt{make}; delete $opt{make};
@@ -374,22 +374,55 @@ if ($conf{auto_profile}) {
 	if (-e ($conf{auto_profile})) {
 		my $cmd = join ' ', @cmd;
 		# safe'ish eval, just so there aren't weird side effects
-		my ($cpu, $mem) = evalctx(slurp($conf{auto_profile}) . ";\nreturn (\$cpu, \$mem);", cmd=>$cmd, cmd=>\@cmd);
+		my ($cpu, $mem, $prof) = evalctx(slurp($conf{auto_profile}) . ";\nreturn (\$cpu, \$mem, \%prof);", cmd=>$cmd, cmd=>\@cmd);
+
+		$prof = $cpu if ref($cpu) eq 'HASH';
+
+		if ($prof && ref($prof) eq 'HASH') {
+			$prof->{memory} = $mem if defined($mem) && !ref($mem) && !$prof->{memory};
+			$prof->{cpus} = $cpu if defined($cpu) && !ref($cpu) && !$prof->{cpus};
+
+			$opt{memory}=$prof->{memory} if $prof->{memory} && !$opt{memory};
+			$opt{cpus}=$prof->{cpus} if $prof->{cpus} && !$opt{cpus};
+
+			for ((@metrics,@labels)) {
+				# as if the user entered it
+				next if !$_;
+				push @{$opt{"param"}}, "$_=" . $prof->{$_} if defined($prof->{$_});
+			}
+		} else {
+			$opt{memory}=$mem if ($mem > $opt{memory});
+			$opt{cpus}=$cpu if ($cpu > $opt{cpus});
+		}
+
 		if ($@) {
 			die "Can't run $conf{auto_profile}: $@\n";
 		}
-		$opt{memory}=$mem if ($mem > $opt{memory});
-		$opt{cpus}=$cpu if ($cpu > $opt{cpus});
 	}
 }
 
-if ($opt{memory}) {
-	if ($opt{memory} !~ /kb?$/) {
-		# default memory unit is assumed to be in MB
-		$opt{memory} *= 1000;
-		if ($opt{memory} =~ /gb?$/) {
-			$opt{memory} *= 1000;
+my %param;
+if ($opt{param}) {
+	for (@{$opt{param}}) {
+		if (/^([^=]+)=(.*)/) {
+			$param{$1} = $2; 
+		} else {
+			die "Parameter $_: should be name=value\n";
 		}
+	}
+}
+$opt{param} = \%param;
+
+# convert memory to kB
+if ($opt{memory}) {
+	if ($opt{memory} =~ /kb?$/i) {
+		# internal memory unit is kB
+	} elsif ($opt{memory} =~ /gb?$/i) {
+		# convert gB to kB
+		$opt{memory} *= 1000000;
+	} else {
+		# convert mB to kB
+		$opt{memory} *= 1000;
 	}
 }
 
@@ -421,9 +454,16 @@ $opt{user} = getpwuid($>);
 $opt{umask} = umask();
 $opt{env}->{USER} = $opt{user};
 
+if (!$opt{wait}) {
+	open STDERR, ">&STDOUT";
+}
+
 if ($verbose) {
-	printf STDERR "Memory:	%d\n", $opt{memory} ? $opt{memory} : $DEFAULT_MEM/1000;
+	printf STDERR "Memory:	%d\n", $opt{memory} ? $opt{memory}/1000 : $DEFAULT_MEM/1000;
 	printf STDERR "CPUs:	%d\n", $opt{cpus} ? $opt{cpus} : 1;
+	for ((@metrics,@labels)) {
+		printf STDERR proper($_) . ":	%s\n", $opt{param}->{$_} ? $opt{param}->{$_} : 1;
+	}
 }
 
 if ($opt{jobx}) {
@@ -481,6 +521,7 @@ if (!$info{jid}) {
 	print STDERR "Failed to submit job", "\n";
 	exit -1;
 }
+my $save_jid = $info{jid};
 
 if ($verbose) {
 	printf STDERR "Job_ID:	$info{jid}\n";
@@ -497,6 +538,12 @@ if ($opt{jobx}) {
 
 if ($opt{wait}) {
 	# wait for a job id
+
+	if (!$info{jid}) {
+		warn "Somwhow jid got lost, debug this!\n";
+		$info{jid}=$save_jid;
+	}
+
 	while (!defined($info{ip})) {
 		%info = waitmsg($conf{master}, $conf{master_port}, 'jinfo', $info{jid});
 		if ($info{error}) {
@@ -541,7 +588,7 @@ if ($opt{wait}) {
 	}
 	if ($stat) {
 		# shift... but if that doesn't get you anything, set to -1 (unknown error)
-		$stat == $stat>>8;
+		$stat = $stat>>8;
 		$stat = -1 if !$stat;
 	}
 	if ($err) {
@@ -553,10 +600,11 @@ if ($opt{wait}) {
 		}
 	}
 	unlink("$ENV{HOME}/.grun/jobx/$opt{jobx}") if $opt{jobx};
+
 	exit($stat);
 } else {
 	# aah... nicer
-	print STDOUT "Job id $info{jid}\n";
+	print STDOUT "Job_ID: $info{jid} \n" if !$verbose;
 }
 
 END {
@@ -566,23 +614,23 @@ END {
 }
 
 sub readsocks {
-	# based on ppcgid, nonforking socket code
+# based on ppcgid, nonforking socket code
 	my $ret=0;
 
-    	my ($new_readable, $new_writable, $new_error) = IO::Select->select($read_set, $write_set, $read_set, 1);
+	my ($new_readable, $new_writable, $new_error) = IO::Select->select($read_set, $write_set, $read_set, 1);
 
-	# remember: if the thing you're doing is slower than forking... fork
+# remember: if the thing you're doing is slower than forking... fork
 	foreach my $sock (@$new_readable) {
 		if ($sock == $listener) {
 			my $new_sock = $sock->accept();
 			if ($new_sock) {
-			    if ($WIN32) {
-				ioctl($new_sock, 0x8004667e, pack("I", 1));
-			    } else {
-				fcntl($new_sock, F_SETFL, O_NONBLOCK);
-			    }
-			    $read_set->add($new_sock);
-			    *$new_sock{HASH}->{time} = time();
+				if ($WIN32) {
+					ioctl($new_sock, 0x8004667e, pack("I", 1));
+				} else {
+					fcntl($new_sock, F_SETFL, O_NONBLOCK);
+				}
+				$read_set->add($new_sock);
+				*$new_sock{HASH}->{time} = time();
 			}
 		} else {
 			my $buf;
@@ -598,12 +646,12 @@ sub readsocks {
 					close_sock($sock);
 				} elsif ($resp[0] eq $SOCK_WAIT) {
 					xlog("debug", "Setting $sock to wait mode\n") if $conf{trace};
-					# leave it open, and in the read-list
+# leave it open, and in the read-list
 				} elsif ($resp[0] eq $SOCK_RAW) {
 					*$sock{HASH}->{resp} = $resp[1];
 					$write_set->add($sock);
 				} elsif ($resp[0] eq $SOCK_FILE) {
-					# read from one or more files, and send them through the socket
+# read from one or more files, and send them through the socket
 					xlog("debug", "Got a file request [@resp]\n") if $conf{trace};
 					*$sock{HASH}->{file} = [splice(@resp, 1)];
 					$write_set->add($sock);
@@ -613,7 +661,7 @@ sub readsocks {
 					$write_set->add($sock);
 				}
 			} else {
-				# append to growing message
+# append to growing message
 				if ($bytes_read == 0) {
 					xlog("debug", "Closing $sock after BR=0\n") if $conf{trace};
 					close_sock($sock);
@@ -625,7 +673,7 @@ sub readsocks {
 		$ret = 1;
 	}
 
-    	foreach my $sock ($write_set->can_write(0)) {
+	foreach my $sock ($write_set->can_write(0)) {
 		if (!*$sock{HASH}->{resp} && *$sock{HASH}->{file}) {
 			if (*$sock{HASH}->{io}) {
 				*$sock{HASH}->{resp} = '';
@@ -638,7 +686,7 @@ sub readsocks {
 			if (!*$sock{HASH}->{io}) {
 				my $file = splice(@{*$sock{HASH}->{file}}, 0, 1);
 				while (-d $file) {
-					# requests for directories are, for now, summarily ignored
+# requests for directories are, for now, summarily ignored
 					$file = splice(@{*$sock{HASH}->{file}}, 0, 1);
 				}
 				if ($file) {
@@ -660,7 +708,7 @@ sub readsocks {
 			}
 		}
 
-    		if (*$sock{HASH}->{close}) {
+		if (*$sock{HASH}->{close}) {
 			xlog("debug", "Closing $sock after close flag\n") if $conf{trace};
 			close_sock($sock);
 		} elsif (length(*$sock{HASH}->{resp})) {
@@ -711,14 +759,14 @@ sub process_message {
 	return ('error'=>$@) if ($@);
 
 	if ($cmd eq 'xcmd') {
-		# these commands 'query or interfere' with normal running of the server 
-		# they are initiated by a user	
-		# they are limped together like this for basically no reason
+# these commands 'query or interfere' with normal running of the server 
+# they are initiated by a user	
+# they are limped together like this for basically no reason
 
 		my $ip = $sock->peerhost();
 
 		if ($args[0] eq 'relo') {
-			# reread config... maybe rebind stuff too
+# reread config... maybe rebind stuff too
 			xlog("note", "Reload from remote command ($ip)");
 			init();
 			return 'ok';
@@ -753,61 +801,62 @@ sub process_message {
 			return "Error: unknown xcmd '$args[0]'";	
 		}
 	} elsif ($cmd eq 'trace') {
-		# turn tracing on... should be 'session' oriented but too lazy for now
+# turn tracing on... should be 'session' oriented but too lazy for now
 		if ($conf{trace} <= 1) {
 			$conf{trace} = 0+$args[0];
 		}
 		return ();
 	} elsif ($cmd eq 'node') {
-		# this is the 'node ping'
+# this is the 'node ping'
 		if (ref($args[0]) eq 'HASH') {		# bit of validation
 			my $ip = $sock->peerhost();	# store info in a file, for fun
-			my $file = "$conf{spool}/nodes/$ip.reg";
+				my $file = "$conf{spool}/nodes/$ip.reg";
 			if (!$ip) {
 				xlog("error", "Socket has no ip?");
 			}
 			open(F, ">$file") || return("Error: can't create $file : $!");
 			print F $data;
 			close F;
-			# also stick in memory
+# also stick in memory
 			my $node = $args[0];
 			if (!$nodes{$ip}) {
 				xlog("note", "Registering node $ip:$node->{port} $node->{hostname}");
 			}
 			$nodes{$ip} = $args[0];
 			$nodes{$ip}->{ip} = $ip;
-			# save execution node ping time for diagnostic (times out of sync or very slow transmission, etc)
+# save execution node ping time for diagnostic (times out of sync or very slow transmission, etc)
 			$nodes{$ip}->{ex_ping} = $nodes{$ip}->{ping};
 			$nodes{$ip}->{ping} = time();
 		} else {
 			return "Error: invalid node registration info";	
 		}
 		return ();
-        } elsif ($cmd eq 'jedit') {
+	} elsif ($cmd eq 'jedit') {
 		my ($jid, %ed) = @args;
 		if (!$jid || !%ed) {
-                	xlog("error", "Invalid edit request (@args)");
-                	return "Invalid edit request (@args)\n";
+			xlog("error", "Invalid edit request (@args)");
+			return "Invalid edit request (@args)\n";
 		} elsif (! -e "$conf{spool}/jobs/$jid") {
-                        if (! -e "$conf{spool}/jobs/$jid.ip") {
-                                xlog("error", "Job $jid not found");
-                                return "Job $jid not found";
-                        } else {
-                                my $ip = slurp("$conf{spool}/jobs/$jid.ip");
-                                # tell client to send an 'xedit' to the running node
-                                return "Forward $ip:" . $nodes{$ip}->{port};
-                        }
-                } else {
+			if (! -e "$conf{spool}/jobs/$jid.ip") {
+				xlog("error", "Job $jid not found");
+				return "Job $jid not found";
+			} else {
+				my $ip = slurp("$conf{spool}/jobs/$jid.ip");
+# tell client to send an 'xedit' to the running node
+# needed only for certain edits....think about this
+#                                return "Forward $ip:" . $nodes{$ip}->{port};
+			}
+		} else {
 			my $ref = $safe->reval(slurp("$conf{spool}/jobs/$jid"));
 			for my $key (keys(%ed)) {
 				$ref->[0]->{$key} = $ed{$key};
 			}
 			burp("$conf{spool}/jobs/$jid.jedit", packref($ref));
 			rename("$conf{spool}/jobs/$jid.jedit", "$conf{spool}/jobs/$jid");
-                        return "Job $jid edited\n";
-                }
-        } elsif ($cmd eq 'jkill') {
-		# this is the 'job kill command'
+			return "Job $jid edited\n";
+		}
+	} elsif ($cmd eq 'jkill') {
+# this is the 'job kill command'
 		my ($jid, $force) = @args;
 
 		if (! -e "$conf{spool}/jobs/$jid") {
@@ -816,8 +865,8 @@ sub process_message {
 				unlink "$conf{spool}/jobs/$jid";
 				return "Job $jid not running";
 			} else {
-				# send xabort to correct node
-                                my $ip = slurp("$conf{spool}/jobs/$jid.ip");
+# send xabort to correct node
+				my $ip = slurp("$conf{spool}/jobs/$jid.ip");
 				if (!$ip) {
 					xlog("error", "Job $jid empty ip!");
 					unlink "$conf{spool}/jobs/$jid";
@@ -841,49 +890,49 @@ sub process_message {
 			return "Job $jid aborted";
 		}
 	} elsif ($cmd eq 'jstat') {
-		# sent by the execution node to say what the status of a job is
+# sent by the execution node to say what the status of a job is
 		my %opts = @args;
 		if ($opts{id}) {
 			my $ip = $sock->peerhost();	# should match the ip from jmine (see above how dumb this is)
-			# temporarily added to recover from errors, but maybe make this allowed for real?
-			# any harm in trying to recover from false orphans?
-			#
-			#if (! -e "$conf{spool}/jobs/$opts{id}:$ip.run") {
-			#	
-			#	if (-e "$conf{spool}/jhist/0/$opts{id}") {
-			#		burp("$conf{spool}/jobs/$opts{id}:$ip.run", slurp("$conf{spool}/jhist/0/$opts{id}"));
-			#	}
-                        #       if (! -e "$conf{spool}/jobs/$opts{id}.ip" ) {
-			#		burp("$conf{spool}/jobs/$opts{id}.ip",$ip);
-			#	}
-			#}
-			if (! -e "$conf{spool}/jobs/$opts{id}:$ip.run") {
-                                my $should = slurp("$conf{spool}/jobs/$opts{id}.ip");
-				
-				if (!$should) {
-					xlog("error", "Got a report ($opts{status},$opts{jrun}) for job $opts{id} from $ip, which has no $conf{spool}/jobs/$opts{id}.ip");
-				} else {
-					if ($opts{pid}<0) {
-						xlog("error", "Orphaned job report $opts{id}");
-						$ip=$should if !$ip;
+# temporarily added to recover from errors, but maybe make this allowed for real?
+# any harm in trying to recover from false orphans?
+#
+#if (! -e "$conf{spool}/jobs/$opts{id}:$ip.run") {
+#	
+#	if (-e "$conf{spool}/jhist/0/$opts{id}") {
+#		burp("$conf{spool}/jobs/$opts{id}:$ip.run", slurp("$conf{spool}/jhist/0/$opts{id}"));
+#	}
+#       if (! -e "$conf{spool}/jobs/$opts{id}.ip" ) {
+#		burp("$conf{spool}/jobs/$opts{id}.ip",$ip);
+#	}
+#}
+				if (! -e "$conf{spool}/jobs/$opts{id}:$ip.run") {
+					my $should = slurp("$conf{spool}/jobs/$opts{id}.ip");
+
+					if (!$should) {
+						xlog("error", "Got a report ($opts{status},$opts{jrun}) for job $opts{id} from $ip, which has no $conf{spool}/jobs/$opts{id}.ip");
 					} else {
-						if (!($ip eq $should)) {
-							xlog("error", "Got a report ($opts{status},$opts{jrun}) for job $opts{id} from $ip, should be $should");
+						if ($opts{pid}<0) {
+							xlog("error", "Orphaned job report $opts{id}");
+							$ip=$should if !$ip;
 						} else {
-							xlog("error", "Got a report ($opts{status},$opts{jrun}) for job $opts{id}, but there's no $opts{id}:$ip.run file");
-							burp("$conf{spool}/jobs/$opts{id}:$ip.run","[{},'<unknown>']");
+							if (!($ip eq $should)) {
+								xlog("error", "Got a report ($opts{status},$opts{jrun}) for job $opts{id} from $ip, should be $should");
+							} else {
+								xlog("error", "Got a report ($opts{status},$opts{jrun}) for job $opts{id}, but there's no $opts{id}:$ip.run file");
+								burp("$conf{spool}/jobs/$opts{id}:$ip.run","[{},'<unknown>']");
+							}
 						}
 					}
 				}
-			}
 			if ($opts{jrun}) {
-				# just a ping
+# just a ping
 				xlog("error", "Oh, i'm still alive $opts{id} from $ip") 
 					if $opts{trace} || $conf{trace};
 				touch("$conf{spool}/jobs/$opts{id}:$ip.run")
 					if -e "$conf{spool}/jobs/$opts{id}:$ip.run";
 			} elsif (defined $opts{status}) {
-				# job is done
+# job is done
 				my $jhist = slurp("$conf{spool}/jobs/$opts{id}:$ip.run");
 				my $status = 0+$opts{status};
 
@@ -894,7 +943,7 @@ sub process_message {
 
 				my %stat = %opts;
 				delete $stat{status};	# don't repeat info in the history file
-				delete $stat{id};
+					delete $stat{id};
 
 				xlog("debug", "Writing history for $opts{id} " . packref(\%stat));
 				open(ST, ">" . jhistpath($opts{id}));
@@ -910,19 +959,19 @@ sub process_message {
 			} else {
 				xlog("error", "Got a report for a job $opts{id} with no status info");
 			}
-			# return ack even if not exists
+# return ack even if not exists
 			return ('dack', pid=>$opts{pid}, jrun=>$opts{jrun});	
 		}
-        } elsif ($cmd eq 'dack') {
-		# ackknowledge receipt of status signal, so you don't have to do it again
-                my %opts = @args;
-                if ($opts{pid}) {
+	} elsif ($cmd eq 'dack') {
+# ackknowledge receipt of status signal, so you don't have to do it again
+		my %opts = @args;
+		if ($opts{pid}) {
 			if (!$opts{jrun}) {
-				# stop tracking this pid
+# stop tracking this pid
 				my $info = gunpack(slurp("$conf{spool}/pids/$opts{pid}"));
 				unlink("$conf{spool}/pids/$opts{pid}");
 				if (!$info->{wait}) {
-					# nobody asked for the output, so don't keep it
+# nobody asked for the output, so don't keep it
 					unlink("$conf{spool}/jpids/$info{id}");
 					unlink("$conf{spool}/pids/$opts{pid}.stat");
 					unlink("$conf{spool}/stdio/$opts{pid}.err");
@@ -945,11 +994,11 @@ sub process_message {
 			$err="User $opts->{user} is unknown on this machine, not executing";
 		}
 
-		# expecting someone to come pick up output?
+# expecting someone to come pick up output?
 		$io_wait{$opts->{id}}->{type} = 'stat' if $opts->{wait};	# status wait
-		$io_wait{$opts->{id}}->{type} = 'io' if $opts->{io};		# io wait
+			$io_wait{$opts->{id}}->{type} = 'io' if $opts->{io};		# io wait
 
-		my $pid;
+			my $pid;
 
 		if ($conf{wrap}) {
 			@cmd = ($conf{wrap}, @cmd);
@@ -969,13 +1018,13 @@ sub process_message {
 			if (! defined $pid) {
 				$err = "Can't fork";
 			} else {
-				# restore signal to default ... regular kill
+# restore signal to default ... regular kill
 				$SIG{INT} = undef;
 				$SIG{TERM} = undef;
 				$ENV{USER} = $opts->{user};
 
-				# kill me with a negative number, all kids die too
-				# kill my parent.... i stay alive, and my IO is still ready to go
+# kill me with a negative number, all kids die too
+# kill my parent.... i stay alive, and my IO is still ready to go
 				POSIX::setsid();
 
 				my $ok=1;	
@@ -997,7 +1046,7 @@ sub process_message {
 						$ok&&=open(STDOUT, ">$conf{spool}/stdio/$$.out");
 					}
 				} else {
-					# save disk and time, i never want i/o
+# save disk and time, i never want i/o
 					if (!$opts->{err}) {
 						$ok&&=open(STDERR, ">/dev/null");
 					}
@@ -1005,17 +1054,17 @@ sub process_message {
 						$ok&&=open(STDOUT, ">/dev/null");
 					}
 				}
-			
+
 				if (!$ok) {
 					xlog("error", "Error opening i/o files : $!\n");
 				}	
 
-				# copy in the umask & the environment
+# copy in the umask & the environment
 				umask $opts->{umask};
 				for (keys(%{$opts->{env}})) {
 					$ENV{$_}=$opts->{env}->{$_};
 				}
-			
+
 				for (keys(%{$opts})) {
 					next if ref($opts->{$_});
 					$ENV{"_GRUN_OPT_$_"} = $opts->{$_};
@@ -1030,35 +1079,35 @@ sub process_message {
 					if ($gid) {
 						$) = $gid;
 						$( = $gid;
-					}
-					$> = $uid;
-					$< = $uid;
-					if ($opts->{cwd}) {
-						if (!chdir($opts->{cwd})) {
-							$err = "Can't cd to $opts->{cwd} : $!";
-							$ret = 103;
-						}
-					}
-				};
+								}
+								$> = $uid;
+								$< = $uid;
+								if ($opts->{cwd}) {
+								if (!chdir($opts->{cwd})) {
+								$err = "Can't cd to $opts->{cwd} : $!";
+								$ret = 103;
+								}
+								}
+								};
 
-				if (!$err && $@) {
-					$ret = 102;
-					$err = "Error setting uid to $uid: $@\n";
-				}
-				if (!$err) {
-					if ($cmd[0] =~ / /) {
-						@cmd = ("bash", "-c", @cmd);
-					}
-					exec("/usr/bin/time", "-f", $TIMEFMT, "-o", $tfile, @cmd);
-					printf STDERR "Can't exec $cmd[0] : $!\n";	
-					exit 101;
-				} else {
-					printf STDERR "$err\n";	
-					exit $ret;
-				}
-				# special exit code 101 means couldn't run the command
-				close STDOUT; 
-				close STDERR; 
+								if (!$err && $@) {
+								$ret = 102;
+								$err = "Error setting uid to $uid: $@\n";
+								}
+								if (!$err) {
+								if ($cmd[0] =~ / /) {
+								@cmd = ("bash", "-c", @cmd);
+								}
+								exec("/usr/bin/time", "-f", $TIMEFMT, "-o", $tfile, @cmd);
+								printf STDERR "Can't exec $cmd[0] : $!\n";	
+								exit 101;
+								} else {
+									printf STDERR "$err\n";	
+									exit $ret;
+								}
+# special exit code 101 means couldn't run the command
+								close STDOUT; 
+								close STDERR; 
 			}
 		}
 
@@ -1069,7 +1118,7 @@ sub process_message {
 		}
 
 		if ($err) {
-			# fake it
+# fake it
 			$pid = 'e' . $opts->{id};
 			xlog("note", "Error $err with job $opts->{id}");
 		}
@@ -1093,7 +1142,7 @@ sub process_message {
 			}
 		}
 	} elsif ($cmd eq 'xclean') {
-		# cleanup, i got everything
+# cleanup, i got everything
 		my ($jid) = @args;
 		my $pid = slurp("$conf{spool}/jpids/$jid");
 		if ($pid > 1) {
@@ -1101,13 +1150,13 @@ sub process_message {
 		} else {
 			xlog("error", "Got a cleanup for $jid which doesn't exist");
 		}
-        } elsif ($cmd eq 'xabort') {
-                # kill job
-                my ($jid, $sig) = @args;
-                my $pid = slurp("$conf{spool}/jpids/$jid");
+	} elsif ($cmd eq 'xabort') {
+# kill job
+		my ($jid, $sig) = @args;
+		my $pid = slurp("$conf{spool}/jpids/$jid");
 		if ($pid > 1) {
 			$sig = 2 if !$sig;
-			# perl kill didn't work!
+# perl kill didn't work!
 #			my $ok = system("kill", "-$sig", "-$pid");
 			my $ok = kill($sig, -$pid);
 			xlog("note", "Kill ($sig) job $jid (pgrp:$pid), return: $ok");
@@ -1125,59 +1174,59 @@ sub process_message {
 		}
 	} elsif ($cmd eq 'xio') {
 		my ($jid) = @args;
-                my $pid = slurp("$conf{spool}/jpids/$jid");
-		# someone has showed recent interest in this one
+		my $pid = slurp("$conf{spool}/jpids/$jid");
+# someone has showed recent interest in this one
 		if ($pid > 1) {
 			touch("$conf{spool}/jpids/$jid");
 			$io_wait{$jid}->{type} = 'io';
 			$io_wait{$jid}->{sock} = $sock;
 			$io_wait{$jid}->{time} = time();		# toss this entry if it gets old
-			return ($SOCK_WAIT);				# leave socket open for response
+				return ($SOCK_WAIT);				# leave socket open for response
 		} else {
 #		print "IOWAIT: " . Dumper \%io_wait;
 			xlog("error", "Wait xio for job ($jid) which isn't running anymore, and there's no data for it.");
 			return ($SOCK_RAW=>"name:fake.err\nlen:14\n\nJob not found\nname:fake.out\nlen:0\n\nname:fake.stat\nlen:4\n\n-102");
 		}
-        } elsif ($cmd eq 'xstat') {
-                my ($jid) = @args;
+	} elsif ($cmd eq 'xstat') {
+		my ($jid) = @args;
 		my $pid = slurp("$conf{spool}/jpids/$jid");
-		# xstat means you don't want i/o, just status... 
+# xstat means you don't want i/o, just status... 
 		unlink  "$conf{spool}/stdio/$pid.out";
 		$io_wait{$jid}->{type} = 'stat';
 
 		$io_wait{$jid}->{sock} = $sock;
 		$io_wait{$jid}->{time} = time();		# toss this entry if it gets old
-		if ($pid <= 1) {
-			xlog("error", "Wait xstat for job ($jid) which isn't running");
-			return (-102, "Job $jid not found")
-		}
+			if ($pid <= 1) {
+				xlog("error", "Wait xstat for job ($jid) which isn't running");
+				return (-102, "Job $jid not found")
+			}
 		return ($SOCK_WAIT);				# leave socket open for response
 	} elsif ($cmd eq 'jinfo') {				# tell me what host a job is on
-                my ($jid) = @args;
-                if (!$jid || ! -e "$conf{spool}/jobs/$jid") {
-                        if (! -e "$conf{spool}/jobs/$jid.ip") {
+		my ($jid) = @args;
+		if (!$jid || ! -e "$conf{spool}/jobs/$jid") {
+			if (!$jid || ! -e "$conf{spool}/jobs/$jid.ip") {
 				my $ip = $sock->peerhost();
-                                xlog("error", "Job '$jid' does not exist from $ip");
-                                return (error=>"Job $jid does not exist.", jid=>-1, ip=>$conf{master}, port=>$conf{master_port});
-                        } else {
-                                my $ip = slurp("$conf{spool}/jobs/$jid.ip");
+				xlog("error", "Job '$jid' does not exist from $ip") if $jid;
+				return (error=>"Job $jid does not exist.", jid=>-1, ip=>$conf{master}, port=>$conf{master_port});
+			} else {
+				my $ip = slurp("$conf{spool}/jobs/$jid.ip");
 				if (!$ip) {
 					xlog("error", "No ip for job $jid");
 				}
-                                # route to correct node
+# route to correct node
 				return (jid=>$jid, ip=>$ip, port=>$nodes{$ip}->{port}, hostname=>$nodes{$ip}->{hostname});
-                        }
-                } else {
+			}
+		} else {
 			$run_wait{$jid}->{sock} = $sock;
 			$run_wait{$jid}->{type} = 'start';      # socket waits for execution start
-			return ($SOCK_WAIT);                    # leave socket open for response
+				return ($SOCK_WAIT);                    # leave socket open for response
 		}
 	} elsif ($cmd eq 'run') {
-		# user command, returns jid=>jobid [, error=>string]
+# user command, returns jid=>jobid [, error=>string]
 		if (!$conf{services}->{queue}) {
 			return (error=>"No queue service running on this host");	
 		} else {
-			# get rid of the 'run' at the front of the array
+# get rid of the 'run' at the front of the array
 			return(error=>"Network data format error ($data)") 
 				unless $data =~ s/^\['run',/[/;
 
@@ -1185,15 +1234,15 @@ sub process_message {
 			my $time = time();
 			++$gjobid;
 
-			# no half-written id's
+# no half-written id's
 			burp("$conf{spool}/nextid.tmp", $gjobid);
 			rename "$conf{spool}/nextid.tmp", "$conf{spool}/nextid";
 
-			# the job file
+# the job file
 			my $jid = $gjobid;
 			my $file = "$conf{spool}/jobs/$jid";
 
-			# stick the host the job came from and the start time in there.
+# stick the host the job came from and the start time in there.
 			my $ip = $sock->peerhost();
 			substr($data,0,2) = "[{time=>" . $time . "," . "from=>'" . $ip . "',";
 
@@ -1236,7 +1285,6 @@ sub schedule {
 	}
 
 	# pass 1 : deduct resources for running jobs
-	my %alloc;
         opendir(D,"$conf{spool}/jobs");
         my @D = sort {(.5-rand()) cmp (.5-rand())} readdir(D);
         closedir(D);
@@ -1256,6 +1304,9 @@ sub schedule {
 		# this should be config, min requirements
 		$job->{cpus} = 1 if $job->{cpus} == 0;
 		$job->{memory} = $DEFAULT_MEM if $job->{memory} == 0;
+		for ((@metrics, @labels)) {
+			$job->{$_} = $conf{"default-$_"} if !$job->{$_} && $conf{"default-$_"};
+		}
 
 		# job is running, make sure it's resources are somewhat locked
 		($jid) = $jid =~ m/^(\d+)/;
@@ -1266,7 +1317,10 @@ sub schedule {
 			my $ip = slurp("$conf{spool}/jobs/$jid.ip");
 			if ($ip =~ /\d/ && $nodes{$ip} && $nodes{$ip}->{ip}) {
 				$nodes{$ip}->{a_cpus} += $job->{cpus};
-				$alloc{$ip}->{a_memory} += $job->{memory};
+				$nodes{$ip}->{a_memory} += $job->{memory};
+				for (@metrics) {
+					$nodes{$ip}->{"a_$_"} += $job->{param}->{$_};
+				}
 			}
 		}
 	}
@@ -1319,9 +1373,21 @@ sub schedule {
 			#xlog("debug", "Sched $n->{ip}: j:$job->{cpus}?$n->{avail}>c:$cpus , j:$job->{memory}?$n->{mem}>m:$mem");
 
 			if ($n->{ping} > (time()-$conf{ping_secs}*3)) {
+				my $ok = 1;
+				for (@metrics) {
+					if (($n->{"param-$_"} - $n->{"a_$_"}) < $job->{param}->{$_}) {
+						$ok =0;
+					}
+				}
+                for (@labels) {
+                    if (!($n->{"param-$_"} eq $job->{param}->{$_})) {
+                        $ok =0;
+                    }
+                }
 				if ( ($mem >= $job->{memory}) &&
 				     (($cpus+$conf{idle_load}) >= $job->{cpus}) && 
-				     ($n->{disk} >= $job->{disk}) 
+				     ($n->{disk} >= $job->{disk}) &&
+					 ($ok)
 				   ) {
 					next if $job->{hosts} && $job->{hosts} !~ /$n->{hostname}/;
 
@@ -1509,6 +1575,10 @@ sub srvexec {
 		$conf{node}->{hostname} = $conf{hostname};
 		$conf{node}->{kernel} = `uname -rv`; chomp $conf{node}->{kernel};
 		$conf{node}->{arch} = `uname -m`; chomp $conf{node}->{arch};
+
+		for ((@labels,@metrics)) {
+			$conf{node}->{"param-$_"} = $conf{"param-$_"};
+		}
 		
 		$conf{registered} = 1;
 		if (!xsend("node", $conf{node})) {
@@ -1713,11 +1783,11 @@ sub gpack {
 		$_[$i+1] =~ s/\n/ /g;
 		$msg .= $_[$i] . ":" . $_[$i+1] . "\n";
 	}
-        return $msg;
+	return $msg;
 }
 
 sub funpack {
-        my ($fil, $dat) = @_;
+	my ($fil, $dat) = @_;
 	return gunpack(slurp($fil), $dat);
 }
 
@@ -1725,20 +1795,20 @@ sub gunpack {
 	my ($msg, $dat) = @_;
 	$dat = {} if !$dat;
 	for (split(/\n/, $msg)) {
-                my ($k, $v) = m/^\s*([^:]+)?\s*:\s*(.*?)\s*$/;
-                $k = lc($k);
+		my ($k, $v) = m/^\s*([^:]+)?\s*:\s*(.*?)\s*$/;
+		$k = lc($k);
 		$dat->{$k}=$v;
 	}
 	return $dat;
 }
 
 sub readconf {
-        %conf = %def;
+	%conf = %def;
 
 	_readconf("$conf{config}");
 
-        # defines happen at the end so defaults can get unpacked
-        for (keys %conf) {
+	# defines happen at the end so defaults can get unpacked
+	for (keys %conf) {
 		next if ref $conf{$_};
 		if ($_ eq 'match' || $_ =~ /^label/) {
 			# match rules are evaluated during matching, but reval now just to test
@@ -1754,11 +1824,20 @@ sub readconf {
 			$@='';
 		} elsif ( ! ($conf{$_} =~ s/^\{(.*)\}$/eval($1)/gei) ) {
 			# evaluate simple inline vars at configure-time
-                	$conf{$_} =~ s/\$([\w-]+)/$conf{lc($1)}?$conf{lc($1)}:$1/gei;
+			$conf{$_} =~ s/\$([\w-]+)/$conf{lc($1)}?$conf{lc($1)}:$1/gei;
 		}
-        }
+		if ($_=~ /^param-(.*)/) {
+			my $nm=$1;
+			# evaluates to the value for that param... if numeric is a "metric" otherwise is a "label"
+			if ($conf{$_} =~ /^[\d.]+$/) {
+				push @metrics, $nm;
+			} else {
+				push @labels, $nm;
+			}
+		}
+	}
 
-        # reorganize some conf vars into a hash
+	# reorganize some conf vars into a hash
 	for my $k (qw(services log_types)) {
 		my $v;
 		$v = $conf{$k};
@@ -1994,12 +2073,16 @@ sub unpackcmd {
 sub _sendcmd {
 	my ($host, $port, @cmd) = @_;
 	my $xcmd = packcmd(@cmd);
-        my $sock = IO::Socket::INET->new(Proto=>"tcp",PeerPort=>$port,PeerAddr=>$host, Timeout=>5);
-        if (!$sock) {
-                xlog("error",$@="Can't connect to $host:$port", Carp::longmess());
+	my $sock = IO::Socket::INET->new(Proto=>"tcp",PeerPort=>$port,PeerAddr=>$host, Timeout=>5);
+	if (!$sock) {
+		sleep(1);
+		$sock = IO::Socket::INET->new(Proto=>"tcp",PeerPort=>$port,PeerAddr=>$host, Timeout=>5);
+	}
+	if (!$sock) {
+		xlog("error",$@="Can't connect to $host:$port", Carp::longmess());
 		return undef;
-        }
-        if ($sock->send($xcmd)) {
+	}
+	if ($sock->send($xcmd)) {
 		return $sock;
 	}
 }
@@ -2352,17 +2435,17 @@ sub showjobs {
 				s/^\s+//g;
 				s/\n\s*/;/g;
 			}
-                        $job->{jid} = $jid;
-                        $job->{stat} = $stat;
-                        $job->{cpus} = 1 if ! $job->{cpus};
-                        $job->{memory} = $DEFAULT_MEM/1000 if ! $job->{memory};
-                        $job->{cmd} = join(' ', @cmd);
-                        if ($opt{long}) {
-                                $opt{fmt} = '----------\n';
-                                for(sort(keys(%$job))) {
-                                        $opt{fmt} .= "$_=" . $job->{$_} . '\n';
-                                }
-                        }
+			$job->{jid} = $jid;
+			$job->{stat} = $stat;
+			$job->{cpus} = 1 if ! $job->{cpus};
+			$job->{memory} = $DEFAULT_MEM/1000 if ! $job->{memory};
+			$job->{cmd} = join(' ', @cmd);
+			if ($opt{long}) {
+					$opt{fmt} = '----------\n';
+					for(sort(keys(%$job))) {
+							$opt{fmt} .= "$_=" . $job->{$_} . '\n';
+					}
+			}
 			if ($opt{dump}) {
 				$r .= packdump($job) . "\n";
 			} else {
@@ -2673,3 +2756,10 @@ sub kill_job {
         }
 	return $err;
 }
+
+sub proper {
+	my $x = shift;
+	$x=~ s/\b(\S)/uc($1)/eg;
+	return $x;
+}
+
