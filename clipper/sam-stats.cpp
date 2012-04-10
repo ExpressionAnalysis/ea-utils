@@ -49,6 +49,8 @@ using namespace std;
 
 void usage(FILE *f);
 
+#define MAX_MAPQ 300
+
 //#define max(a,b) (a>b?a:b)
 //#define min(a,b) (a<b?a:b)
 #define meminit(l) (memset(&l,0,sizeof(l)))
@@ -63,6 +65,7 @@ int debug=0;
 int errs=0;
 extern int optind;
 int histnum=30;
+bool isbwa=false;
 /// if we use this a lot may want to make it variable size
 class scoverage {
 public:
@@ -72,9 +75,38 @@ public:
 	vector <int> dist;
 };
 
+// sorted integer bucket ... good for ram, slow to access
+class ibucket {
+public:
+	int tot;
+	vector<int> dat;
+	ibucket(int max) {dat.resize(max+1);tot=0;}
+	int size() const {return tot;};
+
+	int operator[] (int n) const {
+		assert(n < size());
+		int i; 
+		for (i=0;i<dat.size();++i) {
+			if (n < dat[i]) {
+				return i;
+			}
+			n-=dat[i];
+		}
+	}
+
+	void push(int v) {
+		assert(v<dat.size());
+		++dat[v];
+		++tot;
+	}
+};
+
+double quantile(const ibucket &vec, double p);
+
 class sstats {
 public:
-	sstats() {
+	ibucket vmapq;			// all map qualities
+	sstats() : vmapq(MAX_MAPQ) {
 		memset((void*)&dat,0,sizeof(dat));
 		covr.set_empty_key("-");
 	}
@@ -98,7 +130,6 @@ public:
 		int disc_pos;
 		int dupmax;		// max dups found
 	} dat;
-	vector<int> vmapq;		// all map qualities
 	vector<int> visize;		// all insert sizes
 	google::dense_hash_map<std::string, scoverage> covr;	// # mapped per ref seq
 	google::sparse_hash_map<std::string, int> dups;		// alignments by read-id (not necessary for some pipes)
@@ -117,6 +148,7 @@ public:
 #define T_T 3
 #define T_N 4
 
+void build_basemap();
 
 int dupreads = 1000000;
 bool trackdup=0;
@@ -162,31 +194,21 @@ int main(int argc, char **argv) {
 	if (multi && !ext) 
 		ext = "stats";
 
-	int cb,j;
-	for (cb=0;cb<256;++cb) {
-		switch(cb) {
-			case 'A': case 'a':
-				j=T_A; break;
-			case 'C': case 'c':
-				j=T_C; break;
-			case 'G': case 'g':
-				j=T_G; break;
-			case 'T': case 't':
-				j=T_T; break;
-			default:
-				j=T_N; break;
-		}
-		basemap[cb]=j;
-	}
+	
+	build_basemap();
 
 	debugout("argc:%d, argv[1]:%s, multi:%d, ext:%s\n", argc,argv[optind],multi,ext);
+
 	const char *p;
+	// for each input file
 	for (;optind < argc;++optind) {
 		sstats s;
 		const char *in = argv[optind];
 		FILE *f;
 		FILE *o=NULL;
 		bool needpclose = 0;
+
+		// decide input format
 		if (!strcmp(in,"-")) {
 			// read sam/bam from stdin
 			if (ext) {
@@ -257,6 +279,7 @@ int main(int argc, char **argv) {
 				o=stdout;
 		}
 
+		// more guessing
 		debugout("file:%s, f: %lx\n", in, (long int) f);
 		char c;
 		if (!inbam) {
@@ -268,7 +291,10 @@ int main(int argc, char **argv) {
 				continue;
 			}
 		} else 
-			c = 31;
+			c = 31;		// 31 == bam
+
+
+		// parse sam or bam as needed
 		if (c != 31) {
 			// (could be an uncompressed bam... but can't magic in 1 char)
 			if (!s.parse_sam(f)) {
@@ -285,7 +311,7 @@ int main(int argc, char **argv) {
 		}
 		if (needpclose) pclose(f); else fclose(f);
 
-		sort(s.vmapq.begin(), s.vmapq.end());
+		// sort sstats
 		sort(s.visize.begin(), s.visize.end());
 
 		int phred = s.dat.qualmin < 64 ? 33 : 64;
@@ -356,6 +382,7 @@ int main(int argc, char **argv) {
 			}
 			fprintf(o, "mapq mean\t%.4f\n", s.dat.mapsum/s.dat.mapn);
 			fprintf(o, "mapq stdev\t%.4f\n", stdev(s.dat.mapn, s.dat.mapsum, s.dat.mapssq));
+
 			fprintf(o, "mapq Q1\t%.2f\n", quantile(s.vmapq,.25));
 			fprintf(o, "mapq median\t%.2f\n", quantile(s.vmapq,.50));
 			fprintf(o, "mapq Q3\t%.2f\n", quantile(s.vmapq,.75));
@@ -477,7 +504,7 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 	dat.mapsum += mapq;
 	dat.mapssq += mapq*mapq;
 
-	vmapq.push_back(mapq);
+	vmapq.push(mapq);
 	
 	if (nm > 0) {
 		dat.nmnz += 1;
@@ -709,6 +736,20 @@ std::string string_format(const std::string &fmt, ...) {
        }
 }
 
+// R-compatible quantile code
+
+double quantile(const ibucket &vec, double p) {
+        int l = vec.size();
+        double t = ((double)l-1)*p;
+        int it = (int) t;
+        int v=vec[it];
+        if (t > (double)it) {
+                return (v + (t-it) * (vec[it+1] - v));
+        } else {
+                return v;
+        }
+}
+
 double quantile(const std::vector<int> &vec, double p) {
         int l = vec.size();
         double t = ((double)l-1)*p;
@@ -720,4 +761,24 @@ double quantile(const std::vector<int> &vec, double p) {
                 return v;
         }
 }
+
+void build_basemap() {
+	int cb,j;
+	for (cb=0;cb<256;++cb) {
+		switch(cb) {
+			case 'A': case 'a':
+				j=T_A; break;
+			case 'C': case 'c':
+				j=T_C; break;
+			case 'G': case 'g':
+				j=T_G; break;
+				case 'T': case 't':
+					j=T_T; break;
+				default:
+					j=T_N; break;
+		}
+		basemap[cb]=j;
+	}
+}	
+
 
