@@ -28,10 +28,17 @@ $in = shift @ARGV;
 
 open IN, ($in =~ /\.gz$/ ? "gunzip -c $in" : $in =~ /\.zip$/ ? "unzip -p $in" : "$in");
 while (<IN>) {
+	$gff = 2 if /^##gff-version 2/;
+	next if /^#/ && $gff;
+
 	s/\s+$//;
 	# 0-chr 1-src 2-feat 3-beg 4-end 5-scor 6-dir 7-fram 8-attr
 	my @f = split /\t/;
-	($id) = $f[8]=~ /transcript_id "([^"]+)"/;
+	if ($gff) {
+		($id) = $f[8]=~ /\bID="([^"]+)"/;
+	} else {
+		($id) = $f[8]=~ /transcript_id "([^"]+)"/;
+	}
 
 	next unless $id;
 
@@ -45,6 +52,9 @@ while (<IN>) {
 		$trans{$id}->[10] = $f[3];
 	} elsif ($f[2] eq 'stop_codon') {
 		$trans{$id}->[11] = $f[4];
+	} elsif ($f[2] eq 'miRNA') {
+		$trans{$id} = \@f if !$trans{$id};
+		push @{$exons{$id}}, \@f;
 	}
 }
 
