@@ -93,6 +93,7 @@ class count_perCycle_perQual {
 	};
 };
 
+
 void usage( FILE * f );
 double std_dev( double count , double total, double sqsum );
 double quantile( const std::vector <int> & vec, double p );
@@ -113,8 +114,9 @@ bool fastx = 0;
 char *fastx_outfile = NULL;
 bool brkdown = 0;
 char *brkdown_outfile = NULL;
-bool pacbio = 0;
-int pacbio_10K = 0;
+bool len_hist = 0;
+vector<int> vlen; //all read lengths
+char *lenhist_outfile = NULL;
 
 int main( int argc, char**argv ) {
 
@@ -122,7 +124,7 @@ int main( int argc, char**argv ) {
 	char c;
 	optind = 0;
 	char *filename = NULL;
-	while ( (c = getopt (argc, argv, "?Ddpx:b:c:w:s:h")) != -1) {
+	while ( (c = getopt (argc, argv, "?DdL:x:b:c:w:s:h")) != -1) {
 		switch (c) {
 			case 'c': cyclemax = atoi(optarg); break;
 			case 'D': ++nodup; break;
@@ -131,7 +133,7 @@ int main( int argc, char**argv ) {
 			case 's': show_max = atoi(optarg); break;
 			case 'x': fastx_outfile = optarg; ++fastx; break;
 			case 'b': brkdown_outfile = optarg; ++brkdown; break;
-			case 'p': ++pacbio; break;
+			case 'L': ++len_hist; lenhist_outfile = optarg; break;
 			case 'h': usage(stdout); return 0;
 			case '?':
 					  if (!optopt) {
@@ -199,8 +201,10 @@ int main( int argc, char**argv ) {
 		}
 		
 		total_bases += newFq.seq.n;
-		if(pacbio && newFq.seq.n >= 10000) {
-			pacbio_10K++;
+		if(len_hist) {
+			if(newFq.seq.n > vlen.size()) 
+				vlen.resize(newFq.seq.n);
+			++vlen[newFq.seq.n];
 		}
 
 		if(!fixlen) {
@@ -428,6 +432,18 @@ int main( int argc, char**argv ) {
 		fclose(myfile);
 	}
 
+	if(len_hist) {
+		FILE *myfile;
+		myfile = fopen(lenhist_outfile,"wd");
+		fprintf(myfile,"Length\tCount\n");
+		for(int len_i=0; len_i<=vlen.size(); len_i++) {
+			if(vlen[len_i]) {
+				fprintf(myfile,"%d\t%d\n", len_i,vlen[len_i]);
+			}
+		}
+		fclose(myfile);
+	}
+
 	int uniq_dup = (int)dup_sort.size();
 	if(debug) {
 		cout << endl;
@@ -468,9 +484,6 @@ int main( int argc, char**argv ) {
 	double ACGT_total  = ACGTN_count[T_A] + ACGTN_count[T_C] + ACGTN_count[T_G] + ACGTN_count[T_T];
 	printf("%%N\t%.4f\n", ((double)(nbase-ACGT_total)/nbase*100));
 	printf("Total Bases\t%.0f\n",total_bases);
-	if(pacbio) {
-		printf("Num reads of len ge 10K\t%d\n",pacbio_10K);
-	}
 } //end main method
 
 
@@ -486,7 +499,7 @@ int main( int argc, char**argv ) {
 				"x - output fastx statistics (requires an output filename)\n"
 				"    Also output base breakdown by per phred quality at every cycle.\n"
 				"    It sets cylemax to longest read length\n"
-				"p - Pacbio data flag. Outputs Num Reads >= 10K in length\n\n"
+				"L - output length counts (requires an output filename) \n\n"
 
 				"Version: %s\n" "\n"
 				"Produces lots of easily digested statistics for the files listed\n" 
