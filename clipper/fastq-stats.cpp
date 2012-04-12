@@ -113,6 +113,8 @@ bool fastx = 0;
 char *fastx_outfile = NULL;
 bool brkdown = 0;
 char *brkdown_outfile = NULL;
+bool pacbio = 0;
+int pacbio_10K = 0;
 
 int main( int argc, char**argv ) {
 
@@ -129,6 +131,7 @@ int main( int argc, char**argv ) {
 			case 's': show_max = atoi(optarg); break;
 			case 'x': fastx_outfile = optarg; ++fastx; break;
 			case 'b': brkdown_outfile = optarg; ++brkdown; break;
+			case 'p': ++pacbio; break;
 			case 'h': usage(stdout); return 0;
 			case '?':
 					  if (!optopt) {
@@ -196,6 +199,9 @@ int main( int argc, char**argv ) {
 		}
 		
 		total_bases += newFq.seq.n;
+		if(pacbio && newFq.seq.n >= 10000) {
+			pacbio_10K++;
+		}
 
 		if(!fixlen) {
 			if(newFq.seq.n > lenmax) {
@@ -462,6 +468,9 @@ int main( int argc, char**argv ) {
 	double ACGT_total  = ACGTN_count[T_A] + ACGTN_count[T_C] + ACGTN_count[T_G] + ACGTN_count[T_T];
 	printf("%%N\t%.4f\n", ((double)(nbase-ACGT_total)/nbase*100));
 	printf("Total Bases\t%.0f\n",total_bases);
+	if(pacbio) {
+		printf("Num reads of len ge 10K\t%d\n",pacbio_10K);
+	}
 } //end main method
 
 
@@ -476,7 +485,8 @@ int main( int argc, char**argv ) {
 				"s - number of top duplicate reads to display\n"
 				"x - output fastx statistics (requires an output filename)\n"
 				"    Also output base breakdown by per phred quality at every cycle.\n"
-				"    It sets cylemax to longest read length\n\n"
+				"    It sets cylemax to longest read length\n"
+				"p - Pacbio data flag. Outputs Num Reads >= 10K in length\n\n"
 
 				"Version: %s\n" "\n"
 				"Produces lots of easily digested statistics for the files listed\n" 
