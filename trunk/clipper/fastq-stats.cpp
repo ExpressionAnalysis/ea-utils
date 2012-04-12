@@ -483,7 +483,7 @@ int main( int argc, char**argv ) {
 	printf("%%T\t%.4f\n", ((double)ACGTN_count[T_T]/nbase*100));
 	double ACGT_total  = ACGTN_count[T_A] + ACGTN_count[T_C] + ACGTN_count[T_G] + ACGTN_count[T_T];
 	printf("%%N\t%.4f\n", ((double)(nbase-ACGT_total)/nbase*100));
-	printf("Total Bases\t%.0f\n",total_bases);
+	printf("total bases\t%.0f\n",total_bases);
 } //end main method
 
 
