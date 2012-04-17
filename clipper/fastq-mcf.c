@@ -31,7 +31,7 @@ See "void usage" below for usage.
 #define MAX_ADAPTER_NUM 1000
 #define SCANLEN 15
 #define SCANMIDP ((int) SCANLEN/2)
-#define MAX_FILES 3
+#define MAX_FILES 5
 #define MAX_REF 10
 #define B_A     0
 #define B_C     1
@@ -65,6 +65,8 @@ void usage(FILE *f, const char *msg=NULL);
 int debug=0;
 int warncount = 0;
 
+// used to filter out other genomes, spike in controls, etc
+
 const char *cmd_align_se = "bowtie -S %i -f %1";
 const char *cmd_align_pe = "bowtie -S %i -1 %1 -2 %2";
 
@@ -74,13 +76,13 @@ int main (int argc, char **argv) {
 	int nmin = 1, nkeep = 19, nmax=0;
 	float minpct = 0.25;
 	int pctdiff = 10;
-	int sampcnt = 100000;			// # of reads to sample to determine adapter profile, and base skewing
+	int sampcnt = 200000;			// # of reads to sample to determine adapter profile, and base skewing
 	int xmax = -1;
 	float scale = 2.2;
 	int noclip=0;
 	char end[MAX_FILES]; meminit(end);
 	float skewpct = 2; 			// any base at any position is less than skewpct of reads
-	float pctns = 5;			// any base that is more than 5% n's
+	float pctns = 20;			// any base that is more than 20% n's
 	bool rmns = 1;				// remove n's at the end of the read
 	int qthr = 7;				// remove end of-read with quality < qthr
 	int qwin = 1;				// remove end of read with mean quality < qthr
@@ -888,8 +890,10 @@ int main (int argc, char **argv) {
 					fq[f].qual.s[fq[f].qual.n]='\0';
 				}
 				if (nmax > 0) {
-					fq[f].seq.s[nmax]='\0';
-					fq[f].qual.s[nmax]='\0';
+					if (fq[f].seq.n >= nmax ) {
+						fq[f].seq.s[nmax]='\0';
+						fq[f].qual.s[nmax]='\0';
+					}
 				}
 				fputs(fq[f].id.s,fout[f]);
 				fputs(fq[f].seq.s,fout[f]);
@@ -1029,11 +1033,11 @@ void usage(FILE *f, const char *msg) {
 "    min_clip_len    0\n"
 "    min_seq_remain  15\n"
 "    max_adap_diff   20\n"
-"    cmd_align_se    bowtie -S %i -f %1\n"
-"    cmd_align_pe    bowtie -S %i -1 %1 -2 %2\n"
-"\n"
-"Command lines must return SAM formatted lines, %i is the filter FIL,\n"
-"%1 and %2 are the first and second fastq's\n"
+//"    cmd_align_se    bowtie -S %%i -f %%1\n"
+//"    cmd_align_pe    bowtie -S %%i -1 %%1 -2 %%2\n"
+//"\n"
+//"Command lines must return SAM formatted lines, %%i is the filter FIL,\n"
+//"%%1 and %%2 are the first and second fastq's\n"
 "\n"
 "Increasing the scale makes recognition-lengths longer, a scale\n"
 "of 100 will force full-length recognition.\n"
