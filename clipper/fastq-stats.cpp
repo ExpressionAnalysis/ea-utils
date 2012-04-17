@@ -447,8 +447,8 @@ int main( int argc, char**argv ) {
 	int uniq_dup = (int)dup_sort.size();
 	if(debug) {
 		cout << endl;
-		cout << "Unique Duplicates " << uniq_dup << endl;
-		cout << "Total Duplicates " << ndups << endl; 
+		cout << "unique duplicates\t" << uniq_dup << endl;
+		cout << "total duplicates\t" << ndups << endl; 
 		cout << endl;
 	}
 	if (uniq_dup && !nodup) {
