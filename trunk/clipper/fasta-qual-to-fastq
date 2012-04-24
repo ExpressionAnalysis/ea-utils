@@ -1,0 +1,53 @@
+#!/usr/bin/perl
+
+use EA;
+
+die "usage: $0 <fasta> <qual>\n" unless @ARGV == 2;
+
+my ($fa, $ql) = @ARGV;
+
+# gz compat open fasta and qual files
+zopen(FA, $fa) || die;
+zopen(QL, $ql) || die;
+
+$fid = <FA>;
+$qid = <QL>;
+
+$fid =~ s/\s+$//;
+$qid =~ s/\s+$//;
+
+while (1) {
+	$seq = '';
+
+	if (!$fid) {
+		exit 0;
+	}
+
+	while($fline = <FA>) {
+		$fline =~ s/\s+$//;
+		if ($fline =~ /^>/) {
+			last;
+		}
+		$seq .= $fline;
+	}
+
+	$qual = '';
+	if (!($qid eq $fid)) {
+		die "Line $. : $qid not equal to $fid\n";
+	}
+
+	while($qline = <QL>) {
+		$qline =~ s/\s+$//;
+		if ($qline =~ /^>/) {
+			last;
+		}
+		for (split / /, $qline) {
+			$qual .= chr($_+33);
+		}
+	}
+	$fid =~ s/^>/@/;
+	print "$fid$seq\n+\n$qual\n";
+
+	$fid = $fline;
+	$qid = $qline;
+}
