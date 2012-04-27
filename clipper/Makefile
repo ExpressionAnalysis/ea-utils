@@ -5,7 +5,7 @@ CPPFLAGS?=-O3
 
 PKG=ea-utils
 REL := $(shell svnversion 2>/dev/null | perl -ne 'print $$1 if /:(\d+)/' )
-VER := $(shell grep '%define ver' ${PKG}.spex | perl -ne 'print $$1 if / (\S+) *$$/')
+VER := $(shell grep '%define ver' ${PKG}.spec | perl -ne 'print $$1 if / (\S+) *$$/')
 
 SRC=fastq-clipper.c fastq-mcf.c fastq-multx.c fastq-join.c fastq-stats.cpp
 BIN=fastq-mcf fastq-multx fastq-join  fastq-stats fastq-clipper
@@ -33,7 +33,7 @@ getrel:
 $(PKG).spec: $(PKG).spex
 	perl -pe 's/%RELEASE%/${REL}/' $(PKG).spex > $(PKG).spec
 
-$(PKG).tar.gz: Makefile $(SRC) $(PKG).spec $(PKG).spex fastq-lib.cpp fastq-lib.h sam-stats.cpp fastq-stats.cpp README CHANGES
+$(PKG).tar.gz: Makefile $(SRC) $(PKG).spec fastq-lib.cpp fastq-lib.h sam-stats.cpp fastq-stats.cpp README CHANGES
 	tar -cvzf $(PKG).tar.gz $^
 
 $(PKG).${VER}-${REL}.tar.gz: $(PKG).tar.gz
