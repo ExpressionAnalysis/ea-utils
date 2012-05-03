@@ -18,7 +18,7 @@
 
 #include "fastq-lib.h"
 
-const char * VERSION = "1.0";
+const char * VERSION = "0.8";
 
 using namespace std;
 using namespace google;
@@ -796,7 +796,7 @@ void VarStatVisitor::Visit(PileupSummary &p) {
 void usage(FILE *f) {
         fprintf(f,
 "Usage: varcall <-s|-v> <-f REF> [options] bam1 [bam2...]\n"
-"Version: %s\n"
+"Version: %s (BETA)\n"
 "\n"
 "Either outputs summry stats for the list of files, or performs variant calling\n"
 "\n"
