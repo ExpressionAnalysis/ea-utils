@@ -52,6 +52,7 @@ $def{ping_secs} = 30;				# how often to tell about load/mem/stats
 $def{remove_secs} = '$ping_secs * 1000';	# don't even try kickstarting if the node is this old
 $def{idle_load} = .3;				# how often to tell about load/mem/stats
 $def{retry_secs} = 60;				# how often to retry notifications
+$def{bench_secs} = 86400;			# how often to re-benchmark
 $def{max_buf} = 1000000;			# how often to retry notifications
 $def{expire_secs} = 14400;			# remove jobs whose execution nodes haven't reported back in this amount of time
 $def{io_keep} = 3600;				# keep io for this long after a job with i/o is finished in a detached session
@@ -1530,9 +1531,9 @@ sub getcpus {
 }
 
 sub getbench {
-	my ($force)=1;
+	my ($force)=@_;
         my $bench = slurp("$conf{spool}/bench");
-	if (!$bench||$force) {
+	if (!$bench||$force||(fmodtime("$conf{spool}/bench")<(time()-$conf{bench_secs}))) {
 		require Time::HiRes;
 		my $s = Time::HiRes::time();
 		my $i=0;
