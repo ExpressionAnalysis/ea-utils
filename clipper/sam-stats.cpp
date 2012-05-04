@@ -42,7 +42,7 @@
 
 #include "fastq-lib.h"
 
-const char * VERSION = "1.31";
+const char * VERSION = "1.32"
 
 using namespace BamTools;
 using namespace std;
@@ -151,6 +151,7 @@ public:
 void build_basemap();
 
 int dupreads = 1000000;
+int max_chr = 1000;
 bool trackdup=0;
 int basemap[256];
 int main(int argc, char **argv) {
@@ -158,12 +159,13 @@ int main(int argc, char **argv) {
 	bool multi=0, newonly=0, inbam=0;
 	char c;
 	optind = 0;
-    while ( (c = getopt (argc, argv, "?BDdx:MhH:")) != -1) {
+    while ( (c = getopt (argc, argv, "?BADdx:MhS:")) != -1) {
                 switch (c) {
                 case 'd': ++debug; break;
                 case 'D': ++trackdup; break;
                 case 'B': inbam=1; break;
-                case 'H': histnum=atoi(optarg); break;
+                case 'A': max_chr=1000000; break;
+                case 'S': histnum=atoi(optarg); break;
                 case 'x': ext=optarg; break;
                 case 'M': newonly=1; break;
                 case 'h': usage(stdout); return 0;
@@ -436,13 +438,13 @@ int main(int argc, char **argv) {
 			while (it != s.covr.end()) {
 				if (it->second.mapb > 0) {
 					++mseq;								// number of mapped refseqs
-					if (mseq <= 1000) vtmp.push_back(it->first);		// don't bother if too many chrs
+					if (mseq <= max_chr) vtmp.push_back(it->first);		// don't bother if too many chrs
 					if (it->second.reflen > 0) haverlen = 1;
 				}
 				++it;
 			}
 			// don't print per-seq percentages if size is huge, or is 1
-			if ((haverlen || mseq > 1) && mseq <= 1000) {			// worth reporting
+			if ((haverlen || mseq > 1) && mseq <= max_chr) {			// worth reporting
 				// sort the id's
 				sort(vtmp.begin(),vtmp.end());
 				vector<string>::iterator vit=vtmp.begin();
@@ -672,10 +674,11 @@ void usage(FILE *f) {
 "\n"
 "Produces lots of easily digested statistics for the files listed\n"
 "\n"
-"Options:\n"
+"Options (default in parens):\n"
 "\n"
 "-D             Keep track of multiple alignments (slower!)\n"
 "-M             Only overwrite if newer (requires -x, or multiple files)\n"
+"-A             Report all chr sigs, even if there are more than 1000\n"
 "-B             Input is bam, don't bother looking at magic\n"
 "-x FIL         File extension for multiple files (stats)\n"
 "-b INT         Number of reads to sample for per-base stats (1M)\n"
