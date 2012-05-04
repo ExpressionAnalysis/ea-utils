@@ -42,7 +42,7 @@
 
 #include "fastq-lib.h"
 
-const char * VERSION = "1.32"
+const char * VERSION = "1.32";
 
 using namespace BamTools;
 using namespace std;
