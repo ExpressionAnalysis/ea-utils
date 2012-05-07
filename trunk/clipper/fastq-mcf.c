@@ -349,7 +349,14 @@ int main (int argc, char **argv) {
 	if (debug) printf("Max ns: %d, Avg[0]: %d\n", maxns, avgns[0]);
 
 	// total base count per read position in sample
-	int bcnt[MAX_FILES][2][maxns][6]; meminit(bcnt);
+	int balloc = maxns;
+	bool dobcnt = 1;
+	if (maxns > 500) {
+		dobcnt = 0;
+		balloc = 1;
+	}
+
+	int bcnt[MAX_FILES][2][balloc][6]; meminit(bcnt);
 	int qcnt[MAX_FILES][2]; meminit(qcnt);
 	char qmin=127, qmax=0;
 	int nsampcnt = 0;
@@ -403,12 +410,14 @@ int main (int argc, char **argv) {
 				++nr;
 
 				// to be safe, we don't assume reads are fixed-length, not any slower, just a little more code
-				int b;
-				for (b = 0; b < ns/2 && b < maxns; ++b) {
-					++bcnt[i][0][b][char2bp(s[b])];		// count from begin
-					++bcnt[i][0][b][B_CNT];			// count of samples at position
-					++bcnt[i][1][b][char2bp(s[ns-b-1])];	// count from end
-					++bcnt[i][1][b][B_CNT];			// count of samples at offset-from-end position
+				if (dobcnt) {
+					int b;
+					for (b = 0; b < ns/2 && b < maxns; ++b) {
+						++bcnt[i][0][b][char2bp(s[b])];		// count from begin
+						++bcnt[i][0][b][B_CNT];			// count of samples at position
+						++bcnt[i][1][b][char2bp(s[ns-b-1])];	// count from end
+						++bcnt[i][1][b][B_CNT];			// count of samples at offset-from-end position
+					}
 				}
 				qcnt[i][0]+=((q[0]-phred)<qthr);		// count of q<thr for last (first trimmable) base
 				qcnt[i][1]+=((q[ns-1]-phred)<qthr);	
@@ -463,12 +472,12 @@ int main (int argc, char **argv) {
 		exit(1);
 	}
 
-	// adjust down
 	sampcnt = nsampcnt;
+	int sktrim[i_n][2]; meminit(sktrim);
 
 	// look for severe base skew, and auto-trim ends based on it
-	int sktrim[i_n][2]; meminit(sktrim);
 	int needqtrim=0;
+	if (dobcnt) {
 	if (sampcnt > 0 && skewpct > 0) {
 		for (i=0;i<i_n;++i) {
 			if (avgns[i] < 11) 			// reads of avg length < 11 ? barcode lane, skip it
@@ -520,6 +529,8 @@ int main (int argc, char **argv) {
 				}
 			}
 		}
+	}
+
 	}
 
 	int e;
