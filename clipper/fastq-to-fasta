@@ -1,0 +1,36 @@
+#!/usr/bin/perl
+
+use Getopt::Long;
+
+GetOptions(\%opt, "i=s", "o=s", "h");
+
+$ARGV[0]=$opt{i} if $opt{i};
+$ARGV[0]="gunzip -c $ARGV[0]|" if $ARGV[0] =~ /\.gz$/;
+
+if ($opt{o}) {
+    open (STDOUT, ($opt{o} =~ /\.gz$/ ? "|gzip -c >$opt{o}" : ">$opt{o}")) || die "$opt{o}:$!\n";
+}
+
+print(usage()) && exit if $opt{h};
+
+while($i=<>) {
+    $s=<>;
+    $c=<>;
+    $q=<>;
+    die "Bad fastq at like $." unless $i =~ s/^@/>/;
+    print $i, $s;
+}
+
+sub usage {
+<<EOF
+usage: fastq_to_fasta [-h] [[-i] INFILE] [-o OUTFILE]
+
+   [-h]         = This helpful help screen.
+   [-i INFILE]  = FASTA/Q input file. default is STDIN.
+   [-o OUTFILE] = FASTA output file. default is STDOUT.
+
+If input, or output, ends in '.gz' then the file is
+gunzipped/gzipped.
+EOF
+}
+
