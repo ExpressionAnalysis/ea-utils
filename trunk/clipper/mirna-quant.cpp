@@ -70,14 +70,17 @@ std::string string_format(const std::string &fmt, ...);
 bool file_newer(const char *f1, const char *f2);
 std::vector<std::string> split(char* str,const char* delim);
 
+#define MAX_EX 4
+
 int main (int argc, char **argv) {
 	char *in = NULL;
 	char *out = NULL;
 	char *stat = NULL;
 	char *ref = NULL;
 	char *pat = NULL;
-	char *excl = NULL;
+	char *vexcl[MAX_EX] = {NULL};
 
+	int excl_n = 0;
 	int targ = 1000;
 	int thr = -1;
 	int mergs = 1;
@@ -108,7 +111,7 @@ int main (int argc, char **argv) {
 			case 'p':
 				pat = optarg; break;
 			case 'x':
-				excl = optarg; break;
+				vexcl[excl_n++] = optarg; break;
 			case 'n':
 				targ = atoi(optarg); break;
 			case 't':
@@ -193,7 +196,7 @@ int main (int argc, char **argv) {
 	std::vector<ent> lis;
 
 	std::string tmp;
-	if (excl) {
+	if (excl_n) {
 		// make a temp file
 		if (in) {
 			tmp=string_format("%s.tmp.fq", in);
@@ -203,12 +206,12 @@ int main (int argc, char **argv) {
         ftmp = openordie(tmp.c_str(), "w", NULL, "Error opening file '%s': %s\n");
 	}
 
-	if (npat > 0 || excl) {
+	if (npat > 0 || excl_n) {
 		// fill mmap with pattern matches, and fill tmp fastq with sequences
 		std::vector<idseq>::iterator pit;
       	google::sparse_hash_map<std::string,int>::iterator it = pmap.begin();
 		while (it != pmap.end()) {
-			if (excl) {
+			if (excl_n) {
 				fputs("@\n", ftmp);
 				fputs(it->first.c_str(),ftmp);
 				fputs("\n+\n", ftmp);
@@ -230,35 +233,39 @@ int main (int argc, char **argv) {
 		}
 	}
 
-	if (excl) {
-		std::string ebwt = string_format("%s.1.ebwt", excl);
-		std::string cmd;
-		int ret;
-		if (file_newer(excl,ebwt.c_str())) {
-			cmd=string_format("bowtie-build %s %s > /dev/null", excl, excl).c_str();
-			fprintf(stderr,"+%s\n",cmd.c_str());
-			if (ret=system(cmd.c_str())) {
-				exit(ret >> 8);
-			}
-		}
-		cmd = string_format("bowtie --sam-nohead -S %s %s 2> /dev/null", excl, tmp.c_str());
-		fprintf(stderr,"+%s\n",cmd.c_str());
-		FILE *aln;
-		if (!(aln=popen(cmd.c_str(),"r"))) {
-			fprintf(stderr, "Can't run bowtie: $!\n", strerror(errno));
-			exit(1);
-		}
-		struct line l; meminit(l);
-		while (read_line(aln, l)>0) {
-			std::vector<std::string> v = split(l.s,"\t");
-			if (v[9].size() > 17) {
-				if (atoi(v[3].c_str()) > 0) {
-					// add to mmap
-					mmap[v[9]]=v[2];
+	if (excl_n) {
+		int i;
+		for (i=0;i<excl_n;++i) {
+			char *excl=vexcl[i];
+			std::string ebwt = string_format("%s.1.ebwt", excl);
+			std::string cmd;
+			int ret;
+			if (file_newer(excl,ebwt.c_str())) {
+				cmd=string_format("bowtie-build %s %s > /dev/null", excl, excl).c_str();
+				fprintf(stderr,"+%s\n",cmd.c_str());
+				if (ret=system(cmd.c_str())) {
+					exit(ret >> 8);
 				}
 			}
+			cmd = string_format("bowtie --sam-nohead -S %s %s 2> /dev/null", excl, tmp.c_str());
+			fprintf(stderr,"+%s\n",cmd.c_str());
+			FILE *aln;
+			if (!(aln=popen(cmd.c_str(),"r"))) {
+				fprintf(stderr, "Can't run bowtie: $!\n", strerror(errno));
+				exit(1);
+			}
+			struct line l; meminit(l);
+			while (read_line(aln, l)>0) {
+				std::vector<std::string> v = split(l.s,"\t");
+				if (v[9].size() > 17) {
+					if (atoi(v[3].c_str()) > 0) {
+						// add to mmap
+						mmap[v[9]]=v[2];
+					}
+				}
+			}
+			unlink(tmp.c_str());
 		}
-		unlink(tmp.c_str());
 	}	
 
 	if (mergs > 0) {	
