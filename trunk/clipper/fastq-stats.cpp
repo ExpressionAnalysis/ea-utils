@@ -203,7 +203,7 @@ int main( int argc, char**argv ) {
 		total_bases += newFq.seq.n;
 		if(len_hist) {
 			if(newFq.seq.n > vlen.size()) 
-				vlen.resize(newFq.seq.n);
+				vlen.resize(newFq.seq.n+1);
 			++vlen[newFq.seq.n];
 		}
 
