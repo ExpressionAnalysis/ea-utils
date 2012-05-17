@@ -255,7 +255,7 @@ int main (int argc, char **argv) {
 			char *q = NULL; size_t nq = 0;
 			double tots=0, totsq=0;
 			
-                	stat(in[i], &st);
+			stat(in[i], &st);
 
 			while (getline(&s, &na, fin[i]) > 0) {
 				if (*s != '@')  {
@@ -457,24 +457,24 @@ int main (int argc, char **argv) {
 
 		int blen = 0;
 	
-                int sampcnt = 100000;
-                struct stat st;
-                stat(guide, &st);
+		int sampcnt = 100000;
+		struct stat st;
+		stat(guide, &st);
 
-                char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
+		char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
 		char *q = NULL; size_t nq = 0;
 
-		// small sample to get lengths
+// small sample to get lengths
 		double tots=0, totsq=0;
-                while (getline(&s, &na, gin) > 0) {
+		while (getline(&s, &na, gin) > 0) {
 			if (*s != '@')  {
 				fprintf(stderr,"Invalid fastq file: %s.\n", in[0]);
 				exit(1);
 			}
-			if ((ns=getline(&s, &na, fin[i])) <=0)
+			if ((ns=getline(&s, &na, gin)) <=0)
 				break;
-			getline(&q, &nq, fin[i]);
-			getline(&q, &nq, fin[i]);
+			getline(&q, &nq, gin);
+			getline(&q, &nq, gin);
 			--ns;
 			tots+=ns;
 			totsq+=ns*ns;
