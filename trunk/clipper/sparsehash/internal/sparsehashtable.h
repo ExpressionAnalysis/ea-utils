@@ -95,15 +95,15 @@
 #ifndef _SPARSEHASHTABLE_H_
 #define _SPARSEHASHTABLE_H_
 
-#include <google/sparsehash/sparseconfig.h>
+#include <sparsehash/internal/sparseconfig.h>
 #include <assert.h>
 #include <algorithm>                 // For swap(), eg
 #include <iterator>                  // for iterator tags
 #include <limits>                    // for numeric_limits
 #include <utility>                   // for pair
-#include <google/type_traits.h>        // for remove_const
-#include <google/sparsehash/hashtable-common.h>
-#include <google/sparsetable>    // IWYU pragma: export
+#include <sparsehash/type_traits.h>        // for remove_const
+#include <sparsehash/internal/hashtable-common.h>
+#include <sparsehash/sparsetable>    // IWYU pragma: export
 #include <stdexcept>                 // For length_error
 
 _START_GOOGLE_NAMESPACE_
@@ -467,12 +467,12 @@ class sparse_hashtable {
     assert(num_deleted == 0);
   }
 
+  // Test if the given key is the deleted indicator.  Requires
+  // num_deleted > 0, for correctness of read(), and because that
+  // guarantees that key_info.delkey is valid.
   bool test_deleted_key(const key_type& key) const {
-    // The num_deleted test is crucial for read(): after read(), the ht values
-    // are garbage, and we don't want to think some of them are deleted.
-    // Invariant: !use_deleted implies num_deleted is 0.
-    assert(settings.use_deleted() || num_deleted == 0);
-    return num_deleted > 0 && equals(key_info.delkey, key);
+    assert(num_deleted > 0);
+    return equals(key_info.delkey, key);
   }
 
  public:
@@ -495,20 +495,25 @@ class sparse_hashtable {
   // These are public so the iterators can use them
   // True if the item at position bucknum is "deleted" marker
   bool test_deleted(size_type bucknum) const {
-    if (num_deleted == 0 || !table.test(bucknum)) return false;
-    return test_deleted_key(get_key(table.unsafe_get(bucknum)));
+    // Invariant: !use_deleted() implies num_deleted is 0.
+    assert(settings.use_deleted() || num_deleted == 0);
+    return num_deleted > 0 && table.test(bucknum) &&
+        test_deleted_key(get_key(table.unsafe_get(bucknum)));
   }
   bool test_deleted(const iterator &it) const {
-    if (!settings.use_deleted()) return false;
-    return test_deleted_key(get_key(*it));
+    // Invariant: !use_deleted() implies num_deleted is 0.
+    assert(settings.use_deleted() || num_deleted == 0);
+    return num_deleted > 0 && test_deleted_key(get_key(*it));
   }
   bool test_deleted(const const_iterator &it) const {
-    if (!settings.use_deleted()) return false;
-    return test_deleted_key(get_key(*it));
+    // Invariant: !use_deleted() implies num_deleted is 0.
+    assert(settings.use_deleted() || num_deleted == 0);
+    return num_deleted > 0 && test_deleted_key(get_key(*it));
   }
   bool test_deleted(const destructive_iterator &it) const {
-    if (!settings.use_deleted()) return false;
-    return test_deleted_key(get_key(*it));
+    // Invariant: !use_deleted() implies num_deleted is 0.
+    assert(settings.use_deleted() || num_deleted == 0);
+    return num_deleted > 0 && test_deleted_key(get_key(*it));
   }
 
  private:
@@ -1106,7 +1111,7 @@ class sparse_hashtable {
   template <typename INPUT>
   bool read_metadata(INPUT *fp) {
     num_deleted = 0;            // since we got rid before writing
-    bool result = table.read_metadata(fp);
+    const bool result = table.read_metadata(fp);
     settings.reset_thresholds(bucket_count());
     return result;
   }
@@ -1123,6 +1128,30 @@ class sparse_hashtable {
     return table.read_nopointer_data(fp);
   }
 
+  // INPUT and OUTPUT must be either a FILE, *or* a C++ stream
+  //    (istream, ostream, etc) *or* a class providing
+  //    Read(void*, size_t) and Write(const void*, size_t)
+  //    (respectively), which writes a buffer into a stream
+  //    (which the INPUT/OUTPUT instance presumably owns).
+
+  typedef sparsehash_internal::pod_serializer<value_type> NopointerSerializer;
+
+  // ValueSerializer: a functor.  operator()(OUTPUT*, const value_type&)
+  template <typename ValueSerializer, typename OUTPUT>
+  bool serialize(ValueSerializer serializer, OUTPUT *fp) {
+    squash_deleted();           // so we don't have to worry about delkey
+    return table.serialize(serializer, fp);
+  }
+
+  // ValueSerializer: a functor.  operator()(INPUT*, value_type*)
+  template <typename ValueSerializer, typename INPUT>
+  bool unserialize(ValueSerializer serializer, INPUT *fp) {
+    num_deleted = 0;            // since we got rid before writing
+    const bool result = table.unserialize(serializer, fp);
+    settings.reset_thresholds(bucket_count());
+    return result;
+  }
+
  private:
   // Table is the main storage class.
   typedef sparsetable<value_type, DEFAULT_GROUP_SIZE, value_alloc_type> Table;
@@ -1132,9 +1161,11 @@ class sparse_hashtable {
   // hasher's operator() might have the same function signature, they
   // must be packaged in different classes.
   struct Settings :
-      sh_hashtable_settings<key_type, hasher, size_type, HT_MIN_BUCKETS> {
+      sparsehash_internal::sh_hashtable_settings<key_type, hasher,
+                                                 size_type, HT_MIN_BUCKETS> {
     explicit Settings(const hasher& hf)
-        : sh_hashtable_settings<key_type, hasher, size_type, HT_MIN_BUCKETS>(
+        : sparsehash_internal::sh_hashtable_settings<key_type, hasher,
+                                                     size_type, HT_MIN_BUCKETS>(
             hf, HT_OCCUPANCY_PCT / 100.0f, HT_EMPTY_PCT / 100.0f) {}
   };
 

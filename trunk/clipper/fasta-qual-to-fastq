@@ -47,7 +47,7 @@ while (1) {
 	}
 
 	$fid =~ s/^>/@/;					
-	print "$fid$seq\n+\n$qual\n";
+	print "$fid\n$seq\n+\n$qual\n";
 
 	$fid = $fline;						# line that stopped rec is id
 	$qid = $qline;

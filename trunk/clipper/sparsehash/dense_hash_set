@@ -29,31 +29,43 @@
 
 // ---
 //
-// This is just a very thin wrapper over sparsehashtable.h, just
+// This is just a very thin wrapper over densehashtable.h, just
 // like sgi stl's stl_hash_set is a very thin wrapper over
 // stl_hashtable.  The major thing we define is operator[], because
 // we have a concept of a data_type which stl_hashtable doesn't
 // (it only has a key and a value).
 //
-// This is more different from sparse_hash_map than you might think,
+// This is more different from dense_hash_map than you might think,
 // because all iterators for sets are const (you obviously can't
 // change the key, and for sets there is no value).
 //
-// We adhere mostly to the STL semantics for hash-map.  One important
-// exception is that insert() may invalidate iterators entirely -- STL
-// semantics are that insert() may reorder iterators, but they all
-// still refer to something valid in the hashtable.  Not so for us.
-// Likewise, insert() may invalidate pointers into the hashtable.
-// (Whether insert invalidates iterators and pointers depends on
-// whether it results in a hashtable resize).  On the plus side,
-// delete() doesn't invalidate iterators or pointers at all, or even
-// change the ordering of elements.
+// NOTE: this is exactly like sparse_hash_set.h, with the word
+// "sparse" replaced by "dense", except for the addition of
+// set_empty_key().
+//
+//   YOU MUST CALL SET_EMPTY_KEY() IMMEDIATELY AFTER CONSTRUCTION.
+//
+// Otherwise your program will die in mysterious ways.  (Note if you
+// use the constructor that takes an InputIterator range, you pass in
+// the empty key in the constructor, rather than after.  As a result,
+// this constructor differs from the standard STL version.)
+//
+// In other respects, we adhere mostly to the STL semantics for
+// hash-map.  One important exception is that insert() may invalidate
+// iterators entirely -- STL semantics are that insert() may reorder
+// iterators, but they all still refer to something valid in the
+// hashtable.  Not so for us.  Likewise, insert() may invalidate
+// pointers into the hashtable.  (Whether insert invalidates iterators
+// and pointers depends on whether it results in a hashtable resize).
+// On the plus side, delete() doesn't invalidate iterators or pointers
+// at all, or even change the ordering of elements.
 //
 // Here are a few "power user" tips:
 //
 //    1) set_deleted_key():
-//         Unlike STL's hash_map, if you want to use erase() you
-//         *must* call set_deleted_key() after construction.
+//         If you want to use erase() you must call set_deleted_key(),
+//         in addition to set_empty_key(), after construction.
+//         The deleted and empty keys must differ.
 //
 //    2) resize(0):
 //         When an item is deleted, its memory isn't freed right
@@ -82,28 +94,27 @@
 // - sparse_hash_set can be 3-7 times slower than the others for lookup and,
 //   especially, inserts.  See time_hash_map.cc for details.
 //
-// See /usr/(local/)?doc/sparsehash-*/sparse_hash_set.html
+// See /usr/(local/)?doc/sparsehash-*/dense_hash_set.html
 // for information about how to use this class.
 
-#ifndef _SPARSE_HASH_SET_H_
-#define _SPARSE_HASH_SET_H_
+#ifndef _DENSE_HASH_SET_H_
+#define _DENSE_HASH_SET_H_
 
-#include <google/sparsehash/sparseconfig.h>
-#include <algorithm>                       // needed by stl_alloc
-#include <functional>                      // for equal_to<>
-#include <memory>                          // for alloc (which we don't use)
-#include <utility>                         // for pair<>
-#include <google/sparsehash/libc_allocator_with_realloc.h>
-#include <google/sparsehash/sparsehashtable.h>      // IWYU pragma: export
-#include HASH_FUN_H                // for hash<>
-
+#include <sparsehash/internal/sparseconfig.h>
+#include <algorithm>                        // needed by stl_alloc
+#include <functional>                       // for equal_to<>, select1st<>, etc
+#include <memory>                           // for alloc
+#include <utility>                          // for pair<>
+#include <sparsehash/internal/densehashtable.h>        // IWYU pragma: export
+#include <sparsehash/internal/libc_allocator_with_realloc.h>
+#include HASH_FUN_H                 // for hash<>
 _START_GOOGLE_NAMESPACE_
 
 template <class Value,
           class HashFcn = SPARSEHASH_HASH<Value>,   // defined in sparseconfig.h
           class EqualKey = std::equal_to<Value>,
           class Alloc = libc_allocator_with_realloc<Value> >
-class sparse_hash_set {
+class dense_hash_set {
  private:
   // Apparently identity is not stl-standard, so we define our own
   struct Identity {
@@ -116,8 +127,9 @@ class sparse_hash_set {
     }
   };
 
-  typedef sparse_hashtable<Value, Value, HashFcn, Identity, SetKey,
-                           EqualKey, Alloc> ht;
+  // The actual data
+  typedef dense_hashtable<Value, Value, HashFcn, Identity, SetKey,
+                          EqualKey, Alloc> ht;
   ht rep;
 
  public:
@@ -157,20 +169,22 @@ class sparse_hash_set {
 
 
   // Constructors
-  explicit sparse_hash_set(size_type expected_max_items_in_table = 0,
-                           const hasher& hf = hasher(),
-                           const key_equal& eql = key_equal(),
-                           const allocator_type& alloc = allocator_type())
+  explicit dense_hash_set(size_type expected_max_items_in_table = 0,
+                          const hasher& hf = hasher(),
+                          const key_equal& eql = key_equal(),
+                          const allocator_type& alloc = allocator_type())
       : rep(expected_max_items_in_table, hf, eql, Identity(), SetKey(), alloc) {
   }
 
   template <class InputIterator>
-  sparse_hash_set(InputIterator f, InputIterator l,
-                  size_type expected_max_items_in_table = 0,
-                  const hasher& hf = hasher(),
-                  const key_equal& eql = key_equal(),
-                  const allocator_type& alloc = allocator_type())
+  dense_hash_set(InputIterator f, InputIterator l,
+                 const key_type& empty_key_val,
+                 size_type expected_max_items_in_table = 0,
+                 const hasher& hf = hasher(),
+                 const key_equal& eql = key_equal(),
+                 const allocator_type& alloc = allocator_type())
       : rep(expected_max_items_in_table, hf, eql, Identity(), SetKey(), alloc) {
+    set_empty_key(empty_key_val);
     rep.insert(f, l);
   }
   // We use the default copy constructor
@@ -178,7 +192,10 @@ class sparse_hash_set {
   // We use the default destructor
 
   void clear()                        { rep.clear(); }
-  void swap(sparse_hash_set& hs)      { rep.swap(hs.rep); }
+  // This clears the hash set without resizing it down to the minimum
+  // bucket count, but rather keeps the number of buckets constant
+  void clear_no_resize()              { rep.clear_no_resize(); }
+  void swap(dense_hash_set& hs)       { rep.swap(hs.rep); }
 
 
   // Functions concerning size
@@ -249,10 +266,13 @@ class sparse_hash_set {
     return insert(obj).first;
   }
 
-  // Deletion routines
+  // Deletion and empty routines
   // THESE ARE NON-STANDARD!  I make you specify an "impossible" key
-  // value to identify deleted buckets.  You can change the key as
-  // time goes on, or get rid of it entirely to be insert-only.
+  // value to identify deleted and empty buckets.  You can change the
+  // deleted key as time goes on, or get rid of it entirely to be insert-only.
+  void set_empty_key(const key_type& key)     { rep.set_empty_key(key); }
+  key_type empty_key() const                  { return rep.empty_key(); }
+
   void set_deleted_key(const key_type& key)   { rep.set_deleted_key(key); }
   void clear_deleted_key()                    { rep.clear_deleted_key(); }
   key_type deleted_key() const                { return rep.deleted_key(); }
@@ -264,8 +284,8 @@ class sparse_hash_set {
 
 
   // Comparison
-  bool operator==(const sparse_hash_set& hs) const   { return rep == hs.rep; }
-  bool operator!=(const sparse_hash_set& hs) const   { return rep != hs.rep; }
+  bool operator==(const dense_hash_set& hs) const    { return rep == hs.rep; }
+  bool operator!=(const dense_hash_set& hs) const    { return rep != hs.rep; }
 
 
   // I/O -- this is an add-on for writing metainformation to disk
@@ -273,25 +293,46 @@ class sparse_hash_set {
   // For maximum flexibility, this does not assume a particular
   // file type (though it will probably be a FILE *).  We just pass
   // the fp through to rep.
-  template <typename OUTPUT>
-  bool write_metadata(OUTPUT *fp)       { return rep.write_metadata(fp); }
 
-  template <typename INPUT>
-  bool read_metadata(INPUT *fp)         { return rep.read_metadata(fp); }
+  // If your keys and values are simple enough, you can pass this
+  // serializer to serialize()/unserialize().  "Simple enough" means
+  // value_type is a POD type that contains no pointers.  Note,
+  // however, we don't try to normalize endianness.
+  typedef typename ht::NopointerSerializer NopointerSerializer;
 
-  template <typename OUTPUT>
-  bool write_nopointer_data(OUTPUT *fp) { return rep.write_nopointer_data(fp); }
+  // serializer: a class providing operator()(OUTPUT*, const value_type&)
+  //    (writing value_type to OUTPUT).  You can specify a
+  //    NopointerSerializer object if appropriate (see above).
+  // fp: either a FILE*, OR an ostream*/subclass_of_ostream*, OR a
+  //    pointer to a class providing size_t Write(const void*, size_t),
+  //    which writes a buffer into a stream (which fp presumably
+  //    owns) and returns the number of bytes successfully written.
+  //    Note basic_ostream<not_char> is not currently supported.
+  template <typename ValueSerializer, typename OUTPUT>
+  bool serialize(ValueSerializer serializer, OUTPUT* fp) {
+    return rep.serialize(serializer, fp);
+  }
 
-  template <typename INPUT>
-  bool read_nopointer_data(INPUT *fp)   { return rep.read_nopointer_data(fp); }
+  // serializer: a functor providing operator()(INPUT*, value_type*)
+  //    (reading from INPUT and into value_type).  You can specify a
+  //    NopointerSerializer object if appropriate (see above).
+  // fp: either a FILE*, OR an istream*/subclass_of_istream*, OR a
+  //    pointer to a class providing size_t Read(void*, size_t),
+  //    which reads into a buffer from a stream (which fp presumably
+  //    owns) and returns the number of bytes successfully read.
+  //    Note basic_istream<not_char> is not currently supported.
+  template <typename ValueSerializer, typename INPUT>
+  bool unserialize(ValueSerializer serializer, INPUT* fp) {
+    return rep.unserialize(serializer, fp);
+  }
 };
 
 template <class Val, class HashFcn, class EqualKey, class Alloc>
-inline void swap(sparse_hash_set<Val, HashFcn, EqualKey, Alloc>& hs1,
-                 sparse_hash_set<Val, HashFcn, EqualKey, Alloc>& hs2) {
+inline void swap(dense_hash_set<Val, HashFcn, EqualKey, Alloc>& hs1,
+                 dense_hash_set<Val, HashFcn, EqualKey, Alloc>& hs2) {
   hs1.swap(hs2);
 }
 
 _END_GOOGLE_NAMESPACE_
 
-#endif /* _SPARSE_HASH_SET_H_ */
+#endif /* _DENSE_HASH_SET_H_ */

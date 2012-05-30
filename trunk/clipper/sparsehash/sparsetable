@@ -224,7 +224,7 @@
 #ifndef UTIL_GTL_SPARSETABLE_H_
 #define UTIL_GTL_SPARSETABLE_H_
 
-#include <google/sparsehash/sparseconfig.h>
+#include <sparsehash/internal/sparseconfig.h>
 #include <stdlib.h>             // for malloc/free
 #include <stdio.h>              // to read/write tables
 #include <string.h>             // for memcpy
@@ -242,8 +242,9 @@
 #include <algorithm>            // equal, lexicographical_compare, swap,...
 #include <memory>               // uninitialized_copy, uninitialized_fill
 #include <vector>               // a sparsetable is a vector of groups
-#include <google/type_traits.h>
-#include <google/sparsehash/libc_allocator_with_realloc.h>
+#include <sparsehash/type_traits.h>
+#include <sparsehash/internal/hashtable-common.h>
+#include <sparsehash/internal/libc_allocator_with_realloc.h>
 
 // A lot of work to get a type that's guaranteed to be 16 bits...
 #ifndef HAVE_U_INT16_T
@@ -798,22 +799,6 @@ class destructive_two_d_iterator {
 // the array (from 1 .. # of non-empty buckets in the group) is
 // called its "offset."
 
-// The weird mod in the offset is entirely to quiet compiler warnings
-// as is the cast to int after doing the "x mod 256"
-#define PUT_(take_from, offset)  do {                                          \
-  if (putc(static_cast<int>(((take_from) >> ((offset) % (sizeof(take_from)*8)))\
-                             % 256), fp)                                       \
-      == EOF)                                                                  \
-    return false;                                                              \
-} while (0)
-
-#define GET_(add_to, offset)  do {                                            \
-  if ((x=getc(fp)) == EOF)                                                    \
-    return false;                                                             \
-  else                                                                        \
-    add_to |= (static_cast<size_type>(x) << ((offset) % (sizeof(add_to)*8))); \
-} while (0)
-
 template <class T, u_int16_t GROUP_SIZE, class Alloc>
 class sparsegroup {
  private:
@@ -916,19 +901,10 @@ class sparsegroup {
     group = NULL;
   }
 
- public:                         // get_iter() in sparsetable needs it
-  // We need a small function that tells us how many set bits there are
-  // in positions 0..i-1 of the bitmap.  It uses a big table.
-  // We make it static so templates don't allocate lots of these tables.
-  // There are lots of ways to do this calculation (called 'popcount').
-  // The 8-bit table lookup is one of the fastest, though this
-  // implementation suffers from not doing any loop unrolling.  See, eg,
-  //   http://www.dalkescientific.com/writings/diary/archive/2008/07/03/hakmem_and_other_popcounts.html
-  //   http://gurmeetsingh.wordpress.com/2008/08/05/fast-bit-counting-routines/
-  static size_type pos_to_offset(const unsigned char *bm, size_type pos) {
+  static size_type bits_in_char(unsigned char c) {
     // We could make these ints.  The tradeoff is size (eg does it overwhelm
-    // the cache?) vs efficiency in referencing sub-word-sized array elements
-    static const char bits_in[256] = {      // # of bits set in one char
+    // the cache?) vs efficiency in referencing sub-word-sized array elements.
+    static const char bits_in[256] = {
       0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4,
       1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
       1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5,
@@ -946,23 +922,70 @@ class sparsegroup {
       3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7,
       4, 5, 5, 6, 5, 6, 6, 7, 5, 6, 6, 7, 6, 7, 7, 8,
     };
+    return bits_in[c];
+  }
+
+ public:                         // get_iter() in sparsetable needs it
+  // We need a small function that tells us how many set bits there are
+  // in positions 0..i-1 of the bitmap.  It uses a big table.
+  // We make it static so templates don't allocate lots of these tables.
+  // There are lots of ways to do this calculation (called 'popcount').
+  // The 8-bit table lookup is one of the fastest, though this
+  // implementation suffers from not doing any loop unrolling.  See, eg,
+  //   http://www.dalkescientific.com/writings/diary/archive/2008/07/03/hakmem_and_other_popcounts.html
+  //   http://gurmeetsingh.wordpress.com/2008/08/05/fast-bit-counting-routines/
+  static size_type pos_to_offset(const unsigned char *bm, size_type pos) {
     size_type retval = 0;
 
     // [Note: condition pos > 8 is an optimization; convince yourself we
     // give exactly the same result as if we had pos >= 8 here instead.]
-    for ( ; pos > 8; pos -= 8 )                    // bm[0..pos/8-1]
-      retval += bits_in[*bm++];                    // chars we want *all* bits in
-    return retval + bits_in[*bm & ((1 << pos)-1)]; // the char that includes pos
+    for ( ; pos > 8; pos -= 8 )                   // bm[0..pos/8-1]
+      retval += bits_in_char(*bm++);              // chars we want *all* bits in
+    return retval + bits_in_char(*bm & ((1 << pos)-1));    // char including pos
   }
 
-  size_type pos_to_offset(size_type pos) const {   // not static but still const
+  size_type pos_to_offset(size_type pos) const {  // not static but still const
     return pos_to_offset(bitmap, pos);
+  }
+
+  // Returns the (logical) position in the bm[] array, i, such that
+  // bm[i] is the offset-th set bit in the array.  It is the inverse
+  // of pos_to_offset.  get_pos() uses this function to find the index
+  // of an nonempty_iterator in the table.  Bit-twiddling from
+  // http://hackersdelight.org/basics.pdf
+  static size_type offset_to_pos(const unsigned char *bm, size_type offset) {
+    size_type retval = 0;
+    // This is sizeof(this->bitmap).
+    const size_type group_size = (GROUP_SIZE-1) / 8 + 1;
+    for (size_type i = 0; i < group_size; i++) {   // forward scan
+      const size_type pop_count = bits_in_char(*bm);
+      if (pop_count > offset) {
+        unsigned char last_bm = *bm;
+        for (; offset > 0; offset--) {
+          last_bm &= (last_bm-1);  // remove right-most set bit
+        }
+        // Clear all bits to the left of the rightmost bit (the &),
+        // and then clear the rightmost bit but set all bits to the
+        // right of it (the -1).
+        last_bm = (last_bm & -last_bm) - 1;
+        retval += bits_in_char(last_bm);
+        return retval;
+      }
+      offset -= pop_count;
+      retval += 8;
+      bm++;
+    }
+    return retval;
+  }
+
+  size_type offset_to_pos(size_type offset) const {
+    return offset_to_pos(bitmap, offset);
   }
 
 
  public:
   // Constructors -- default and copy -- and destructor
-  sparsegroup(allocator_type& a) :
+  explicit sparsegroup(allocator_type& a) :
       group(0), settings(alloc_impl<value_alloc_type>(a)) {
     memset(bitmap, 0, sizeof(bitmap));
   }
@@ -1190,50 +1213,48 @@ class sparsegroup {
   // the actual array contents (which we don't know how to store),
   // just the bitmap and size.  Meant to be used with table I/O.
 
-  // Returns true if all was ok.
-  bool write_metadata(FILE *fp) const {
+  template <typename OUTPUT> bool write_metadata(OUTPUT *fp) const {
     // we explicitly set to u_int16_t
     assert(sizeof(settings.num_buckets) == 2);
-    PUT_(settings.num_buckets, 8);
-    PUT_(settings.num_buckets, 0);
-    if ( !fwrite(bitmap, sizeof(bitmap), 1, fp) )
+    if ( !sparsehash_internal::write_bigendian_number(fp, settings.num_buckets,
+                                                      2) )
+      return false;
+    if ( !sparsehash_internal::write_data(fp, bitmap, sizeof(bitmap)) )
       return false;
     return true;
   }
 
   // Reading destroys the old group contents!  Returns true if all was ok.
-  bool read_metadata(FILE *fp) {
+  template <typename INPUT> bool read_metadata(INPUT *fp) {
     clear();
-
-    int x;          // the GET_ macro requires an 'int x' to be defined
-    GET_(settings.num_buckets, 8);
-    GET_(settings.num_buckets, 0);
-
-    if ( !fread(bitmap, sizeof(bitmap), 1, fp) )  return false;
-
+    if ( !sparsehash_internal::read_bigendian_number(fp, &settings.num_buckets,
+                                                     2) )
+      return false;
+    if ( !sparsehash_internal::read_data(fp, bitmap, sizeof(bitmap)) )
+      return false;
     // We'll allocate the space, but we won't fill it: it will be
     // left as uninitialized raw memory.
     group = allocate_group(settings.num_buckets);
     return true;
   }
 
+  // Again, only meaningful if value_type is a POD.
+  template <typename INPUT> bool read_nopointer_data(INPUT *fp) {
+     for ( nonempty_iterator it = nonempty_begin();
+           it != nonempty_end(); ++it ) {
+       if ( !sparsehash_internal::read_data(fp, &(*it), sizeof(*it)) )
+         return false;
+     }
+     return true;
+  }
+
   // If your keys and values are simple enough, we can write them
   // to disk for you.  "simple enough" means POD and no pointers.
   // However, we don't try to normalize endianness.
-  bool write_nopointer_data(FILE *fp) const {
+  template <typename OUTPUT> bool write_nopointer_data(OUTPUT *fp) const {
     for ( const_nonempty_iterator it = nonempty_begin();
           it != nonempty_end(); ++it ) {
-      if ( !fwrite(&*it, sizeof(*it), 1, fp) )  return false;
-    }
-    return true;
-  }
-
-  // When reading, we have to override the potential const-ness of *it.
-  // Again, only meaningful if value_type is a POD.
-  bool read_nopointer_data(FILE *fp) {
-    for ( nonempty_iterator it = nonempty_begin();
-          it != nonempty_end(); ++it ) {
-      if ( !fread(reinterpret_cast<void*>(&(*it)), sizeof(*it), 1, fp) )
+      if ( !sparsehash_internal::write_data(fp, &(*it), sizeof(*it)) )
         return false;
     }
     return true;
@@ -1448,7 +1469,7 @@ class sparsetable {
 
  public:
   // Constructors -- default, normal (when you specify size), and copy
-  sparsetable(size_type sz = 0, Alloc alloc = Alloc())
+  explicit sparsetable(size_type sz = 0, Alloc alloc = Alloc())
       : groups(vector_alloc(alloc)), settings(alloc, sz) {
     groups.resize(num_groups(sz), group_type(settings));
   }
@@ -1535,7 +1556,7 @@ class sparsetable {
   // TODO(csilvers): make protected + friend element_adaptor
   reference mutating_get(size_type i) {    // fills bucket i before getting
     assert(i < settings.table_size);
-    size_type old_numbuckets = which_group(i).num_nonempty();
+    typename group_type::size_type old_numbuckets = which_group(i).num_nonempty();
     reference retval = which_group(i).mutating_get(pos_in_group(i));
     settings.num_buckets += which_group(i).num_nonempty() - old_numbuckets;
     return retval;
@@ -1569,12 +1590,21 @@ class sparsetable {
        groups[group_num(i)].pos_to_offset(pos_in_group(i))));
   }
 
+  // And the reverse transformation.
+  size_type get_pos(const const_nonempty_iterator it) const {
+    difference_type current_row = it.row_current - it.row_begin;
+    difference_type current_col = (it.col_current -
+                                   groups[current_row].nonempty_begin());
+    return ((current_row * GROUP_SIZE) +
+            groups[current_row].offset_to_pos(current_col));
+  }
+
 
   // This returns a reference to the inserted item (which is a copy of val)
   // The trick is to figure out whether we're replacing or inserting anew
   reference set(size_type i, const_reference val) {
     assert(i < settings.table_size);
-    size_type old_numbuckets = which_group(i).num_nonempty();
+    typename group_type::size_type old_numbuckets = which_group(i).num_nonempty();
     reference retval = which_group(i).set(pos_in_group(i), val);
     settings.num_buckets += which_group(i).num_nonempty() - old_numbuckets;
     return retval;
@@ -1584,7 +1614,7 @@ class sparsetable {
   // "undefining", rather than "clearing".
   void erase(size_type i) {
     assert(i < settings.table_size);
-    size_type old_numbuckets = which_group(i).num_nonempty();
+    typename group_type::size_type old_numbuckets = which_group(i).num_nonempty();
     which_group(i).erase(pos_in_group(i));
     settings.num_buckets += which_group(i).num_nonempty() - old_numbuckets;
   }
@@ -1618,56 +1648,39 @@ class sparsetable {
   // causes us to mis-read old-version code that stores exactly
   // 0xFFFFFFF, but I don't think that is likely to have happened for
   // these particular values.
-  template <typename IntType>
-  static bool write_32_or_64(FILE* fp, IntType value) {
+  template <typename OUTPUT, typename IntType>
+  static bool write_32_or_64(OUTPUT* fp, IntType value) {
     if ( value < 0xFFFFFFFFULL ) {        // fits in 4 bytes
-      PUT_(value, 24);
-      PUT_(value, 16);
-      PUT_(value, 8);
-      PUT_(value, 0);
-    } else if ( value == 0xFFFFFFFFUL ) {   // special case in 32bit systems
-      PUT_(0xFF, 0); PUT_(0xFF, 0); PUT_(0xFF, 0); PUT_(0xFF, 0);  // marker
-      PUT_(0, 0); PUT_(0, 0); PUT_(0, 0); PUT_(0, 0);
-      PUT_(0xFF, 0); PUT_(0xFF, 0); PUT_(0xFF, 0); PUT_(0xFF, 0);
+      if ( !sparsehash_internal::write_bigendian_number(fp, value, 4) )
+        return false;
     } else {
-      PUT_(0xFF, 0); PUT_(0xFF, 0); PUT_(0xFF, 0); PUT_(0xFF, 0);  // marker
-      PUT_(value, 56);
-      PUT_(value, 48);
-      PUT_(value, 40);
-      PUT_(value, 32);
-      PUT_(value, 24);
-      PUT_(value, 16);
-      PUT_(value, 8);
-      PUT_(value, 0);
+      if ( !sparsehash_internal::write_bigendian_number(fp, 0xFFFFFFFFUL, 4) )
+        return false;
+      if ( !sparsehash_internal::write_bigendian_number(fp, value, 8) )
+        return false;
     }
     return true;
   }
 
-  template <typename IntType>
-  static bool read_32_or_64(FILE* fp, IntType *value) {  // reads into value
-    size_type first4 = 0;
-    int x;
-    GET_(first4, 24);
-    GET_(first4, 16);
-    GET_(first4, 8);
-    GET_(first4, 0);
+  template <typename INPUT, typename IntType>
+  static bool read_32_or_64(INPUT* fp, IntType *value) {  // reads into value
+    MagicNumberType first4 = 0;   // a convenient 32-bit unsigned type
+    if ( !sparsehash_internal::read_bigendian_number(fp, &first4, 4) )
+      return false;
     if ( first4 < 0xFFFFFFFFULL ) {
       *value = first4;
     } else {
-      GET_(*value, 56);
-      GET_(*value, 48);
-      GET_(*value, 40);
-      GET_(*value, 32);
-      GET_(*value, 24);
-      GET_(*value, 16);
-      GET_(*value, 8);
-      GET_(*value, 0);
+      if ( !sparsehash_internal::read_bigendian_number(fp, value, 8) )
+        return false;
     }
     return true;
   }
 
  public:
-  bool write_metadata(FILE *fp) const {
+  // read/write_metadata() and read_write/nopointer_data() are DEPRECATED.
+  // Use serialize() and unserialize(), below, for new code.
+
+  template <typename OUTPUT> bool write_metadata(OUTPUT *fp) const {
     if ( !write_32_or_64(fp, MAGIC_NUMBER) )  return false;
     if ( !write_32_or_64(fp, settings.table_size) )  return false;
     if ( !write_32_or_64(fp, settings.num_buckets) )  return false;
@@ -1679,7 +1692,7 @@ class sparsetable {
   }
 
   // Reading destroys the old table contents!  Returns true if read ok.
-  bool read_metadata(FILE *fp) {
+  template <typename INPUT> bool read_metadata(INPUT *fp) {
     size_type magic_read = 0;
     if ( !read_32_or_64(fp, &magic_read) )  return false;
     if ( magic_read != MAGIC_NUMBER ) {
@@ -1719,6 +1732,38 @@ class sparsetable {
     return true;
   }
 
+  // INPUT and OUTPUT must be either a FILE, *or* a C++ stream
+  //    (istream, ostream, etc) *or* a class providing
+  //    Read(void*, size_t) and Write(const void*, size_t)
+  //    (respectively), which writes a buffer into a stream
+  //    (which the INPUT/OUTPUT instance presumably owns).
+
+  typedef sparsehash_internal::pod_serializer<value_type> NopointerSerializer;
+
+  // ValueSerializer: a functor.  operator()(OUTPUT*, const value_type&)
+  template <typename ValueSerializer, typename OUTPUT>
+  bool serialize(ValueSerializer serializer, OUTPUT *fp) {
+    if ( !write_metadata(fp) )
+      return false;
+    for ( const_nonempty_iterator it = nonempty_begin();
+          it != nonempty_end(); ++it ) {
+      if ( !serializer(fp, *it) )  return false;
+    }
+    return true;
+  }
+
+  // ValueSerializer: a functor.  operator()(INPUT*, value_type*)
+  template <typename ValueSerializer, typename INPUT>
+  bool unserialize(ValueSerializer serializer, INPUT *fp) {
+    clear();
+    if ( !read_metadata(fp) )
+      return false;
+    for ( nonempty_iterator it = nonempty_begin();
+          it != nonempty_end(); ++it ) {
+      if ( !serializer(fp, &*it) )  return false;
+    }
+    return true;
+  }
 
   // Comparisons.  Note the comparisons are pretty arbitrary: we
   // compare values of the first index that isn't equal (using default
@@ -1769,9 +1814,6 @@ inline void swap(sparsetable<T,GROUP_SIZE,Alloc> &x,
                  sparsetable<T,GROUP_SIZE,Alloc> &y) {
   x.swap(y);
 }
-
-#undef GET_
-#undef PUT_
 
 _END_GOOGLE_NAMESPACE_
 

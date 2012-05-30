@@ -71,7 +71,7 @@
 // For enlarge_factor, you can use this chart to try to trade-off
 // expected lookup time to the space taken up.  By default, this
 // code uses quadratic probing, though you can change it to linear
-// via _JUMP below if you really want to.
+// via JUMP_ below if you really want to.
 //
 // From http://www.augustana.ca/~mohrj/courses/1999.fall/csc210/lecture_notes/hashing.html
 // NUMBER OF PROBES / LOOKUP       Successful            Unsuccessful
@@ -89,7 +89,7 @@
 #ifndef _DENSEHASHTABLE_H_
 #define _DENSEHASHTABLE_H_
 
-#include <google/sparsehash/sparseconfig.h>
+#include <sparsehash/internal/sparseconfig.h>
 #include <assert.h>
 #include <stdio.h>              // for FILE, fwrite, fread
 #include <algorithm>            // For swap(), eg
@@ -97,9 +97,9 @@
 #include <limits>               // for numeric_limits
 #include <memory>               // For uninitialized_fill
 #include <utility>              // for pair
-#include <google/sparsehash/hashtable-common.h>
-#include <google/sparsehash/libc_allocator_with_realloc.h>
-#include <google/type_traits.h>
+#include <sparsehash/internal/hashtable-common.h>
+#include <sparsehash/internal/libc_allocator_with_realloc.h>
+#include <sparsehash/type_traits.h>
 #include <stdexcept>                 // For length_error
 
 _START_GOOGLE_NAMESPACE_
@@ -117,25 +117,6 @@ using GOOGLE_NAMESPACE::remove_const;
 // #define JUMP_(key, num_probes)    ( 1 )
 // Quadratic probing
 #define JUMP_(key, num_probes)    ( num_probes )
-
-// The weird mod in the offset is entirely to quiet compiler warnings
-// as is the cast to int after doing the "x mod 256"
-#define PUT_(take_from, offset)  do {                                    \
-    if (putc(static_cast<int>(offset >= sizeof(take_from)*8)             \
-                              ? 0 : ((take_from) >> (offset)) % 256, fp) \
-        == EOF)                                                          \
-    return false;                                                        \
-} while (0)
-
-#define GET_(add_to, offset)  do {                                      \
-  if ((x=getc(fp)) == EOF)                                              \
-    return false;                                                       \
-  else if (offset >= sizeof(add_to) * 8)                                \
-    assert(x == 0);   /* otherwise it's too big for us to represent */  \
-  else                                                                  \
-    add_to |= (static_cast<size_type>(x) << ((offset) % (sizeof(add_to)*8))); \
-} while (0)
-
 
 // Hashtable class, used to implement the hashed associative containers
 // hash_set and hash_map.
@@ -397,12 +378,12 @@ class dense_hashtable {
     assert(num_deleted == 0);
   }
 
+  // Test if the given key is the deleted indicator.  Requires
+  // num_deleted > 0, for correctness of read(), and because that
+  // guarantees that key_info.delkey is valid.
   bool test_deleted_key(const key_type& key) const {
-    // The num_deleted test is crucial for read(): after read(), the ht values
-    // are garbage, and we don't want to think some of them are deleted.
-    // Invariant: !use_deleted implies num_deleted is 0.
-    assert(settings.use_deleted() || num_deleted == 0);
-    return num_deleted > 0 && equals(key_info.delkey, key);
+    assert(num_deleted > 0);
+    return equals(key_info.delkey, key);
   }
 
  public:
@@ -429,13 +410,19 @@ class dense_hashtable {
   // These are public so the iterators can use them
   // True if the item at position bucknum is "deleted" marker
   bool test_deleted(size_type bucknum) const {
-    return test_deleted_key(get_key(table[bucknum]));
+    // Invariant: !use_deleted() implies num_deleted is 0.
+    assert(settings.use_deleted() || num_deleted == 0);
+    return num_deleted > 0 && test_deleted_key(get_key(table[bucknum]));
   }
   bool test_deleted(const iterator &it) const {
-    return test_deleted_key(get_key(*it));
+    // Invariant: !use_deleted() implies num_deleted is 0.
+    assert(settings.use_deleted() || num_deleted == 0);
+    return num_deleted > 0 && test_deleted_key(get_key(*it));
   }
   bool test_deleted(const const_iterator &it) const {
-    return test_deleted_key(get_key(*it));
+    // Invariant: !use_deleted() implies num_deleted is 0.
+    assert(settings.use_deleted() || num_deleted == 0);
+    return num_deleted > 0 && test_deleted_key(get_key(*it));
   }
 
  private:
@@ -1100,107 +1087,78 @@ class dense_hashtable {
   typedef unsigned long MagicNumberType;
   static const MagicNumberType MAGIC_NUMBER = 0x13578642;
 
-  // Could make these faster with built-ins, but no real need.
-  template <typename IntType>
-  static bool write64(FILE *fp, IntType value) {
-    PUT_(value, 56);
-    PUT_(value, 48);
-    PUT_(value, 40);
-    PUT_(value, 32);
-    PUT_(value, 24);
-    PUT_(value, 16);
-    PUT_(value, 8);
-    PUT_(value, 0);
-    return true;
-  }
-
-  template <typename IntType>
-  static bool read64(FILE *fp, IntType *value) {  // reads into value
-    int x;   // used by GET_
-    GET_(*value, 56);
-    GET_(*value, 48);
-    GET_(*value, 40);
-    GET_(*value, 32);
-    GET_(*value, 24);
-    GET_(*value, 16);
-    GET_(*value, 8);
-    GET_(*value, 0);
-    return true;
-  }
-
  public:
-  bool write_metadata(FILE *fp) {
+  // I/O -- this is an add-on for writing hash table to disk
+  //
+  // INPUT and OUTPUT must be either a FILE, *or* a C++ stream
+  //    (istream, ostream, etc) *or* a class providing
+  //    Read(void*, size_t) and Write(const void*, size_t)
+  //    (respectively), which writes a buffer into a stream
+  //    (which the INPUT/OUTPUT instance presumably owns).
+
+  typedef sparsehash_internal::pod_serializer<value_type> NopointerSerializer;
+
+  // ValueSerializer: a functor.  operator()(OUTPUT*, const value_type&)
+  template <typename ValueSerializer, typename OUTPUT>
+  bool serialize(ValueSerializer serializer, OUTPUT *fp) {
     squash_deleted();           // so we don't have to worry about delkey
-    if ( !write64(fp, MAGIC_NUMBER) )  return false;
-    if ( !write64(fp, num_buckets) )  return false;
-    if ( !write64(fp, num_elements) )  return false;
+    if ( !sparsehash_internal::write_bigendian_number(fp, MAGIC_NUMBER, 4) )
+      return false;
+    if ( !sparsehash_internal::write_bigendian_number(fp, num_buckets, 8) )
+      return false;
+    if ( !sparsehash_internal::write_bigendian_number(fp, num_elements, 8) )
+      return false;
     // Now write a bitmap of non-empty buckets.
-    for (int i = 0; i < num_buckets; i += 8) {
+    for ( size_type i = 0; i < num_buckets; i += 8 ) {
       unsigned char bits = 0;
-      for (int bit = 0; bit < 8; ++bit) {
-        if (i + bit < num_buckets && !test_empty(i + bit))
+      for ( int bit = 0; bit < 8; ++bit ) {
+        if ( i + bit < num_buckets && !test_empty(i + bit) )
           bits |= (1 << bit);
       }
-      PUT_(bits, 0);
-    }
-    return true;
-  }
-
-  bool read_metadata(FILE *fp) {
-    num_deleted = 0;            // since we got rid before writing
-    assert(settings.use_empty() && "empty_key not set for read_metadata");
-    if (table)  val_info.deallocate(table, num_buckets);  // we'll make our own
-
-    size_type magic_read = 0;
-    if ( !read64(fp, &magic_read) )  return false;
-    if ( magic_read != MAGIC_NUMBER ) {
-      clear();                        // just to be consistent
-      return false;
-    }
-    if ( !read64(fp, &num_buckets) )  return false;
-    if ( !read64(fp, &num_elements) )  return false;
-
-    settings.reset_thresholds(bucket_count());
-    table = val_info.allocate(num_buckets);
-    assert(table);
-    fill_range_with_empty(table, table + num_buckets);
-
-    // Read the bitmap of non-empty buckets.
-    for (int i = 0; i < num_buckets; i += 8) {
-      int x;   // used by GET_
-      unsigned char bits;
-      GET_(bits, 0);
-      for (int bit = 0; bit < 8; ++bit) {
-        if (i + bit < num_buckets && (bits & (1 << bit)) ) {  // not empty
-          // TODO(csilvers): mark that this bucket is non-empty somehow
-          return false;
+      if ( !sparsehash_internal::write_data(fp, &bits, sizeof(bits)) )
+        return false;
+      for ( int bit = 0; bit < 8; ++bit ) {
+        if ( bits & (1 << bit) ) {
+          if ( !serializer(fp, table[i + bit]) ) return false;
         }
       }
     }
-
     return true;
   }
 
-  // If your keys and values are simple enough, we can write them to
-  // disk for you.  "simple enough" means value_type is a POD type
-  // that contains no pointers.  However, we don't try to normalize
-  // endianness
-  bool write_nopointer_data(FILE *fp) const {
-    for ( const_iterator it = begin(); it != end(); ++it ) {
-      if ( !fwrite(&*it, sizeof(*it), 1, fp) )  return false;
-    }
-    return false;
-  }
+  // INPUT: anything we've written an overload of read_data() for.
+  // ValueSerializer: a functor.  operator()(INPUT*, value_type*)
+  template <typename ValueSerializer, typename INPUT>
+  bool unserialize(ValueSerializer serializer, INPUT *fp) {
+    assert(settings.use_empty() && "empty_key not set for read");
 
-  // When reading, we have to override the potential const-ness of *it
-  bool read_nopointer_data(FILE *fp) {
-    for ( iterator it = begin(); it != end(); ++it ) {
-      if ( !fread(reinterpret_cast<void*>(&(*it)), sizeof(*it), 1, fp) )
+    clear();                        // just to be consistent
+    MagicNumberType magic_read;
+    if ( !sparsehash_internal::read_bigendian_number(fp, &magic_read, 4) )
+      return false;
+    if ( magic_read != MAGIC_NUMBER ) {
+      return false;
+    }
+    size_type new_num_buckets;
+    if ( !sparsehash_internal::read_bigendian_number(fp, &new_num_buckets, 8) )
+      return false;
+    clear_to_size(new_num_buckets);
+    if ( !sparsehash_internal::read_bigendian_number(fp, &num_elements, 8) )
+      return false;
+
+    // Read the bitmap of non-empty buckets.
+    for (size_type i = 0; i < num_buckets; i += 8) {
+      unsigned char bits;
+      if ( !sparsehash_internal::read_data(fp, &bits, sizeof(bits)) )
         return false;
+      for ( int bit = 0; bit < 8; ++bit ) {
+        if ( i + bit < num_buckets && (bits & (1 << bit)) ) {  // not empty
+          if ( !serializer(fp, &table[i + bit]) ) return false;
+        }
+      }
     }
-    return false;
+    return true;
   }
-
 
  private:
   template <class A>
@@ -1267,9 +1225,11 @@ class dense_hashtable {
   // have the same function signature, they must be packaged in
   // different classes.
   struct Settings :
-      sh_hashtable_settings<key_type, hasher, size_type, HT_MIN_BUCKETS> {
+      sparsehash_internal::sh_hashtable_settings<key_type, hasher,
+                                                 size_type, HT_MIN_BUCKETS> {
     explicit Settings(const hasher& hf)
-        : sh_hashtable_settings<key_type, hasher, size_type, HT_MIN_BUCKETS>(
+        : sparsehash_internal::sh_hashtable_settings<key_type, hasher,
+                                                     size_type, HT_MIN_BUCKETS>(
             hf, HT_OCCUPANCY_PCT / 100.0f, HT_EMPTY_PCT / 100.0f) {}
   };
 
@@ -1333,8 +1293,6 @@ inline void swap(dense_hashtable<V,K,HF,ExK,SetK,EqK,A> &x,
 }
 
 #undef JUMP_
-#undef PUT_
-#undef GET_
 
 template <class V, class K, class HF, class ExK, class SetK, class EqK, class A>
 const typename dense_hashtable<V,K,HF,ExK,SetK,EqK,A>::size_type
@@ -1355,9 +1313,6 @@ template <class V, class K, class HF, class ExK, class SetK, class EqK, class A>
 const int dense_hashtable<V,K,HF,ExK,SetK,EqK,A>::HT_EMPTY_PCT
   = static_cast<int>(0.4 *
                      dense_hashtable<V,K,HF,ExK,SetK,EqK,A>::HT_OCCUPANCY_PCT);
-
-#undef GET_
-#undef PUT_
 
 _END_GOOGLE_NAMESPACE_
 
