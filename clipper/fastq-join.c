@@ -108,10 +108,10 @@ int main (int argc, char **argv) {
 	}
 
 	const char *suffix[5]={"un1", "un2", "join", "un3", "join2"};
-        FILE *fout[5]; meminit(fout);
+	FILE *fout[5]; meminit(fout);
 	bool gzout[5]; meminit(gzout);
 	char *pre = out[0];
-        for (i = 0; i < (in[2] ? 5 : 3); ++i) {
+	for (i = 0; i < (in[2] ? 5 : 3); ++i) {
 		// prefix out
 		if (out_n == 1) {
 			out[i]=(char *)malloc(strlen(pre)+10);
@@ -125,12 +125,12 @@ int main (int argc, char **argv) {
 				strcat(out[i], suffix[i]);
 			}
 		} // else explicit
-                fout[i] = gzopen(out[i], "w",&gzout[i]);
-                if (!fout[i]) {
-                        fprintf(stderr, "Error opening output file '%s': %s\n",out[i], strerror(errno));
-                        return 1;
-                }
-        }
+		fout[i] = gzopen(out[i], "w",&gzout[i]);
+		if (!fout[i]) {
+				fprintf(stderr, "Error opening output file '%s': %s\n",out[i], strerror(errno));
+				return 1;
+		}
+	}
 
 //printf("in_n:%d in:%x fo:%x", in_n, in[3], fout[4]);
 //return 1;
@@ -150,7 +150,7 @@ int main (int argc, char **argv) {
 		for (i=0;i<in_n;++i) {
 			char c=getc(fin[i]);
 			if (c != '@')  {
-				fprintf(stderr, "%s doesn't appear to be a fastq file", in[i]);
+				fprintf(stderr, "%s doesn't appear to be a fastq file (%c)\n", in[i], c);
 				return 1;
 			}
 			ungetc(c, fin[i]);

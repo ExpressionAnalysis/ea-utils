@@ -27,19 +27,15 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-// ---
+// ----
 //
 // This is just a very thin wrapper over densehashtable.h, just
-// like sgi stl's stl_hash_set is a very thin wrapper over
+// like sgi stl's stl_hash_map is a very thin wrapper over
 // stl_hashtable.  The major thing we define is operator[], because
 // we have a concept of a data_type which stl_hashtable doesn't
 // (it only has a key and a value).
 //
-// This is more different from dense_hash_map than you might think,
-// because all iterators for sets are const (you obviously can't
-// change the key, and for sets there is no value).
-//
-// NOTE: this is exactly like sparse_hash_set.h, with the word
+// NOTE: this is exactly like sparse_hash_map.h, with the word
 // "sparse" replaced by "dense", except for the addition of
 // set_empty_key().
 //
@@ -63,7 +59,7 @@
 // Here are a few "power user" tips:
 //
 //    1) set_deleted_key():
-//         If you want to use erase() you must call set_deleted_key(),
+//         If you want to use erase() you *must* call set_deleted_key(),
 //         in addition to set_empty_key(), after construction.
 //         The deleted and empty keys must differ.
 //
@@ -79,61 +75,75 @@
 //         the hash table will never shrink.
 //
 // Roughly speaking:
-//   (1) dense_hash_set: fastest, uses the most memory unless entries are small
-//   (2) sparse_hash_set: slowest, uses the least memory
-//   (3) hash_set / unordered_set (STL): in the middle
+//   (1) dense_hash_map: fastest, uses the most memory unless entries are small
+//   (2) sparse_hash_map: slowest, uses the least memory
+//   (3) hash_map / unordered_map (STL): in the middle
 //
-// Typically I use sparse_hash_set when I care about space and/or when
-// I need to save the hashtable on disk.  I use hash_set otherwise.  I
+// Typically I use sparse_hash_map when I care about space and/or when
+// I need to save the hashtable on disk.  I use hash_map otherwise.  I
 // don't personally use dense_hash_set ever; some people use it for
 // small sets with lots of lookups.
 //
-// - dense_hash_set has, typically, about 78% memory overhead (if your
-//   data takes up X bytes, the hash_set uses .78X more bytes in overhead).
-// - sparse_hash_set has about 4 bits overhead per entry.
-// - sparse_hash_set can be 3-7 times slower than the others for lookup and,
+// - dense_hash_map has, typically, about 78% memory overhead (if your
+//   data takes up X bytes, the hash_map uses .78X more bytes in overhead).
+// - sparse_hash_map has about 4 bits overhead per entry.
+// - sparse_hash_map can be 3-7 times slower than the others for lookup and,
 //   especially, inserts.  See time_hash_map.cc for details.
 //
-// See /usr/(local/)?doc/sparsehash-*/dense_hash_set.html
+// See /usr/(local/)?doc/sparsehash-*/dense_hash_map.html
 // for information about how to use this class.
 
-#ifndef _DENSE_HASH_SET_H_
-#define _DENSE_HASH_SET_H_
+#ifndef _DENSE_HASH_MAP_H_
+#define _DENSE_HASH_MAP_H_
 
-#include <google/sparsehash/sparseconfig.h>
+#include <sparsehash/internal/sparseconfig.h>
 #include <algorithm>                        // needed by stl_alloc
 #include <functional>                       // for equal_to<>, select1st<>, etc
 #include <memory>                           // for alloc
 #include <utility>                          // for pair<>
-#include <google/sparsehash/densehashtable.h>        // IWYU pragma: export
-#include <google/sparsehash/libc_allocator_with_realloc.h>
+#include <sparsehash/internal/densehashtable.h>        // IWYU pragma: export
+#include <sparsehash/internal/libc_allocator_with_realloc.h>
 #include HASH_FUN_H                 // for hash<>
 _START_GOOGLE_NAMESPACE_
 
-template <class Value,
-          class HashFcn = SPARSEHASH_HASH<Value>,   // defined in sparseconfig.h
-          class EqualKey = std::equal_to<Value>,
-          class Alloc = libc_allocator_with_realloc<Value> >
-class dense_hash_set {
+template <class Key, class T,
+          class HashFcn = SPARSEHASH_HASH<Key>,   // defined in sparseconfig.h
+          class EqualKey = std::equal_to<Key>,
+          class Alloc = libc_allocator_with_realloc<std::pair<const Key, T> > >
+class dense_hash_map {
  private:
-  // Apparently identity is not stl-standard, so we define our own
-  struct Identity {
-    typedef const Value& result_type;
-    const Value& operator()(const Value& v) const { return v; }
+  // Apparently select1st is not stl-standard, so we define our own
+  struct SelectKey {
+    typedef const Key& result_type;
+    const Key& operator()(const std::pair<const Key, T>& p) const {
+      return p.first;
+    }
   };
   struct SetKey {
-    void operator()(Value* value, const Value& new_key) const {
-      *value = new_key;
+    void operator()(std::pair<const Key, T>* value, const Key& new_key) const {
+      *const_cast<Key*>(&value->first) = new_key;
+      // It would be nice to clear the rest of value here as well, in
+      // case it's taking up a lot of memory.  We do this by clearing
+      // the value.  This assumes T has a zero-arg constructor!
+      value->second = T();
+    }
+  };
+  // For operator[].
+  struct DefaultValue {
+    std::pair<const Key, T> operator()(const Key& key) {
+      return std::make_pair(key, T());
     }
   };
 
   // The actual data
-  typedef dense_hashtable<Value, Value, HashFcn, Identity, SetKey,
-                          EqualKey, Alloc> ht;
+  typedef dense_hashtable<std::pair<const Key, T>, Key, HashFcn, SelectKey,
+                          SetKey, EqualKey, Alloc> ht;
   ht rep;
 
  public:
   typedef typename ht::key_type key_type;
+  typedef T data_type;
+  typedef T mapped_type;
   typedef typename ht::value_type value_type;
   typedef typename ht::hasher hasher;
   typedef typename ht::key_equal key_equal;
@@ -141,49 +151,52 @@ class dense_hash_set {
 
   typedef typename ht::size_type size_type;
   typedef typename ht::difference_type difference_type;
-  typedef typename ht::const_pointer pointer;
+  typedef typename ht::pointer pointer;
   typedef typename ht::const_pointer const_pointer;
-  typedef typename ht::const_reference reference;
+  typedef typename ht::reference reference;
   typedef typename ht::const_reference const_reference;
 
-  typedef typename ht::const_iterator iterator;
+  typedef typename ht::iterator iterator;
   typedef typename ht::const_iterator const_iterator;
-  typedef typename ht::const_local_iterator local_iterator;
+  typedef typename ht::local_iterator local_iterator;
   typedef typename ht::const_local_iterator const_local_iterator;
 
+  // Iterator functions
+  iterator begin()                               { return rep.begin(); }
+  iterator end()                                 { return rep.end(); }
+  const_iterator begin() const                   { return rep.begin(); }
+  const_iterator end() const                     { return rep.end(); }
 
-  // Iterator functions -- recall all iterators are const
-  iterator begin() const                  { return rep.begin(); }
-  iterator end() const                    { return rep.end(); }
 
-  // These come from tr1's unordered_set. For us, a bucket has 0 or 1 elements.
-  local_iterator begin(size_type i) const { return rep.begin(i); }
-  local_iterator end(size_type i) const   { return rep.end(i); }
-
+  // These come from tr1's unordered_map. For us, a bucket has 0 or 1 elements.
+  local_iterator begin(size_type i)              { return rep.begin(i); }
+  local_iterator end(size_type i)                { return rep.end(i); }
+  const_local_iterator begin(size_type i) const  { return rep.begin(i); }
+  const_local_iterator end(size_type i) const    { return rep.end(i); }
 
   // Accessor functions
-  allocator_type get_allocator() const    { return rep.get_allocator(); }
-  hasher hash_funct() const               { return rep.hash_funct(); }
-  hasher hash_function() const            { return hash_funct(); }  // tr1 name
-  key_equal key_eq() const                { return rep.key_eq(); }
+  allocator_type get_allocator() const           { return rep.get_allocator(); }
+  hasher hash_funct() const                      { return rep.hash_funct(); }
+  hasher hash_function() const                   { return hash_funct(); }
+  key_equal key_eq() const                       { return rep.key_eq(); }
 
 
   // Constructors
-  explicit dense_hash_set(size_type expected_max_items_in_table = 0,
+  explicit dense_hash_map(size_type expected_max_items_in_table = 0,
                           const hasher& hf = hasher(),
                           const key_equal& eql = key_equal(),
                           const allocator_type& alloc = allocator_type())
-      : rep(expected_max_items_in_table, hf, eql, Identity(), SetKey(), alloc) {
+    : rep(expected_max_items_in_table, hf, eql, SelectKey(), SetKey(), alloc) {
   }
 
   template <class InputIterator>
-  dense_hash_set(InputIterator f, InputIterator l,
+  dense_hash_map(InputIterator f, InputIterator l,
                  const key_type& empty_key_val,
                  size_type expected_max_items_in_table = 0,
                  const hasher& hf = hasher(),
                  const key_equal& eql = key_equal(),
                  const allocator_type& alloc = allocator_type())
-      : rep(expected_max_items_in_table, hf, eql, Identity(), SetKey(), alloc) {
+    : rep(expected_max_items_in_table, hf, eql, SelectKey(), SetKey(), alloc) {
     set_empty_key(empty_key_val);
     rep.insert(f, l);
   }
@@ -192,10 +205,10 @@ class dense_hash_set {
   // We use the default destructor
 
   void clear()                        { rep.clear(); }
-  // This clears the hash set without resizing it down to the minimum
+  // This clears the hash map without resizing it down to the minimum
   // bucket count, but rather keeps the number of buckets constant
   void clear_no_resize()              { rep.clear_no_resize(); }
-  void swap(dense_hash_set& hs)       { rep.swap(hs.rep); }
+  void swap(dense_hash_map& hs)       { rep.swap(hs.rep); }
 
 
   // Functions concerning size
@@ -238,22 +251,33 @@ class dense_hash_set {
   }
 
   void resize(size_type hint)         { rep.resize(hint); }
-  void rehash(size_type hint)         { resize(hint); }     // the tr1 name
+  void rehash(size_type hint)         { resize(hint); }      // the tr1 name
 
   // Lookup routines
-  iterator find(const key_type& key) const           { return rep.find(key); }
+  iterator find(const key_type& key)                 { return rep.find(key); }
+  const_iterator find(const key_type& key) const     { return rep.find(key); }
+
+  data_type& operator[](const key_type& key) {       // This is our value-add!
+    // If key is in the hashtable, returns find(key)->second,
+    // otherwise returns insert(value_type(key, T()).first->second.
+    // Note it does not create an empty T unless the find fails.
+    return rep.template find_or_insert<DefaultValue>(key).second;
+  }
 
   size_type count(const key_type& key) const         { return rep.count(key); }
 
-  std::pair<iterator, iterator> equal_range(const key_type& key) const {
+  std::pair<iterator, iterator> equal_range(const key_type& key) {
+    return rep.equal_range(key);
+  }
+  std::pair<const_iterator, const_iterator> equal_range(const key_type& key)
+      const {
     return rep.equal_range(key);
   }
 
 
   // Insertion routines
   std::pair<iterator, bool> insert(const value_type& obj) {
-    std::pair<typename ht::iterator, bool> p = rep.insert(obj);
-    return std::pair<iterator, bool>(p.first, p.second);   // const to non-const
+    return rep.insert(obj);
   }
   template <class InputIterator> void insert(InputIterator f, InputIterator l) {
     rep.insert(f, l);
@@ -262,7 +286,7 @@ class dense_hash_set {
     rep.insert(f, l);
   }
   // Required for std::insert_iterator; the passed-in iterator is ignored.
-  iterator insert(iterator, const value_type& obj)   {
+  iterator insert(iterator, const value_type& obj) {
     return insert(obj).first;
   }
 
@@ -270,8 +294,12 @@ class dense_hash_set {
   // THESE ARE NON-STANDARD!  I make you specify an "impossible" key
   // value to identify deleted and empty buckets.  You can change the
   // deleted key as time goes on, or get rid of it entirely to be insert-only.
-  void set_empty_key(const key_type& key)     { rep.set_empty_key(key); }
-  key_type empty_key() const                  { return rep.empty_key(); }
+  void set_empty_key(const key_type& key)   {           // YOU MUST CALL THIS!
+    rep.set_empty_key(value_type(key, data_type()));    // rep wants a value
+  }
+  key_type empty_key() const {
+    return rep.empty_key().first;                       // rep returns a value
+  }
 
   void set_deleted_key(const key_type& key)   { rep.set_deleted_key(key); }
   void clear_deleted_key()                    { rep.clear_deleted_key(); }
@@ -284,34 +312,58 @@ class dense_hash_set {
 
 
   // Comparison
-  bool operator==(const dense_hash_set& hs) const    { return rep == hs.rep; }
-  bool operator!=(const dense_hash_set& hs) const    { return rep != hs.rep; }
+  bool operator==(const dense_hash_map& hs) const    { return rep == hs.rep; }
+  bool operator!=(const dense_hash_map& hs) const    { return rep != hs.rep; }
 
 
-  // I/O -- this is an add-on for writing metainformation to disk
+  // I/O -- this is an add-on for writing hash map to disk
   //
   // For maximum flexibility, this does not assume a particular
   // file type (though it will probably be a FILE *).  We just pass
   // the fp through to rep.
-  template <typename OUTPUT>
-  bool write_metadata(OUTPUT *fp)       { return rep.write_metadata(fp); }
 
-  template <typename INPUT>
-  bool read_metadata(INPUT *fp)         { return rep.read_metadata(fp); }
+  // If your keys and values are simple enough, you can pass this
+  // serializer to serialize()/unserialize().  "Simple enough" means
+  // value_type is a POD type that contains no pointers.  Note,
+  // however, we don't try to normalize endianness.
+  typedef typename ht::NopointerSerializer NopointerSerializer;
 
-  template <typename OUTPUT>
-  bool write_nopointer_data(OUTPUT *fp) { return rep.write_nopointer_data(fp); }
+  // serializer: a class providing operator()(OUTPUT*, const value_type&)
+  //    (writing value_type to OUTPUT).  You can specify a
+  //    NopointerSerializer object if appropriate (see above).
+  // fp: either a FILE*, OR an ostream*/subclass_of_ostream*, OR a
+  //    pointer to a class providing size_t Write(const void*, size_t),
+  //    which writes a buffer into a stream (which fp presumably
+  //    owns) and returns the number of bytes successfully written.
+  //    Note basic_ostream<not_char> is not currently supported.
+  template <typename ValueSerializer, typename OUTPUT>
+  bool serialize(ValueSerializer serializer, OUTPUT* fp) {
+    return rep.serialize(serializer, fp);
+  }
 
-  template <typename INPUT>
-  bool read_nopointer_data(INPUT *fp)   { return rep.read_nopointer_data(fp); }
+  // serializer: a functor providing operator()(INPUT*, value_type*)
+  //    (reading from INPUT and into value_type).  You can specify a
+  //    NopointerSerializer object if appropriate (see above).
+  // fp: either a FILE*, OR an istream*/subclass_of_istream*, OR a
+  //    pointer to a class providing size_t Read(void*, size_t),
+  //    which reads into a buffer from a stream (which fp presumably
+  //    owns) and returns the number of bytes successfully read.
+  //    Note basic_istream<not_char> is not currently supported.
+  // NOTE: Since value_type is std::pair<const Key, T>, ValueSerializer
+  // may need to do a const cast in order to fill in the key.
+  template <typename ValueSerializer, typename INPUT>
+  bool unserialize(ValueSerializer serializer, INPUT* fp) {
+    return rep.unserialize(serializer, fp);
+  }
 };
 
-template <class Val, class HashFcn, class EqualKey, class Alloc>
-inline void swap(dense_hash_set<Val, HashFcn, EqualKey, Alloc>& hs1,
-                 dense_hash_set<Val, HashFcn, EqualKey, Alloc>& hs2) {
-  hs1.swap(hs2);
+// We need a global swap as well
+template <class Key, class T, class HashFcn, class EqualKey, class Alloc>
+inline void swap(dense_hash_map<Key, T, HashFcn, EqualKey, Alloc>& hm1,
+                 dense_hash_map<Key, T, HashFcn, EqualKey, Alloc>& hm2) {
+  hm1.swap(hm2);
 }
 
 _END_GOOGLE_NAMESPACE_
 
-#endif /* _DENSE_HASH_SET_H_ */
+#endif /* _DENSE_HASH_MAP_H_ */

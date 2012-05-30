@@ -151,7 +151,6 @@ bool poorqual(int n, int l, const char *s, const char *q) {
         return 1;
 }
 
-
 #define comp(c) ((c)=='A'?'T':(c)=='a'?'t':(c)=='C'?'G':(c)=='c'?'g':(c)=='G'?'C':(c)=='g'?'c':(c)=='T'?'A':(c)=='t'?'a':(c))
 
 void revcomp(struct fq *d, struct fq *s) {
