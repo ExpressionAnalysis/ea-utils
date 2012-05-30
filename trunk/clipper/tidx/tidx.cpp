@@ -33,7 +33,7 @@ int main (int argc, char **argv) {
     int skip_i = 0;
 
     char c;
-    while ( (c = getopt (argc, argv, "hdt:r:c:b:e:i:a:nB")) != -1) {
+    while ( (c = getopt (argc, argv, "hdt:r:c:b:e:i:s:a:nB")) != -1) {
         switch (c) {
             case 'd':
                 debug=true; break;
@@ -77,14 +77,17 @@ int main (int argc, char **argv) {
         }
     }
 
-    if (!vin.size()) 
-        fail("Error: at least one -i index file is required\n");
+    if (!vin.size())  {
+        fail("Error: at least one -i index file is required\n"); usage(stderr);
+    }
 
-    if (! build && ! ain) 
-        fail("Error: one of -B or -a is required\n");
+    if (! build && ! ain) { 
+        fail("Error: one of -B or -a is required\n"); usage(stderr);
+    }
 
-    if (build && ain) 
-        fail("Error: only one of -B or -a is requiredi, not both\n");
+    if (build && ain) {
+        fail("Error: only one of -B or -a is required, not both\n"); usage(stderr);
+    }
 
     --nchr; --nbeg; --nend;
 
@@ -132,3 +135,38 @@ int main (int argc, char **argv) {
             delete vmap[f_i];
     }
 }
+
+void usage(FILE *f) {
+fputs(
+"Usage: tidx [options] -i IFILE [-i IFILE2...] -a AFILE\n"
+"   or: tidx [options] -B -i IFILE\n"
+"\n"
+"Fragments and merges overlapping regions in an file with start-stop values.\n"
+"Creating a simple, fast, compressed index\n"
+"\n"
+"Also can load that index, and search AFILE for intersecting lines\n"
+"\n"
+"If the 'group' column is zero, no grouping will be used\n"
+"\n"
+"If just -b is present during a search, then only that column\n"
+"is searched.\n"
+"\n"
+"If both -b and -e are present during a search, then all regions\n"
+"that overlap will be returned.\n"
+"\n"
+"Options and (defaults):\n"
+"\n"
+"-i IFILE       Text file to index (can specify more than one)\n"
+"-B             Build index, don't annotate\n"
+"-a FILE        Read text file and annotate\n"
+"-r STRING      Annotation response separator (^)\n"
+"-t CHAR(s)     Field separator (TAB)\n"
+"-c INT         Group by (chromosome) column (1)\n"
+"-b INT         Begin region column (2) (or position for annot)\n"
+"-e INT         End region column (3)\n"
+"-s INT or CHAR Skip rows starting with CHAR (#), or skip INT rows\n"
+"-n             Don't echo input lines\n"
+"\n"
+        ,f);
+}
+

@@ -229,27 +229,27 @@ void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, 
     if (debug) fprintf(stderr, "reading %s (%d, %d, %d)\n", in, nchr, nbeg, nend);
 	while (read_line(fin, l)>0) {	
         ++nl;
-        if (skip_i-- > 0)
-            continue;
-        if (*l.s==skip_c)
-            continue;
-        chomp_line(l);
-        vector<char *> v = split(l.s, sep);
-        if (nlast >= v.size()) {
-            fail("error, file %s, line %d: missing info\n", in, nl);
-        } 
-        annot a;
-        a.beg=atoi(v[nbeg]);
-        a.end=atoi(v[nend]);
-        if (a.beg > a.end) {
-            fail("error, file %s, line %d: beg > end : %d > %d\n", in, nl, a.beg, a.end);
+        if (skip_i > 0 || *l.s==skip_c) {
+            --skip_i;
+        } else {
+            chomp_line(l);
+            vector<char *> v = split(l.s, sep);
+            if (nlast >= v.size()) {
+                fail("error, file %s, line %d: missing info\n", in, nl);
+            } 
+            annot a;
+            a.beg=atoi(v[nbeg]);
+            a.end=atoi(v[nend]);
+            if (a.beg > a.end) {
+                fail("error, file %s, line %d: beg > end : %d > %d\n", in, nl, a.beg, a.end);
+            }
+            a.pos.push_back(tpos);
+            if (strcmp(v[nchr], p_chr.c_str())) {       // speed up
+                pvan = &map[v[nchr]];
+                p_chr=v[nchr];
+            }
+            pvan->push_back(a);
         }
-        a.pos.push_back(tpos);
-        if (strcmp(v[nchr], p_chr.c_str())) {       // speed up
-            pvan = &map[v[nchr]];
-            p_chr=v[nchr];
-        }
-        pvan->push_back(a);
         tpos = ftell(fin);
 	}
     dense_hash_map<string,vector<annot> >::iterator it;
@@ -336,47 +336,13 @@ void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, 
 
 }
 
-void usage(FILE *f) {
-fputs(
-"Usage: tidx [options] -i IFILE [-i IFILE2...] -a AFILE\n"
-"   or: tidx [options] -B -i IFILE\n"
-"\n"
-"Fragments and merges overlapping regions in an file with start-stop values.\n"
-"Creating a simple, fast, compressed index\n"
-"\n"
-"Also can load that index, and search AFILE for intersecting lines\n"
-"\n"
-"If the 'group' column is zero, no grouping will be used\n"
-"\n"
-"If just -b is present during a search, then only that column\n"
-"is searched.\n"
-"\n"
-"If both -b and -e are present during a search, then all regions\n"
-"that overlap will be returned.\n"
-"\n"
-"Options and (defaults):\n"
-"\n"
-"-i IFILE       Text file to index (can specify more than one)\n"
-"-B             Build index, don't annotate\n"
-"-a FILE        Read text file and annotate\n"
-"-r STRING      Annotation response separator (^)\n"
-"-t CHAR(s)     Field separator (TAB)\n"
-"-c INT         Group by (chromosome) column (1)\n"
-"-b INT         Begin region column (2) (or position for annot)\n"
-"-e INT         End region column (3)\n"
-"-s INT or CHAR Skip rows starting with CHAR (#), or skip INT rows\n"
-"-n             Don't echo input lines\n"
-"\n"
-        ,f);
-}
-
 double xtime() {
     struct timeval tm;
     gettimeofday(&tm, NULL);
     return (double) tm.tv_sec + ((double)tm.tv_usec)/1000000.0;
 }
 
-
+// for the api
 void tidx_build(const char *file, const char *sep, int chr, int beg, int end, int skip_i, char skip_c) {
     tidx n;
     n.build(file, sep, chr, beg, end, skip_i, skip_c); 

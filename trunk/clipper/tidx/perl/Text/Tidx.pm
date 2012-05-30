@@ -19,6 +19,16 @@ sub lookup {
     return Text::Tidx::SWIG::tidx::lookup_c($self, @_);
 }
 
+sub query {
+    my $self = shift;
+    my $res = Text::Tidx::SWIG::tidx::lookup_c($self, @ARGV[0..1], '^');
+    if (!$res) {
+        return ();
+    }
+    $res =~ s/^\^//;
+    return split /^/, $res;
+}
+
 sub build {
     return Text::Tidx::SWIG::tidx_build(@_);
 }

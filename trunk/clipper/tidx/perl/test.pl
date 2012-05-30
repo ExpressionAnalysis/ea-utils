@@ -1,7 +1,7 @@
-BEGIN {
-    @INC=("blib/lib",@INC);
-    $ENV{LD_LIBRARY_PATH}="./blib/arch/auto/Text/Tidx/SWIG";
-};
+#BEGIN {
+#    @INC=("blib/lib",@INC);
+#    $ENV{LD_LIBRARY_PATH}="./blib/arch/auto/Text/Tidx/SWIG";
+#};
 
 use Text::Tidx;
 
