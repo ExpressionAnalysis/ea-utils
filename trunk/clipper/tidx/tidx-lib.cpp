@@ -124,11 +124,10 @@ void chomp_line(struct line &l) {
 
 vector <long int> empty_vector;
 const vector<long int> &tidx::lookup(const char *chr, int pos) {
-//    printf("here 1: %s\n", chr);
     dense_hash_map<string,vector<annot> >::iterator it=map.find(chr);
     if (it == map.end()) return empty_vector;
     vector<annot> &va = it->second;
-//    printf("here 2: %d\n", (int) va.size());
+    if (debug) fprintf(stderr,"lookup: %s:%d -> %d\n", chr, pos, (int) va.size());
     int b=0, t=va.size(), c=0;
     while (t>b) {
         c=(t+b)/2;
@@ -202,6 +201,19 @@ void tidx::init() {
     map.set_empty_key("-");
 }
 
+void tidx::dump(FILE *fh) {
+    dense_hash_map<string,vector<annot> >::iterator it;
+    fprintf(fh,"%s",path.c_str());
+    while (it != map.end()) {
+        vector<annot> &van = it->second;
+        int i;
+        if (debug) fprintf(stderr, "frag %s : %ld -> ", it->first.c_str(), van.size());
+        for (i=0;i<van.size()-1;++i) {
+            fprintf(fh, "%s\t%d\t%d\t%ld", it->first.c_str(), van[i].beg, van[i].end, van[i].pos.size());
+        }
+    }    
+}
+
 void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c) {
 	FILE *fin=fopen(in,"r");
 
@@ -263,11 +275,13 @@ void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, 
         for (i=0;i<van.size()-1;++i) {
             if (van[i].beg >= van[i+1].beg && van[i].end == van[i+1].end) {
                 // exact match
+                if (debug) fprintf(stderr, " [dup %d]", van[i].beg);
                 prepend(van[i+1].pos,van[i].pos);
                 // skip next... (empty pos won't be serialized)
                 assert(van[i].beg == van[i+1].beg);
                 van[i].pos.clear();
             } else if (van[i].end >= van[i+1].beg) {
+                if (debug) fprintf(stderr, " [ovr %d]", van[i].beg);
                 // overlap next
                 int new_st;
                 int new_en;
@@ -306,10 +320,13 @@ void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, 
             }
         }
         long j = 0;
-        for (i=0;i<van.size()-1;++i) {
+        for (i=0;i<van.size();++i) {
+            // overlap next
             if (van[i].pos.size() != 0)
                 if (i != j) 
                     van[j++]=van[i];
+                else
+                    ++j;
         }
         if (j != van.size()) {
             if (debug) fprintf(stderr, "(rm %ld) ", van.size()-j);
@@ -333,7 +350,7 @@ void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, 
     xen = xtime();
     speed = xen-xst;
     if (debug) fprintf(stderr, "read in %g secs\n", speed);
-
+    path=in;
 }
 
 double xtime() {

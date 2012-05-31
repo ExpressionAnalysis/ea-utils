@@ -19,7 +19,7 @@ tidx_wrap.so: tidx_wrap.cxx tidx-lib.cpp fastq-lib.cpp utils.cpp tidx.h
 	g++ -O3 -fPIC -I${PERL_INC}/CORE  tidx_wrap.cxx tidx-lib.cpp fastq-lib.cpp utils.cpp -shared -o tidx_wrap.so
 
 perl/Tidx.bs perl/Makefile: perl/Makefile.PL tidx_wrap.so
-	cd perl; perl Makefile.PL; ${MAKE} $(MFLAGS)
+	cd perl; perl Makefile.PL; ${MAKE} $(MFLAGS) INSTALL_BASE=${PREFIX}
 
 ${PREFIX}/bin/tidx: tidx
 	cp tidx ${PREFIX}/bin

@@ -11,6 +11,7 @@ public:
 
 class tidx {
     FILE *fh;
+    void init();
 public:
     bool debug;
     tidx() {init();};
@@ -19,7 +20,7 @@ public:
     std::string path;
     google::dense_hash_map<std::string,std::vector<annot> > map;
 
-    void init();
+    void dump(FILE *stream);
     bool read(const char *path);
     void build(const char *path, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c);
 

@@ -28,12 +28,14 @@ int main (int argc, char **argv) {
     const char *ain= NULL;
 	const char *sep = "\t";
     const char *msep = "^";
+    const char *trim = "chr";
+    char *point = NULL;
     int nchr = 1, nbeg = 2, nend = 3;
     char skip_c = '#';
     int skip_i = 0;
 
     char c;
-    while ( (c = getopt (argc, argv, "hdt:r:c:b:e:i:s:a:nB")) != -1) {
+    while ( (c = getopt (argc, argv, "hdt:r:c:b:T:e:p:i:s:a:nB")) != -1) {
         switch (c) {
             case 'd':
                 debug=true; break;
@@ -45,6 +47,8 @@ int main (int argc, char **argv) {
                 usage(stdout); exit(0);
             case 't':
                 sep = optarg; break;
+            case 'p':
+                point = optarg; break;
             case 's':
                 if (isdigit(*optarg))
                     skip_i = atoi(optarg);
@@ -53,6 +57,8 @@ int main (int argc, char **argv) {
                 break;
             case 'r':
                 msep = optarg; break;
+            case 'T':
+                trim = optarg; break;
             case 'c':
                 nchr = atoi(optarg); break;
             case 'i':
@@ -81,12 +87,12 @@ int main (int argc, char **argv) {
         fail("Error: at least one -i index file is required\n"); usage(stderr);
     }
 
-    if (! build && ! ain) { 
-        fail("Error: one of -B or -a is required\n"); usage(stderr);
+    if (! build && ! ain && !point) { 
+        fail("Error: one of -B, -p or -a is required\n"); usage(stderr);
     }
 
-    if (build && ain) {
-        fail("Error: only one of -B or -a is required, not both\n"); usage(stderr);
+    if ((!!build + !!ain + !!point) > 1) {
+        fail("Error: only one of -B, -p or -a is allowed\n"); usage(stderr);
     }
 
     --nchr; --nbeg; --nend;
@@ -95,40 +101,64 @@ int main (int argc, char **argv) {
         int f_i;
         for (f_i=0;f_i<vin.size();++f_i) {
             tidx x;
+            if (debug) 
+                x.debug=true;
             x.build(vin[f_i], sep, nchr, nbeg, nend, skip_i, skip_c);
         }
     } else {
-        FILE *fin = fopen(ain, "r");
-        if (!fin)
-            fail("%s:%s", ain,strerror(errno));
 	    struct line l; meminit(l);
         int nl = 0;
         int f_i;
         vector<tidx *>vmap; vmap.resize(vin.size());
         for (f_i=0;f_i<vin.size();++f_i) { 
             vmap[f_i]=new tidx(vin[f_i]);
+            if (debug) 
+                vmap[f_i]->debug=true;
         }
 
-	    while (read_line(fin, l)>0) {
-            ++nl;
-
-            chomp_line(l);
-
-            fputs(l.s,stdout);                              // echo
-
-            vector<char *> v = split(l.s, sep);     // todo, only get the keys desired, don't destroy
-
-            string res;
-            if (v.size() > nchr && v.size() > nbeg) {
-                for (f_i=0;f_i<vin.size();++f_i) {
-                    string tmp = vmap[f_i]->lookup(v[nchr], atoi(v[nbeg]), msep);
-                    if (tmp.size()) {
-                        res = res + tmp;
-                    }
+        if ( point ) {
+            char * p = strchr(point, ':');
+            if (!p) {
+                fail("Error: -p requires chr:pos argument\n");
+            }
+            *p++ = '\0';
+            long pos = atol(p);
+            int found = 0;
+            for (f_i=0;f_i<vin.size();++f_i) {
+                string tmp = vmap[f_i]->lookup(point, pos, msep);
+                if (tmp.size()) {
+                    ++found;
+                    fputs(tmp.c_str()+(found==1),stdout);                             // echo
                 }
             }
-            fputs(res.c_str(),stdout);                             // echo
-            fputc('\n',stdout);
+            if (found) fputc('\n',stdout);
+            return !found;
+        } else {
+            FILE *fin = fopen(ain, "r");
+            if (!fin)
+                fail("error '%s':%s", ain,strerror(errno));
+
+            while (read_line(fin, l)>0) {
+                ++nl;
+
+                chomp_line(l);
+
+                fputs(l.s,stdout);                              // echo
+
+                vector<char *> v = split(l.s, sep);     // todo, only get the keys desired, don't destroy
+
+                string res;
+                if (v.size() > nchr && v.size() > nbeg) {
+                    for (f_i=0;f_i<vin.size();++f_i) {
+                        string tmp = vmap[f_i]->lookup(v[nchr], atol(v[nbeg]), msep);
+                        if (tmp.size()) {
+                            res = res + tmp;
+                        }
+                    }
+                }
+                fputs(res.c_str(),stdout);                             // echo
+                fputc('\n',stdout);
+            }
         }
 
         for (f_i=0;f_i<vin.size();++f_i) 
