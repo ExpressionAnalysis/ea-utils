@@ -94,20 +94,35 @@ int gzclose(FILE *f, bool isgz) {
 FILE *gzopen(const char *f, const char *m, bool*isgz) {
 	// maybe use zlib some day?
         FILE *h;
-        if (!strcmp(fext(f),".gz")) {
-                char *tmp=(char *)malloc(strlen(f)+100);
-                if (strchr(m,'w')) {
-                        strcpy(tmp, "gzip --rsyncable > '");
-                        strcat(tmp, f);
-                        strcat(tmp, "'");
-                } else {
-                        strcpy(tmp, "gunzip -c '");
-                        strcat(tmp, f);
-                        strcat(tmp, "'");
-                }
-		h = popen(tmp, m);
-		*isgz=1;
-		free(tmp);
+        const char * ext = fext(f);
+        if (!strcmp(ext,".gz")) {
+            char *tmp=(char *)malloc(strlen(f)+100);
+            if (strchr(m,'w')) {
+                    strcpy(tmp, "gzip --rsyncable > '");
+                    strcat(tmp, f);
+                    strcat(tmp, "'");
+            } else {
+                    strcpy(tmp, "gunzip -c '");
+                    strcat(tmp, f);
+                    strcat(tmp, "'");
+            }
+            h = popen(tmp, m);
+            *isgz=1;
+            free(tmp);
+        } else if (!strcmp(ext,".zip")) {
+            char *tmp=(char *)malloc(strlen(f)+100);
+            if (strchr(m,'w')) {
+                    strcpy(tmp, "zip -q '");
+                    strcat(tmp, f);
+                    strcat(tmp, "' -");
+            } else {
+                    strcpy(tmp, "unzip -p '");
+                    strcat(tmp, f);
+                    strcat(tmp, "'");
+            }
+            h = popen(tmp, m);
+            *isgz=1;
+            free(tmp);
         } else {
                 h = fopen(f, m);
                 *isgz=0;
