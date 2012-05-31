@@ -39,10 +39,10 @@ $(PKG).tar.gz: Makefile $(SRC) $(PKG).spec fastq-lib.cpp fastq-lib.h sam-stats.c
 $(PKG).${VER}-${REL}.tar.gz: $(PKG).tar.gz
 	cp $< $@
 
-%: %.c
+%: %.c fastq-lib.cpp
 	$(CC) $(CFLAGS) fastq-lib.cpp -o $@ $<
 
-%: %.cpp
+%: %.cpp fastq-lib.cpp
 	$(CC) $(CFLAGS) fastq-lib.cpp -o $@ $<
 
 # this requires bamtools and google's sparsehash headers
