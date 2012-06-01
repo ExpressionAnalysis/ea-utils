@@ -214,6 +214,7 @@ void tidx::dump(FILE *fh) {
     }    
 }
 
+// fun part
 void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c) {
 	FILE *fin=fopen(in,"r");
 
@@ -238,8 +239,9 @@ void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, 
     path=in;
     vector<annot> *pvan;
     long tpos = ftell(fin);
+    // read in the annotation file
     if (debug) fprintf(stderr, "reading %s (%d, %d, %d)\n", in, nchr, nbeg, nend);
-	while (read_line(fin, l)>0) {	
+	while (read_line(fin, l)>0) {
         ++nl;
         if (skip_i > 0 || *l.s==skip_c) {
             --skip_i;
@@ -266,9 +268,11 @@ void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, 
 	}
     dense_hash_map<string,vector<annot> >::iterator it;
 
+    // for each chromosome
     it = map.begin();
     while (it != map.end()) {
         vector<annot> &van = it->second;
+        // sort the annotation file by beginning of region
         sort(van.begin(), van.end(), annot_comp);
         int i;
         if (debug) fprintf(stderr, "frag %s : %ld -> ", it->first.c_str(), van.size());
@@ -276,6 +280,7 @@ void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, 
             if (van[i].beg >= van[i+1].beg && van[i].end == van[i+1].end) {
                 // exact match
                 if (debug) fprintf(stderr, " [dup %d]", van[i].beg);
+                // merge annotations
                 prepend(van[i+1].pos,van[i].pos);
                 // skip next... (empty pos won't be serialized)
                 assert(van[i].beg == van[i+1].beg);
@@ -286,14 +291,15 @@ void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, 
                 int new_st;
                 int new_en;
 
+                // forced to initialize here so we can use a reference (for efficiency)
                 vector<long> &new_ro = van[i].pos;
                 
                 if (van[i].end < van[i+1].end) {
                     // contained within next, so new frag starting after i stop
                     new_st = van[i].end + 1;
-                    new_en = van[i+1].end + 1;
+                    new_en = van[i+1].end;
                     new_ro = van[i+1].pos;                  // that only contains the other
-                    van[i+1].end=van[i].end;                // shorten me
+                    van[i+1].end=van[i].end;                // shorten next to my end
                     append(van[i+1].pos,van[i].pos);        // and now the other contains me
                 } else {
                     // passes next, so next contains all of me
