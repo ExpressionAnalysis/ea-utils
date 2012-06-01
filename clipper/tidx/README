@@ -1,0 +1,11 @@
+This program aims to index a text file.
+
+It should probably use a file-based btree, instead of reading the whole thing into RAM (DBSnp eats 1.2GB ram).
+
+The important pert of th algorithm is the part that
+
+a) sorts
+b) removes overlaps
+c) creates an index that can be searched trivially, rather than requiring an r-tree
+
+This could be generalized to n-dminensional speces as well.... by removing all possible overlapping regions
