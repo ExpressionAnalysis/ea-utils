@@ -556,7 +556,7 @@ if ($opt{wait}) {
 		}
 	}
 
-	my $host = $info{hostname} ? $info{hostname} : $info{ip};
+	my $host = $info{hostname} ? $info{hostname} : $info{ip};           # support old ver which didn't have hostname
 
 	if ($verbose) {
 		printf STDERR "Host:	%s\n", $host;
@@ -839,8 +839,8 @@ sub process_message {
 			return "Invalid edit request (@args)\n";
 		} elsif (! -e "$conf{spool}/jobs/$jid") {
 			if (! -e "$conf{spool}/jobs/$jid.ip") {
-				xlog("error", "Job $jid not found");
-				return "Job $jid not found";
+				xlog("error", "Job $jid not found during jedit");
+				return "Job $jid not found during jedit";
 			} else {
 				my $ip = slurp("$conf{spool}/jobs/$jid.ip");
 # tell client to send an 'xedit' to the running node
@@ -1168,38 +1168,42 @@ sub process_message {
 			}
 			$io_wait{$jid}->{status}=127+$sig;
 			$io_wait{$jid}->{error}="Job $jid aborted";
+            # this should be one function
 			unlink "$conf{spool}/stdio/$pid.err";
-			unlink "$conf{spool}/stdio/$pid.log";
+			unlink "$conf{spool}/stdio/$pid.out";
+			unlink "$conf{spool}/stdio/$pid.stat";
+			unlink "$conf{spool}/stdio/$jid.time";
 		} else {
-			return "Job $jid not found";
+			return "Job $jid not found for xabort";
 		}
 	} elsif ($cmd eq 'xio') {
 		my ($jid) = @args;
 		my $pid = slurp("$conf{spool}/jpids/$jid");
 # someone has showed recent interest in this one
 		if ($pid > 1) {
-			touch("$conf{spool}/jpids/$jid");
-			$io_wait{$jid}->{type} = 'io';
-			$io_wait{$jid}->{sock} = $sock;
-			$io_wait{$jid}->{time} = time();		# toss this entry if it gets old
+                touch("$conf{spool}/jpids/$jid");
+                $io_wait{$jid}->{type} = 'io';
+                $io_wait{$jid}->{sock} = $sock;
+                $io_wait{$jid}->{time} = time();		# toss this entry if it gets old
 				return ($SOCK_WAIT);				# leave socket open for response
 		} else {
 #		print "IOWAIT: " . Dumper \%io_wait;
 			xlog("error", "Wait xio for job ($jid) which isn't running anymore, and there's no data for it.");
-			return ($SOCK_RAW=>"name:fake.err\nlen:14\n\nJob not found\nname:fake.out\nlen:0\n\nname:fake.stat\nlen:4\n\n-102");
+			return ($SOCK_RAW=>"name:fake.err\nlen:14\n\nJob $jid not found during xio\nname:fake.out\nlen:0\n\nname:fake.stat\nlen:4\n\n-102");
 		}
 	} elsif ($cmd eq 'xstat') {
 		my ($jid) = @args;
 		my $pid = slurp("$conf{spool}/jpids/$jid");
 # xstat means you don't want i/o, just status... 
 		unlink  "$conf{spool}/stdio/$pid.out";
+		unlink  "$conf{spool}/stdio/$jid.time";
 		$io_wait{$jid}->{type} = 'stat';
 
 		$io_wait{$jid}->{sock} = $sock;
 		$io_wait{$jid}->{time} = time();		# toss this entry if it gets old
 			if ($pid <= 1) {
 				xlog("error", "Wait xstat for job ($jid) which isn't running");
-				return (-102, "Job $jid not found")
+				return (-102, "Job $jid not found during xstat")
 			}
 		return ($SOCK_WAIT);				# leave socket open for response
 	} elsif ($cmd eq 'jinfo') {				# tell me what host a job is on
@@ -1208,7 +1212,7 @@ sub process_message {
 			if (!$jid || ! -e "$conf{spool}/jobs/$jid.ip") {
 				my $ip = $sock->peerhost();
 				xlog("error", "Job '$jid' does not exist from $ip") if $jid;
-				return (error=>"Job $jid does not exist.", jid=>-1, ip=>$conf{master}, port=>$conf{master_port});
+				return (error=>"Job $jid does not exist during jinfo.", jid=>-1, ip=>$conf{master}, port=>$conf{master_port});
 			} else {
 				my $ip = slurp("$conf{spool}/jobs/$jid.ip");
 				if (!$ip) {
@@ -1218,9 +1222,10 @@ sub process_message {
 				return (jid=>$jid, ip=>$ip, port=>$nodes{$ip}->{port}, hostname=>$nodes{$ip}->{hostname});
 			}
 		} else {
+            # wait for job start
 			$run_wait{$jid}->{sock} = $sock;
 			$run_wait{$jid}->{type} = 'start';      # socket waits for execution start
-				return ($SOCK_WAIT);                    # leave socket open for response
+            return ($SOCK_WAIT);                    # leave socket open for response
 		}
 	} elsif ($cmd eq 'run') {
 # user command, returns jid=>jobid [, error=>string]
@@ -1663,8 +1668,8 @@ sub srvexec {
 		}
 		closedir D;
 
-                opendir(D,"$conf{spool}/jpids");
-                while(my $jid = readdir(D)) {
+            opendir(D,"$conf{spool}/jpids");
+            while(my $jid = readdir(D)) {
 			next unless /^\d/;
 
 			# no xio requests, and no stats in a long time...
@@ -1699,6 +1704,7 @@ sub srvexec {
 					xlog("error", "Cleanup leftover err/out for $kid");
 					unlink "$conf{spool}/stdio/$kid.err";
 					unlink "$conf{spool}/stdio/$kid.out";
+				}
 				}
 			}
 		}
