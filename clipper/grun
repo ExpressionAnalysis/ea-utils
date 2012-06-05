@@ -1705,7 +1705,6 @@ sub srvexec {
 					unlink "$conf{spool}/stdio/$kid.err";
 					unlink "$conf{spool}/stdio/$kid.out";
 				}
-				}
 			}
 		}
 		closedir(D);
