@@ -975,7 +975,7 @@ void usage(FILE *f) {
 "-G NAME	Group(s) matching NAME only\n"
 "-x		Don't trim barcodes before writing\n"
 "-n		Don't execute, just print likely barcode list\n"
-"-v C		Verify that mated id's match up to character C ('/' for illumina)\n"
+"-v C		Verify that mated id's match up to character C (Use ' ' for illumina)\n"
 "-m N		Allow up to N mismatches, as long as they are unique (1)\n"
 	,f);
 }
