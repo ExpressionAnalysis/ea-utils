@@ -560,7 +560,8 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 	}
 	if (trackdup) {
 		size_t p;
-		if ((p = name.find_first_of('/'))!=string::npos) 
+        // illumina changed things
+		if ((p = name.find_first_of(' '))!=string::npos) 
 				name.resize(p);
 		int x=++dups[name];
 		if (x>dat.dupmax) 
