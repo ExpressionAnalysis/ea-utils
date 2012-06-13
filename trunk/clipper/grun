@@ -371,6 +371,11 @@ if (!@cmd) {
 	die usage();
 }
 
+if ($cmd[$#cmd] =~ /\&$/) {
+    # TODO: grun should wait for all kids, and disallow detaching, not just get rude here
+    die "Not running background-only job.  You might mean: grun \"command\" &.\n";
+}
+
 if ($conf{auto_profile}) {
 	if (-e ($conf{auto_profile})) {
 		my $cmd = join ' ', @cmd;
@@ -1070,7 +1075,8 @@ sub process_message {
 					next if ref($opts->{$_});
 					$ENV{"_GRUN_OPT_$_"} = $opts->{$_};
 				}
-				$ENV{"_GRUN"} = 1;
+				$ENV{"_GRUN"} = $opts->{id};
+				$ENV{"SGE_TASK_ID"} = $opts->{id};
 				my $err;
 				my $ret;
 
@@ -1668,8 +1674,8 @@ sub srvexec {
 		}
 		closedir D;
 
-            opendir(D,"$conf{spool}/jpids");
-            while(my $jid = readdir(D)) {
+        opendir(D,"$conf{spool}/jpids");
+        while(my $jid = readdir(D)) {
 			next unless /^\d/;
 
 			# no xio requests, and no stats in a long time...
