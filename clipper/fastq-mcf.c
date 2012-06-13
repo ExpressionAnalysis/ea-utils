@@ -76,7 +76,7 @@ int main (int argc, char **argv) {
 	int nmin = 1, nkeep = 19, nmax=0;
 	float minpct = 0.25;
 	int pctdiff = 10;
-	int sampcnt = 200000;			// # of reads to sample to determine adapter profile, and base skewing
+	int sampcnt = 300000;			// # of reads to sample to determine adapter profile, and base skewing
 	int xmax = -1;
 	float scale = 2.2;
 	int noclip=0;
@@ -89,6 +89,7 @@ int main (int argc, char **argv) {
 	char phred = 0;
 	bool force = 0;
 	int ilv3 = -1;
+    bool noexec = 0;
 
 	int i;
 
@@ -575,6 +576,19 @@ int main (int argc, char **argv) {
 					cnt = ad[a].bcnt[i];
 				}
 
+                char *p;
+                if (p=strstr(ad[a].id, "_3p")) {
+                    if (p[3] == '\0' || p[3] == '_') {
+                        ad[a].end[i]='e'; 
+					    cnt = ad[a].ecnt[i];
+                    }
+                } else if (p=strstr(ad[a].id, "_5p")) {
+                    if (p[3] == '\0' || p[3] == '_') {
+                        ad[a].end[i]='b';
+                        cnt = ad[a].bcnt[i];
+                    }
+                }
+
 				// user supplied end.... don't clip elsewhere
 				if (end[i] && ad[a].end[i] != end[i])
 					continue;
@@ -597,6 +611,7 @@ int main (int argc, char **argv) {
 			continue;
 		ad[newc++]=ad[a];
 	}
+
 	acnt=newc;
 
 	if (acnt == 0 && !someskew && !force && !needqtrim && !ilv3) {
