@@ -109,7 +109,7 @@ if ($qinfo) {
 
 	Getopt::Long::Configure qw(no_require_order no_ignore_case passthrough);
 	my %opt;
-	GetOptions(\%opt, "silent", "inplace", "hosts=s") || die usage();
+	GetOptions(\%opt, "silent", "inplace", "hosts=s", "debug") || die usage();
 	my $cmd = shift @ARGV;
 	die usage() if !$cmd;
 
@@ -154,10 +154,12 @@ if ($qinfo) {
 		} elsif ((!samehost($host,$conf{bind}) || (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|stat$/)))) {
 # this could get ugly, if called a lot, may want to make more efficient
 			sendcmd($host, $port, 'trace', 1) if ($conf{trace});
+            warn ("waitmsg($host, $port, 'xcmd', $cmd, @arg, %opt)\n") if $opt{debug};
 			my ($res) = waitmsg($host, $port, "xcmd", $cmd, @arg, %opt);
 			print $res;
 			sendcmd($host, $port, 'trace', 0) if ($conf{trace});
 		} else {
+            warn ("using local queue status, host $host is $conf{bind}/$conf{hostip} ENV is " . `hostname` . "\n") if $opt{debug};
 			if ($cmd eq 'stat') {
 				print shownodes(@arg);
 			}	
@@ -223,7 +225,7 @@ if ($editjob) {
 		$_=$ARGV[0];
 		for (split /,/, $_) {
 			my ($key, $val) = $_ =~ /^([^=]+)(?:=(.*))?$/;
-			my $nk = bestunique($key, qw(hold resume memory cpus state), @metrics, @labels);
+			my $nk = bestunique($key, qw(hold resume memory cpus state hosts), @metrics, @labels);
 			$key = $nk if $nk;
 			$key = 'state', $val = 'hold' if ($key eq 'hold');
 			$key = 'state', $val = 'resume' if ($key eq 'resume');
@@ -1076,7 +1078,9 @@ sub process_message {
 					$ENV{"_GRUN_OPT_$_"} = $opts->{$_};
 				}
 				$ENV{"_GRUN"} = $opts->{id};
-				$ENV{"SGE_TASK_ID"} = $opts->{id};
+                if (!$ENV{SGE_TASK_ID}) {
+    				$ENV{"SGE_TASK_ID"} = $opts->{id};
+                }
 				my $err;
 				my $ret;
 
@@ -1339,7 +1343,7 @@ sub schedule {
 
 	# no attempt here to prioritize jobs, just match and go
 	my $cnt=0;
-        for my $jid (@D) {
+    for my $jid (@D) {
 		my $jfil = "$conf{spool}/jobs/$jid";
 		# probably should have a folder per job to avoid this
 		next if ($jfil =~ /\.ip$/);
@@ -1496,10 +1500,9 @@ sub sockresp {
 
 # called at start, and kill -HUP
 sub init {
-	if (!$ENV{HOSTNAME}) {
-		$ENV{HOSTNAME} = `hostname`;
-		chomp $ENV{HOSTNAME};
-	}
+    $ENV{HOSTNAME} = `hostname`;
+    chomp $ENV{HOSTNAME};
+
 	readconf();
 	if ($daemon) {
 		mkdir $conf{spool};
