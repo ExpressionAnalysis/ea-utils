@@ -1,0 +1,106 @@
+#!/usr/bin/perl
+
+#Copyright (c) 2012 Erik Aronesty
+#
+#Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+#
+#The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+#
+#THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+$in = $ARGV[0];
+
+open(IN, $in) ||  die "$in:$!\n";
+
+my $seq;
+while (<IN>) {
+	if (/^>/) {
+		summ();
+		$ln=0;
+        $seq='';
+		next;
+	} else {
+		chomp;
+        $seq .= $_;
+		$ln += length($_);
+	}
+}
+
+summ() if $ln;
+
+print "entries\t$gc\n";
+print "len max\t$mx\n";
+print "len min\t$mn\n";
+printf "len mean\t%d\n", $tl/$gc;
+print "total bases\t$tl\n";
+
+@ln = sort {$a <=> $b} @ln;
+
+printf "len q1\t%d\n", quantile(\@ln, .25);
+printf "len median\t%d\n", quantile(\@ln, .50);
+printf "len q3\t%d\n", quantile(\@ln, .75);
+
+@gt500 = grep {$_>500} @ln;
+$bgt500 = 0; for (@gt500) { $bgt500 += $_ };
+
+for (@ln) {
+	$sum += $_;
+	if (!$n50 && $sum >= $tl*.5) {
+		$n50=$_;
+	}
+	if (!$n90 && $sum >= $tl*.9) {
+		$n90=$_;
+	}
+}
+
+for (@ln) {
+	if ($_ >= 500) {
+		$xsum += $_;
+		if (!$xn50 && $xsum >= $bgt500*.5) {
+			$xn50=$_;
+		}
+		if (!$xn90 && $xsum >= $bgt500*.9) {
+			$xn90=$_;
+		}
+	}
+}
+
+printf "N50\t%d\n", $n50;
+printf "N90\t%d\n", $n90;
+printf "N50 > 500\t%d\n", $xn50;
+printf "N90 > 500\t%d\n", $xn90;
+
+printf "contigs > 500\t%d\n", scalar @gt500;
+printf "bases in contigs > 500\t%d\n", $bgt500;
+
+my $mer21 = 0;
+for (values(%mer)) {$mer21+=1 if $_>1};
+$mer21 = 100*$mer21/scalar(keys(%mer));
+printf "dup-mer-21\t%2.2f\n", $mer21;
+
+
+sub summ  {
+	if ($ln > 0) {
+		++$gc;
+		$tl+=$ln;
+		$mx = $ln if $ln>$mx;
+		$mn = $ln if $ln<$mn || !$mn;
+        for ($i=0;$i<length($seq)-21;++$i) {
+            ++$mer{substr($seq,$i,21)};
+        }
+	}
+	push @ln, $ln;
+}
+
+sub quantile {
+    my ($a,$p) = @_;
+    my $l = scalar(@{$a});
+    my $t = ($l-1)*$p;
+    my $v=$a->[int($t)];
+    if ($t > int($t)) {
+        return $v + $p * ($a->[int($t)+1] - $v);
+    } else {
+        return $v;
+    }
+}
+	
