@@ -12,6 +12,7 @@
 
 #include <string>
 #include <queue>
+#include <list>
 
 #include <google/sparse_hash_map> // or sparse_hash_set, dense_hash_map, ...
 #include <google/dense_hash_map> // or sparse_hash_set, dense_hash_map, ...
@@ -83,40 +84,60 @@ public:
 
 bool hitolocall (const vcall &i,const vcall &j) {return ((i.depth())>(j.depth()));}
 
+class Read {
+public:
+    int MapQ;
+    string Seq;
+    Read() {MapQ=0;};
+};
+
+class PileupReads {
+public:
+    int MeanReadLen;
+    int TotReadLen;
+    int BinMax;
+    deque<Read> ReadBin;
+    list<Read> ReadList;
+    PileupReads() {MeanReadLen=TotReadLen=0; BinMax=1000;}
+};
+
 class PileupSummary {
 public:
-    const char * Chr;
+    string Chr;
     int Pos;
     char Base;
     int Depth;
     int TotQual;
     int NumReads;
-
     vector<vcall> Calls;
 
     int SkipDupReads;
     int SkipMinMapq;
     int SkipMinQual;
     int MaxDepthByPos;
+    int RepeatCount;
+    char RepeatBase;
 
-	PileupSummary(char *line);
+	PileupSummary(char *line, PileupReads &reads);
+    PileupSummary() { Base = '\0'; Pos=-1; };
 };
 
 class PileupVisitor {
     public:
-        PileupVisitor() {}
-		void Parse(char *dat) {PileupSummary p(dat); Visit(p);};
+        char InputType;
+        PileupReads Reads;
+        PileupVisitor() {InputType ='\0';}
+		void Parse(char *dat) {PileupSummary p(dat, Reads); Visit(p);};
 		virtual void Visit(PileupSummary &dat)=0;
+		virtual void Finish()=0;
 };
 
 class VarStatVisitor : public PileupVisitor {
     public:
-        VarStatVisitor() : PileupVisitor() {tot_depth=0; num_reads=0;};
+    VarStatVisitor() : PileupVisitor() {tot_depth=0; num_reads=0;};
 
-    // PileupVisitor interface implementation
-    public:
-        // prints coverage results ( tab-delimited )
-		void Visit(PileupSummary &dat);
+    void Visit(PileupSummary &dat);
+    void Finish() {};
 
     public:
 	double tot_depth;
@@ -126,13 +147,15 @@ class VarStatVisitor : public PileupVisitor {
 
 class VarCallVisitor : public PileupVisitor {
 
-    public:
-        VarCallVisitor() : PileupVisitor() {SkippedDepth=0;};
+    deque<PileupSummary> Win;
+    void VisitX(PileupSummary &dat);
 
-    // PileupVisitor interface implementation
     public:
-        // prints coverage results ( tab-delimited )
-		void Visit(PileupSummary &dat);
+    int WinMax;
+    VarCallVisitor() : PileupVisitor() {SkippedDepth=0;WinMax=0;};
+
+    void Visit(PileupSummary &dat);
+    void Finish();
 
 	int SkippedDepth;
 };
@@ -155,11 +178,13 @@ int debug_xpos=0;
 int min_depth=0;
 int min_mapq=1;
 int min_qual=3;
+int repeat_filter=8;
+double artifact_filter=1;
 int min_adepth=0;
 int min_idepth=0;
+int mean_read_length=20;        // low default, so it doesn't filter anything 
 int no_baq=0;
-int max_dupreads=5;		// skip duplicate reads greater than this maximum
-double zygosity=.5;		// set to .1 for 1 10% admixture, or even .5 
+double zygosity=.5;		        // set to .1 for 1 10% admixture, or even .05 for het/admix
 
 void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref);
 
@@ -179,14 +204,16 @@ int main(int argc, char **argv) {
 	int upctqdepth=0;
 	int do_stats=0;
 	int do_varcall=0;
-	while ( (c = getopt_long(argc, argv, "?dsvBhe:m:N:x:f:p:a:q:Q:i:",NULL,NULL)) != -1) {
+	while ( (c = getopt_long(argc, argv, "?dsvBhe:m:N:x:f:p:a:q:Q:i:D:R:b:",NULL,NULL)) != -1) {
 		switch (c) {
 			case 'd': ++debug; break;
 			case 'h': usage(stdout); return 0;
 			case 'm': umindepth=atoi(optarg); break;
 			case 'q': min_qual=atoi(optarg); break;
 			case 'Q': min_mapq=atoi(optarg); break;
+			case 'R': repeat_filter=atoi(optarg); break;
 			case 'a': uminadepth=atoi(optarg);break;
+			case 'D': artifact_filter=atof(optarg);break;
 			case 'i': uminidepth=atoi(optarg);break;
 			case 'x': {
 					debug_xchr=optarg;
@@ -227,19 +254,6 @@ int main(int argc, char **argv) {
 		warn("Specify -s for stats only, or -v to do variant calling\n\n");
 		usage(stderr);
 		return 1;
-	}
-
-	if (!ref) {
-		warn("Need a reference file (-f) parameter, try -h for help\n");
-		return 1;
-	}
-
-	if (!hasdata(string(ref)+".fai")) {
-		int ret=system(string_format("samtools faidx '%s'", ref).c_str());
-		if (ret) {
-			warn("Need a %s.fai file, run samtools faidx\n", ref);
-			return 1;
-		}
 	}
 
 	if (noiseout) {
@@ -345,7 +359,6 @@ int main(int argc, char **argv) {
 		pct_qdepth=qnoise_mean+qnoise_dev*stdevfrommean;
 		stat_out("minority qpct\t%.4f\n", 100*pct_qdepth);
 
-		max_dupreads=depth_q2/(vstat.tot_depth/vstat.num_reads);
 	//  qpct has better sens/spec, discourage use
 
 	//	pct_depth=noise_mean+noise_dev*stdevfrommean;
@@ -366,20 +379,30 @@ int main(int argc, char **argv) {
 		if (uminidepth) min_idepth=uminidepth;
 
 		if (min_depth || (!pct_depth  && !pct_qdepth)) {
-			warn("Outputting all variations, no minimum depths specified\n");
+			warn("warning\toutputting all variations, no minimum depths specified\n");
 		}
 
 		warn("version\tvarcall-%s\n", VERSION);
 		warn("min depth\t%d\n", min_depth);
 		warn("min call depth\t%d\n", min_adepth);
 		warn("minority qpct\t%d\n", (int)(100*pct_qdepth));
-		warn("baq correct\t%s\n", (no_baq?"no":"yes"));
+
 		warn("min balance\t%d\n", (int)(100*pct_balance));
 		warn("min qual\t%d\n", min_qual);
 		warn("min map qual\t%d\n", min_mapq);
 
 		VarCallVisitor vcall;
+
+        if (repeat_filter > 0) {
+		    warn("homopolymer filter\t%d\n", repeat_filter);
+            vcall.WinMax=repeat_filter+repeat_filter+1;
+        }
+
 		parse_bams(vcall, in_n, in, ref);
+
+        if (vcall.InputType == 'B') {
+        	warn("baq correct\t%s\n", (no_baq?"no":"yes"));
+        }
 	}
 }
 
@@ -439,7 +462,7 @@ void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref) {
 		exit(1);
 	}
 
-	int i, bam_n;
+	int i, bam_n=0;
 	for (i=0;i<in_n;++i) {
 		if (!strcmp(fext(in[i]), ".bam")) {
 			++bam_n;
@@ -456,19 +479,35 @@ void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref) {
 				exit(1);
 			} else {
 				warn("input\t%d pileup\n", in_n);
+                v.InputType='P';
 			}
 		}
 	} else {
 		warn("input\t%d bam\n", bam_n);
+        v.InputType='B';
 	}
 
 	int is_popen = 0;
 	FILE *fin;
 
 	if (bam_n) {
+        if (!ref) {
+            warn("Need a reference file (-f) parameter, try -h for help\n");
+            exit(1);
+        }
+
+        if (!hasdata(string(ref)+".fai")) {
+            int ret=system(string_format("samtools faidx '%s'", ref).c_str());
+            if (ret) {
+                warn("Need a %s.fai file, run samtools faidx\n", ref);
+                exit(1);
+            }
+        }
+
+
 		const char *nobaq = no_baq ? "-B" : "";
 
-		string mpil_cmd = string_format("samtools mpileup -d 100000 %s -O -s -f '%s'", nobaq, ref);
+		string mpil_cmd = string_format("samtools mpileup -d 100000 %s -f '%s'", nobaq, ref);
 
 		int i;
 		for (i=0;i<in_n;++i) {
@@ -507,26 +546,24 @@ void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref) {
 	}
 }
 
-#define b2i(c) ((c)=='A'?0:(c)=='a'?0:(c)=='C'?1:(c)=='c'?1:(c)=='G'?2:(c)=='g'?2:(c)=='T'?3:(c)=='t'?3:(c)=='*'?4:(c)=='-'?4:(c)=='+'?5:6)
-#define i2b(i) (i==0?'A':i==1?'C':i==2?'G':i==3?'T':i==4?'-':i==5?'+':'?')
+#define b2i(c) ((c)=='A'?0:(c)=='a'?0:(c)=='C'?1:(c)=='c'?1:(c)=='G'?2:(c)=='g'?2:(c)=='T'?3:(c)=='t'?3:(c)=='*'?4:(c)=='-'?5:(c)=='+'?5:7)
+#define i2b(i) (i==0?'A':i==1?'C':i==2?'G':i==3?'T':i==4?'*':i==5?'-':i==6?'+':'?')
 
 bool hitoloint (int i,int j) { return (i>j);}
 
 int track_readlen[10000];
 
-PileupSummary::PileupSummary(char *line) {
+
+PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 
 	vector<char *> d=split(line, "\t");
 
-	if (d.size() < 8) {
-		warn("Can't read pileup : field count error\n");
+	if (d.size() < 6) {
+		warn("Can't read pileup : %d fields, need 6 columns\n", (int) d.size());
 		exit(1);
 	}
 
-
-	vector<char *> p_pos=split(d[7], ",");
 	const char * p_qual=d[5];
-	const char *p_mq=d[6];
 
 	Chr=d[0];
 	Pos=atoi(d[1]);
@@ -536,6 +573,8 @@ PileupSummary::PileupSummary(char *line) {
 	SkipMinQual = 0;
 	SkipMinMapq = 0;
 	MaxDepthByPos = 0;
+	RepeatCount = 0;
+	RepeatBase = '\0';
 	NumReads = 0;
 
 	int i;
@@ -543,28 +582,43 @@ PileupSummary::PileupSummary(char *line) {
 
 	const char *cur_p = d[4];
 
-	for (i=0;i<Depth;++i) {
+    list<Read>::iterator read_i = rds.ReadList.begin();
+
+    int eor=0;
+	for (i=0;i<Depth;++i,++read_i) {
 		bool sor=0;
-		bool eor=0;
 		
-		int pia = atoi(p_pos[i]);
+		if (*cur_p == '^') {
+			sor=1;
+			++cur_p;
+            Read x;
+            x.MapQ = *cur_p-phred;
+            ++cur_p;
+            if (read_i != rds.ReadList.end()) {
+                ++read_i;
+            }
+            read_i=rds.ReadList.insert(read_i,x);
+		}
+
+        if (read_i == rds.ReadList.end()) {
+            warn("warning: read start without '^', partial pileup: '%s'\n", cur_p);
+            Read x;
+            x.MapQ = -1;
+            read_i=rds.ReadList.insert(read_i,x);
+        }
+
+        int pia = read_i->Seq.length()+1;
 		if (pia >= depthbypos.size()) {
 			depthbypos.resize(pia+1);
 		}
 		depthbypos[pia]++;
 
 
-		if (*cur_p == '^') {
-			++cur_p;
-            ++cur_p;					// skip mq
-			sor=1;
-		}
-
 		if (sor) 
 			++NumReads;
 
 		char q = p_qual[i]-phred;				// qual char
-		char mq = p_mq[i]-phred;				// mq char
+		char mq = read_i->MapQ;
 		char o = *cur_p;				// orig call
 		char c = toupper(o);			// uppercase/ref 
 		bool is_ref = 0;
@@ -576,7 +630,7 @@ PileupSummary::PileupSummary(char *line) {
 
 		bool skip = 0;
 
-		if (depthbypos[pia] > max_dupreads) {
+		if (artifact_filter > 0 && (depthbypos[pia] > artifact_filter * (1+(Depth/mean_read_length)))) {
 			++SkipDupReads;
 			skip=1;
 		} else if (mq < min_mapq) {
@@ -587,7 +641,6 @@ PileupSummary::PileupSummary(char *line) {
 			skip=1;
 		} else {
 			int j = b2i(c);
-
 			if (j >= Calls.size()) {
 				int was = Calls.size();
 				Calls.resize(j+1);
@@ -595,20 +648,11 @@ PileupSummary::PileupSummary(char *line) {
 					Calls[t].base=i2b(t);
 				}
 			}
-
 			if (is_ref) 
 				Calls[j].is_ref = 1;
 
 			if ( o == ',' || o == 'a' || o == 'c' || o == 't' || o == 'g' ) {
 				++Calls[j].rev;
-			} else if( o == '+' || o == '*') {
-				if (Calls[j].depth()%2) {
-					++Calls[j].rev;
-				} else {
-					++Calls[j].fwd;
-				}
-			} else if( o == '-' ) {
-				// do nothing
 			} else {
 				++Calls[j].fwd;
 			}
@@ -617,29 +661,58 @@ PileupSummary::PileupSummary(char *line) {
 		}
 
 		if (c == '-' || c == '+') {
-
-			char *end_p;
-			int len = strtol(++cur_p, &end_p, 10);
-			// keep this
-
-			string idl(end_p, len);
-			if (!skip && c == '+') {
-				int j = b2i(c);
-				to_upper(idl);
-				Calls[j].seqs.push_back(idl);
-			}
-			cur_p=end_p+len;
-
-			--i;
+            warn("invalid pileup, at '%s', indel not attached to read?\n", cur_p);
 		} else {
+		    if (c != '*') 
+                read_i->Seq += c;
 			++cur_p;
 		}
 
+        if (*cur_p == '+' || *cur_p == '-') {
+            c = *cur_p;
+            char *end_p;
+            int len = strtol(++cur_p, &end_p, 10);
+            string ins_seq(end_p, len);
+            to_upper(ins_seq);
+            read_i->Seq += ins_seq;
+            if (!skip) {
+                int j = b2i(c);
+                if (j >= Calls.size()) {
+                    int was = Calls.size();
+                    Calls.resize(j+1);
+                    int t; for (t=was;t<=j;++t) {
+                        Calls[t].base=i2b(t);
+                    }
+                }
+                if ( o == ',' || o == 'a' || o == 'c' || o == 't' || o == 'g' ) {
+                    ++Calls[j].rev;
+                } else {
+                    ++Calls[j].fwd;
+                }
+                Calls[j].qual+=q;
+                Calls[j].seqs.push_back(ins_seq);
+            }
+            cur_p=end_p+len;
+        }
+
         if (*cur_p == '$') {
+            if (read_i->MapQ > -1) {
+                rds.ReadBin.push_back(*read_i);
+                if (rds.ReadBin.size() > rds.BinMax) {
+                    rds.ReadBin.pop_front();
+                }
+            }
+//            printf("%d\t%s\n", read_i->MapQ, read_i->Seq.c_str());
+            read_i=rds.ReadList.erase(read_i);
+            --read_i;
             ++cur_p;
-            eor=1;
+            ++eor;
         }
 	}
+
+    if ((Depth-eor) != rds.ReadList.size()) {
+        warn("warning\tdepth is %d, but read list is: %d\n", Depth, (int) rds.ReadList.size());
+    }
 
 	if (*cur_p == '-' || *cur_p == '+') {
 		char *end_p;
@@ -671,7 +744,106 @@ PileupSummary::PileupSummary(char *line) {
 	}
 }
 
+PileupSummary JunkSummary;
+
 void VarCallVisitor::Visit(PileupSummary &p) {
+    if (WinMax < 5) {
+        VisitX(p);
+        return;
+    }
+
+    if (Win.size() && (Win.back().Pos != (p.Pos - 1) )) {
+        if (p.Base != '-') {
+            if (Win.back().Pos < p.Pos && ((p.Pos - Win.back().Pos) <= (WinMax/2))) {
+                while (Win.back().Pos < (p.Pos - 1)) {
+                    // visit/pop, add a placeholder
+                    JunkSummary.Base = '-';
+                    JunkSummary.Pos = Win.back().Pos + 1;
+                    Visit(JunkSummary);
+                }
+            } else {
+                while (Win.size()) {
+                    // visit/pop, but don't add anything, until it's empty
+                    JunkSummary.Base = '@';
+                    JunkSummary.Pos = 0;
+                    Visit(JunkSummary);
+                }
+            }
+        } 
+    }
+
+    if (p.Base != '@')              // see above, false-add to clear queue
+        Win.push_back(p);
+
+    if (Win.size() > WinMax)        // queue too big?  pop
+        Win.pop_front();
+    
+    int i;
+    int lrc=0,rrc=0;                // left repeat count, right repeat count
+    char lrb, rrb;                  // left repeat base...
+    int vx;
+
+    if (Win.size() < WinMax/2) {    // small window?  look at leading edge only
+        vx = Win.size()-1;
+    } else {
+        vx = WinMax/2;              // larger window? look at midpoint
+    }
+
+    if (Win[vx].Base == '-') 
+        return;
+
+    if (vx > 1) {                   // look left
+        lrb = Win[vx-1].Base;
+        for (i=vx-2; i >= 0; --i) { // increment repeat count
+            if (Win[i].Base == lrb) 
+                ++lrc;
+            else 
+                break;
+        }
+    }
+    if (vx < (Win.size()-2)) {
+        rrb = Win[vx+1].Base;
+        for (i=vx+1; i < Win.size(); ++i) {
+            if (Win[i].Base == rrb)
+                ++rrc;
+            else
+                break;
+        }
+    }
+
+    // maximum repeat count and associated base
+    if (lrb == rrb ) {
+        Win[vx].RepeatCount = lrc+rrc;
+        Win[vx].RepeatBase = lrb;
+    } else if (lrb > rrb) {
+        Win[vx].RepeatCount = lrc;
+        Win[vx].RepeatBase = lrb;
+    } else {
+        Win[vx].RepeatCount = rrc;
+        Win[vx].RepeatBase = rrb;
+    }
+
+	if (debug_xpos) {
+        if (Win[vx].Pos == debug_xpos && !strcmp(debug_xchr,Win[vx].Chr.data())) {
+            fprintf(stderr,"xpos-window\t");
+            for (i=0;i<Win.size();++i) {
+                fprintf(stderr,"%c", Win[i].Base);
+            }
+            fprintf(stderr,"\n");
+        }
+    }
+
+    VisitX(Win[vx]);
+}
+
+void VarCallVisitor::Finish() {
+    int vx = WinMax/2;
+    while (vx < Win.size()) {
+        VisitX(Win[vx++]);
+    }
+}
+
+void VarCallVisitor::VisitX(PileupSummary &p) {
 	if (p.Depth < min_depth) {
 		++SkippedDepth;
 		return;
@@ -680,17 +852,20 @@ void VarCallVisitor::Visit(PileupSummary &p) {
 	if (debug_xpos) {
 		if (p.Pos != debug_xpos)
 			return;
-		if (strcmp(debug_xchr,p.Chr)) 
+		if (strcmp(debug_xchr,p.Chr.data())) 
 			return;
 	}
 
 	int i;
 	if (p.Calls.size() > 6) 
-		p.Calls.resize(6);	// toss N's before sort
+		p.Calls.resize(7);	// toss N's before sort
 	sort(p.Calls.begin(), p.Calls.end(), hitolocall);
 
-	bool need_out = 0;
+	int need_out = -1;
 	int skipped_balance=0;
+	int skipped_indel=0;
+	int skipped_depth=0;
+	int skipped_repeat=0;
 	string pil;
 	for (i=0;i<p.Calls.size();++i) {		// all calls
 //		printf("d:%d b: %c, pd: %d\n", (int) p.Calls[i].depth(), p.Calls[i].base, p.Depth);
@@ -701,15 +876,16 @@ void VarCallVisitor::Visit(PileupSummary &p) {
 		if (!p.Calls[i].base)
 			continue;
 
-		if (pct > pct_depth && qpct > pct_qdepth && (p.Calls[i].depth() >= min_adepth)) {
+		if (pct > pct_depth && qpct >= pct_qdepth && (p.Calls[i].depth() >= min_adepth)) {
 			double bpct = (double) min(p.Calls[i].fwd,p.Calls[i].rev)/p.Calls[i].depth();
 			// balance is meaningless at low depths
-			if ((bpct > pct_balance) || (p.Calls[i].depth()<4)) {
-
-				if (p.Calls[i].base == '-' || p.Calls[i].base == '+') {
+			if ((bpct >= pct_balance) || (p.Calls[i].depth()<4)) {
+				if (p.Calls[i].base == '+' || p.Calls[i].base == '-') {
+                    // yuk ... time to think about a possible indel call
 					if (p.Calls[i].depth() >= min_idepth) {
 						// should really pick more than 1
 						// but need to allow "similar" indels to pile up
+                        // should group into distinct bins, using some homology thing
 						sort(p.Calls[i].seqs.begin(), p.Calls[i].seqs.end());
 						string prev, maxs;
 						int pcnt=0, maxc=0, j;
@@ -730,31 +906,51 @@ void VarCallVisitor::Visit(PileupSummary &p) {
 							maxc=pcnt;
 						}
 						if (maxc >= min_idepth && maxc >= min_adepth) {
-							need_out = 1;
-							pil += string_format("\t%c%s:%d,%d", p.Calls[i].base, maxs.c_str(),maxc,p.Calls[i].qual/p.Calls[i].depth());	
-							skipped_balance+=p.Calls[i].depth()-maxc;
+                            // only calls 1 indel at a given position
+                            if (p.RepeatCount < repeat_filter) {
+                                if (need_out == -1) 
+                                    need_out = i;
+                                pil += string_format("\t%c%s:%d,%d", p.Calls[i].base, maxs.c_str(),maxc,p.Calls[i].qual/p.Calls[i].depth());	
+                                skipped_indel+=p.Calls[i].depth()-maxc;
+                            } else {
+                                skipped_repeat+=p.Calls[i].depth();
+                            }
 						} else {
-							skipped_balance+=p.Calls[i].depth();
+							skipped_indel+=p.Calls[i].depth();
 						}
 					} else {
-						skipped_balance+=p.Calls[i].depth();
+						skipped_indel+=p.Calls[i].depth();
 					}
 				} else {
-					if (!p.Calls[i].is_ref) 
-						need_out = 1;
-					pil += string_format("\t%c:%d,%d", p.Calls[i].base,p.Calls[i].depth(),p.Calls[i].qual/p.Calls[i].depth());	
+					if (!p.Calls[i].is_ref || debug_xpos) { 
+                        if (need_out == -1)
+                            need_out = i;
+					    pil += string_format("\t%c:%d,%d", p.Calls[i].base,p.Calls[i].depth(),p.Calls[i].qual/p.Calls[i].depth());	
+                    }
 				}
 			} else {
 				skipped_balance+=p.Calls[i].depth();
 			}
 		} else {
-			skipped_balance+=p.Calls[i].depth();
+			skipped_depth+=p.Calls[i].depth();
 			break;
 		}
 	}
-	if (need_out||debug_xpos) {
-		printf("%s\t%d\t%c\t%d\t%d%s\n",p.Chr, p.Pos, p.Base, p.Depth, skipped_balance+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pil.c_str());
+	if (need_out>=0||debug_xpos) {
+        double pct_allele = 100.0 * p.Calls[need_out].depth() / (double) p.Depth;
+		printf("%s\t%d\t%c\t%d\t%d\t%2.2f%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_depth+skipped_balance+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, pil.c_str());
 		if (debug_xpos) {
+		    fprintf(stderr,"xpos-skip-dup\t%d\n",p.SkipDupReads);
+		    fprintf(stderr,"xpos-skip-mapq\t%d\n",p.SkipMinMapq);
+		    fprintf(stderr,"xpos-skip-qual\t%d\n",p.SkipMinQual);
+		    fprintf(stderr,"xpos-skip-bal\t%d\n",skipped_balance);
+		    fprintf(stderr,"xpos-skip-depth\t%d\n",skipped_depth);
+		    fprintf(stderr,"xpos-skip-indel\t%d\n",skipped_indel);
+		    fprintf(stderr,"xpos-skip-repeat\t%d\n",skipped_repeat);
+            if (repeat_filter > 0) {
+                fprintf(stderr,"repeat-count\t%d\n",p.RepeatCount);
+                fprintf(stderr,"repeat-base\t%c\n",p.RepeatBase);
+            }
 			exit(0);
 		}
 	}
@@ -769,7 +965,7 @@ void VarStatVisitor::Visit(PileupSummary &p) {
 
 	int i;
 	if (p.Calls.size() > 5) 
-		p.Calls.resize(5);		// toss N's and '+' before sort
+		p.Calls.resize(6);		// toss N's and '+' before sort
 
 	sort(p.Calls.begin(), p.Calls.end(), hitolocall);
 
@@ -807,11 +1003,13 @@ void usage(FILE *f) {
 "-f          Reference fasta\n"
 "-m          Min locii depth (0)\n"
 "-a          Min allele depth (0)\n"
+"-p          Min allele pct by quality (0)\n"
 "-q          Min qual (3)\n"
 "-C          Min mapping quality (1)\n"
 "-b          Min pct balance (strand/total) (0)\n"
-"-B          Turn off BAQ\n"
-"-p          Min pct quality (0)\n"
+"-D FLOAT    Max duplicate read fraction (depth/length per position) (1)\n"
+"-B          Turn off BAQ correction (false)\n"
+"-R          Homopolymer repeat indel filtering (8)\n"
 "-V          Output vcf format\n"
 "-x CHR:POS  Output this pos only, then quit\n"
 "-N FIL      Output noise stats to file\n"
@@ -823,8 +1021,6 @@ void usage(FILE *f) {
 "\n"
 "Files must be sorted bam files with bai index files available.  Alternatively,\n"
 "pileup files can be supplied.\n"
-"\n"
-"Pileup files must have -g (mapping qual) and -O (base pos) fields.\n"
 "\n"
 "Output files\n"
 "\n"
