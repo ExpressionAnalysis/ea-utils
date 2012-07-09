@@ -19,7 +19,9 @@
 
 #include "fastq-lib.h"
 
-const char * VERSION = "0.8";
+const char * VERSION = "0.8.6";
+
+#define MIN_READ_LEN 20
 
 using namespace std;
 using namespace google;
@@ -93,12 +95,11 @@ public:
 
 class PileupReads {
 public:
-    int MeanReadLen;
+    double MeanReadLen() {return ReadBin.size() ? TotReadLen/ReadBin.size() : MIN_READ_LEN;}
     int TotReadLen;
-    int BinMax;
     deque<Read> ReadBin;
     list<Read> ReadList;
-    PileupReads() {MeanReadLen=TotReadLen=0; BinMax=1000;}
+    PileupReads() {TotReadLen=0;}
 };
 
 class PileupSummary {
@@ -182,7 +183,6 @@ int repeat_filter=8;
 double artifact_filter=1;
 int min_adepth=0;
 int min_idepth=0;
-int mean_read_length=20;        // low default, so it doesn't filter anything 
 int no_baq=0;
 double zygosity=.5;		        // set to .1 for 1 10% admixture, or even .05 for het/admix
 
@@ -201,7 +201,7 @@ int main(int argc, char **argv) {
 	int umindepth=0;
 	int uminadepth=0;
 	int uminidepth=0;
-	int upctqdepth=0;
+	double upctqdepth=0;
 	int do_stats=0;
 	int do_varcall=0;
 	while ( (c = getopt_long(argc, argv, "?dsvBhe:m:N:x:f:p:a:q:Q:i:D:R:b:",NULL,NULL)) != -1) {
@@ -226,7 +226,7 @@ int main(int argc, char **argv) {
 				}
 			case 'b': pct_balance=atof(optarg)/100.0; break;
 			case 'B': no_baq=1; break;
-			case 'p': upctqdepth=atoi(optarg); break;
+			case 'p': upctqdepth=atof(optarg); break;
 			case 'e': alpha=atof(optarg); break;
 			case 'f': ref=optarg; break;
 			case 'N': noiseout=optarg; break;
@@ -250,7 +250,7 @@ int main(int argc, char **argv) {
 		minsampdepth=umindepth;
 	}
 
-	if (!do_stats && !do_varcall) {
+	if (!do_stats && !do_varcall || do_stats && do_varcall) {
 		warn("Specify -s for stats only, or -v to do variant calling\n\n");
 		usage(stderr);
 		return 1;
@@ -357,7 +357,7 @@ int main(int argc, char **argv) {
 		stat_out("qnorm adj\t%f\n", stdevfrommean);
 
 		pct_qdepth=qnoise_mean+qnoise_dev*stdevfrommean;
-		stat_out("minority qpct\t%.4f\n", 100*pct_qdepth);
+		stat_out("min pct qual\t%.4f\n", 100*pct_qdepth);
 
 	//  qpct has better sens/spec, discourage use
 
@@ -374,7 +374,7 @@ int main(int argc, char **argv) {
 
 	if (do_varcall) {
 		if (umindepth) min_depth=umindepth;
-		if (upctqdepth) pct_qdepth=(double)upctqdepth/100;
+		if (upctqdepth > 0) pct_qdepth=(double)upctqdepth/100;
 		if (uminadepth) min_adepth=uminadepth;
 		if (uminidepth) min_idepth=uminidepth;
 
@@ -385,7 +385,7 @@ int main(int argc, char **argv) {
 		warn("version\tvarcall-%s\n", VERSION);
 		warn("min depth\t%d\n", min_depth);
 		warn("min call depth\t%d\n", min_adepth);
-		warn("minority qpct\t%d\n", (int)(100*pct_qdepth));
+		warn("min pct qual\t%d\n", (int)(100*pct_qdepth));
 
 		warn("min balance\t%d\n", (int)(100*pct_balance));
 		warn("min qual\t%d\n", min_qual);
@@ -546,7 +546,7 @@ void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref) {
 	}
 }
 
-#define b2i(c) ((c)=='A'?0:(c)=='a'?0:(c)=='C'?1:(c)=='c'?1:(c)=='G'?2:(c)=='g'?2:(c)=='T'?3:(c)=='t'?3:(c)=='*'?4:(c)=='-'?5:(c)=='+'?5:7)
+#define b2i(c) ((c)=='A'?0:(c)=='a'?0:(c)=='C'?1:(c)=='c'?1:(c)=='G'?2:(c)=='g'?2:(c)=='T'?3:(c)=='t'?3:(c)=='*'?4:(c)=='-'?5:(c)=='+'?6:7)
 #define i2b(i) (i==0?'A':i==1?'C':i==2?'G':i==3?'T':i==4?'*':i==5?'-':i==6?'+':'?')
 
 bool hitoloint (int i,int j) { return (i>j);}
@@ -601,7 +601,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 		}
 
         if (read_i == rds.ReadList.end()) {
-            warn("warning: read start without '^', partial pileup: '%s'\n", cur_p);
+            warn("warning\tread start without '^', partial pileup: '%s'\n", cur_p);
             Read x;
             x.MapQ = -1;
             read_i=rds.ReadList.insert(read_i,x);
@@ -630,7 +630,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 
 		bool skip = 0;
 
-		if (artifact_filter > 0 && (depthbypos[pia] > artifact_filter * (1+(Depth/mean_read_length)))) {
+		if (artifact_filter > 0 && (depthbypos[pia] > artifact_filter * (1+(Depth/rds.MeanReadLen())))) {
 			++SkipDupReads;
 			skip=1;
 		} else if (mq < min_mapq) {
@@ -697,9 +697,11 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 
         if (*cur_p == '$') {
             if (read_i->MapQ > -1) {
+                rds.TotReadLen+=read_i->Seq.size();
                 rds.ReadBin.push_back(*read_i);
-                if (rds.ReadBin.size() > rds.BinMax) {
+                if (rds.ReadBin.size() > min(1000,Depth*2)) {
                     rds.ReadBin.pop_front();
+                    rds.TotReadLen-=rds.ReadBin.front().Seq.size();
                 }
             }
 //            printf("%d\t%s\n", read_i->MapQ, read_i->Seq.c_str());
@@ -961,26 +963,50 @@ void VarStatVisitor::Visit(PileupSummary &p) {
 	if (p.Depth < minsampdepth)
 		return;
 
-	int ins = p.Calls[5].depth();
+    // insert and deletions have their own, separate noise levels
 
+	int ins_depth = p.Calls.size() > 6 ? p.Calls[6].depth() : 0;
+	int ins_qual = p.Calls.size() > 6 ? p.Calls[6].qual : 0;
+	double ins_noise = 0;
+	double ins_qnoise = 0;
+	if (p.Calls.size() > 1 && p.Calls[1].depth() > ins_depth && ins_depth > 0) {
+		ins_noise = (double) ins_depth/p.Depth;
+		ins_qnoise = (double) ins_qual/p.TotQual;
+	}
+
+	int del_depth = p.Calls.size() > 5 ? p.Calls[5].depth() : 0;
+	int del_qual = p.Calls.size() > 5 ? p.Calls[5].qual : 0;
+	double del_noise = 0;
+	double del_qnoise = 0;
+	if (p.Calls.size() > 1 && p.Calls[1].depth() > del_depth && del_depth > 0) {
+		del_noise = (double) del_depth/p.Depth;
+		del_qnoise = (double) del_qual/p.TotQual;
+	}
+
+    // snp's are "noise" if there are 3 alleles at a given position
 	int i;
 	if (p.Calls.size() > 5) 
-		p.Calls.resize(6);		// toss N's and '+' before sort
+		p.Calls.resize(5);		// toss N's and inserts before sort
 
 	sort(p.Calls.begin(), p.Calls.end(), hitolocall);
 
 	double noise = p.Calls.size() > 2 ? (double) p.Calls[2].depth()/p.Depth : 0;
-	double inoise = 0;
-	if (p.Calls[1].depth() > ins && ins > 1) {
-		inoise = (double) ins/p.Depth;
-//		noise += inoise;
-	}
 	double qnoise = p.Calls.size() > 2 ? (double) p.Calls[2].qual/p.TotQual : 0;
+
 	double mnqual = (double)p.TotQual/p.Depth;
+
 	char pbase = p.Calls.size() > 2 ? p.Calls[2].base : '.';
 
 	if (noise_f) {
 		fprintf(noise_f,"%d\t%c\t%f\t%f\n", p.Depth, pbase, noise, qnoise, mnqual);
+/*
+        if (ins_noise > 0) {
+		    fprintf(noise_f,"%d\t%c\t%f\t%f\n", p.Depth, '+', ins_noise, ins_qnoise, mnqual);
+        }
+        if (del_noise > 0) {
+		    fprintf(noise_f,"%d\t%c\t%f\t%f\n", p.Depth, '-', del_noise, del_qnoise, mnqual);
+        }
+*/
 	}
 
 	tot_depth += p.Depth;
@@ -1000,7 +1026,7 @@ void usage(FILE *f) {
 "\n"
 "-s          Calculate statistics\n"
 "-v          Calculate variants bases on supplied parameters\n"
-"-f          Reference fasta\n"
+"-f          Reference fasta (required if using bams)\n"
 "-m          Min locii depth (0)\n"
 "-a          Min allele depth (0)\n"
 "-p          Min allele pct by quality (0)\n"
@@ -1020,7 +1046,7 @@ void usage(FILE *f) {
 "Input files\n"
 "\n"
 "Files must be sorted bam files with bai index files available.  Alternatively,\n"
-"pileup files can be supplied.\n"
+"a single pileup file can be supplied.\n"
 "\n"
 "Output files\n"
 "\n"
@@ -1040,8 +1066,6 @@ void usage(FILE *f) {
 "Contains mean, median, quartile information for depth, base quality, read len,\n"
 "mapping quality, indel levels. Also estimates parameters suitable for\n"
 "variant calls, and can be passed directly to this program for variant calls\n"
-"\n"
-"Variant Output:\n"
 "\n"
         ,VERSION);
 }
