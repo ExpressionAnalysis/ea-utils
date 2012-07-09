@@ -405,7 +405,7 @@ int main (int argc, char **argv) {
 						if (!dual)
 							fprintf(stderr, "Using Barcode %s (%s)\n", bcg[b].b.id.s, bcg[b].b.seq.s);
 
-						if (debug) fprintf(stderr, "Using Barcode %s (%s-%s) ... ecnt:%d, escnt:%d,bcnt:%d, bscnt:%d\n", bcg[b].b.id.s, bcg[b].b.seq.s, bcg[b].b.dual, bcg[b].ecnt[i], bcg[b].escnt[i], bcg[b].bcnt[i], bcg[b].bscnt[i]);
+						if (debug) fprintf(stderr, "Debug Barcode %s (%s-%s) ... ecnt:%d, escnt:%d,bcnt:%d, bscnt:%d\n", bcg[b].b.id.s, bcg[b].b.seq.s, bcg[b].b.dual, bcg[b].ecnt[i], bcg[b].escnt[i], bcg[b].bcnt[i], bcg[b].bscnt[i]);
 
 					} else {
 						bc[bcnt].shifted=1;
@@ -413,7 +413,7 @@ int main (int argc, char **argv) {
 						if (!dual)
 							fprintf(stderr, "Using Barcode %s (%s) shifted\n", bcg[b].b.id.s, bcg[b].b.seq.s);
 
-						if (debug) printf("Using Barcode %s (%s-%s) shifted ... ecnt:%d, escnt:%d,bcnt:%d, bscnt:%d\n", bcg[b].b.id.s, bcg[b].b.seq.s, bcg[b].b.dual, bcg[b].ecnt[i], bcg[b].escnt[i], bcg[b].bcnt[i], bcg[b].bscnt[i]);
+						if (debug) printf("Debug Barcode %s (%s-%s) shifted ... ecnt:%d, escnt:%d,bcnt:%d, bscnt:%d\n", bcg[b].b.id.s, bcg[b].b.seq.s, bcg[b].b.dual, bcg[b].ecnt[i], bcg[b].escnt[i], bcg[b].bcnt[i], bcg[b].bscnt[i]);
 					}
 					++bcnt;
 				}
@@ -615,6 +615,7 @@ int main (int argc, char **argv) {
 		int ne=0, nb=0, dne=0, dnb=0, tcount=0, read_ok=0;
 
 		int *recount = dual ? ((int *) malloc(sizeof(int)*bcnt)) : NULL;
+		if (dual) memset(recount, 0, sizeof(int)*bcnt);
 
 		struct fq fq[2]; meminit(fq);
 
@@ -672,17 +673,25 @@ int main (int argc, char **argv) {
 			dend = (dne > dnb) ? 'e' : 'b';
 			fprintf(stderr, "Dual-end used: %s\n", endstr(dend));
 			int ocnt = bcnt;
-			int thresh = max(1,tcount/10000);
+            // this should allow up to a 300 plex
+			int thresh = max(1,tcount/1000);
 			bcnt=0;
+            if (debug)
+                fprintf(stderr, "dual resample threshold: %d out of %d\n", thresh, tcount);
 			for (i=0;i<ocnt;++i) {
 				if (recount[i] >= thresh) {
 					fprintf(stderr, "Using Barcode %s (%s-%s)\n", bc[i].id.s, bc[i].seq.s, bc[i].dual);
+                    if (debug)
+    					fprintf(stderr, "%d >= %d\n", recount[i], thresh);
 					bc[bcnt].seq=bc[i].seq;
 					bc[bcnt].id=bc[i].id;
 					bc[bcnt].dual=bc[i].dual;
 					bc[bcnt].dual_n=bc[i].dual_n;
 					++bcnt;
-				}
+				} else {
+                    if (debug)
+    					fprintf(stderr, "skipping barcode %s (%s-%s), %d < %d\n", bc[i].id.s, bc[i].seq.s, bc[i].dual, recount[i], thresh);
+                }
 			}
 		}
 	}
