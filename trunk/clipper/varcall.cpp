@@ -927,8 +927,8 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 					if (!p.Calls[i].is_ref || debug_xpos) { 
                         if (need_out == -1)
                             need_out = i;
-					    pil += string_format("\t%c:%d,%d", p.Calls[i].base,p.Calls[i].depth(),p.Calls[i].qual/p.Calls[i].depth());	
                     }
+					pil += string_format("\t%c:%d,%d", p.Calls[i].base,p.Calls[i].depth(),p.Calls[i].qual/p.Calls[i].depth());	
 				}
 			} else {
 				skipped_balance+=p.Calls[i].depth();
