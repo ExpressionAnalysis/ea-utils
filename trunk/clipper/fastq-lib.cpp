@@ -32,8 +32,8 @@ int read_line(FILE *in, struct line &l) {
         return (l.n = getline(&l.s, &l.a, in));
 }
 
-int read_fq(FILE *in, int rno, struct fq *fq) {
-        read_line(in, fq->id);
+int read_fq(FILE *in, int rno, struct fq *fq, const char *name) {
+    read_line(in, fq->id);
 	if (fq->id.s && (*fq->id.s == '>')) {
 		fq->id.s[0] = '@';
 		// read fasta instead
@@ -65,7 +65,12 @@ int read_fq(FILE *in, int rno, struct fq *fq) {
         if (fq->qual.n <= 0)
                 return 0;
         if (fq->id.s[0] != '@' || fq->com.s[0] != '+' || fq->seq.n != fq->qual.n) {
-                fprintf(stderr, "Malformed fastq record at line %d\n", rno*2+1);
+                const char *errtyp = (fq->seq.n != fq->qual.n) ?  "length mismatch" : fq->id.s[0] != '@' ? "no '@' for id" : "no '+' for comment";
+                if (name) {
+                    fprintf(stderr, "Malformed fastq record (%s) in file '%s', line %d\n", errtyp, name, rno*2+1);
+                } else {
+                    fprintf(stderr, "Malformed fastq record (%s) at line %d\n", errtyp, rno*2+1);
+                }
                 return -1;
         }
         // win32-safe chomp
