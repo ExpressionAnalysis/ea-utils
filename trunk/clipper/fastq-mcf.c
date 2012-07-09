@@ -102,6 +102,7 @@ int main (int argc, char **argv) {
 	bool skipb = 0;
 	char *fref[MAX_REF]; meminit(fref); 
 	int fref_n = 0;
+    char *qspec = NULL;
 
 	while (	(c = getopt_long(argc, argv, "-nf0uUVSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:",NULL,NULL)) != -1) {
 		switch (c) {
@@ -124,6 +125,7 @@ int main (int argc, char **argv) {
 			case 'f': force = true; break;
 			case 'k': skewpct = atof(optarg); break;
 			case 'q': qthr = atoi(optarg); break;
+			case 'Q': qspec = optarg; break;
 			case 'w': qwin = atoi(optarg); break;
 			case 'C': sampcnt = atoi(optarg); break;
 			case 'F': fref[fref_n++] = optarg; break;
@@ -1012,35 +1014,40 @@ void usage(FILE *f, const char *msg) {
 "\n"
 "Detects levels of adapter presence, computes likelihoods and\n"
 "locations (start, end) of the adapters.   Removes the adapter\n"
-"sequences from the fastq file, and sends it to stdout.\n\n"
+"sequences from the fastq file(s).\n"
+"\n"
 "Stats go to stderr, unless -o is specified.\n"
+"\n"
+"Specify -0 to turn off all default settings\n"
 "\n"
 "If you specify multiple 'paired-end' inputs, then a -o option is\n" 
 "required for each.  IE: -o read1.clip.q -o read2.clip.fq\n"
 "\n"
 "Options:\n"
-"    -h      This help\n"
-"    -o FIL  Output file (stats to stdout)\n"
-"    -s N.N  Log scale for clip pct to threshold (2.2)\n"
-"    -t N    %% occurance threshold before clipping (0.25)\n"
-"    -m N    Minimum clip length, overrides scaled auto (1)\n"
-"    -p N    Maximum adapter difference percentage (10)\n"
-"    -l N    Minimum remaining sequence length (19)\n"
-"    -L N    Maximum sequence length (none)\n"
-"    -k N    sKew percentage-less-than causing trim (2)\n"
-"    -q N    quality threshold causing trimming (10)\n"
-"    -w N    window-size for quality trimming (1)\n"
-"    -f      force output, even if not much will be done\n"
-"    -F FIL  remove sequences that align to FIL\n"
-"    -0      Set all trimming parameters to zero\n"
-"    -U|u    Force disable/enable illumina PF filtering\n"
-"    -P N    phred-scale (auto)\n"
-"    -x N    'N' (Bad read) percentage causing trimming (20)\n"
-"    -R      Don't remove N's from the fronts/ends of reads\n"
-"    -n      Don't clip, just output what would be done\n"
-"    -C N    Number of reads to use for subsampling (200k)\n"
-"    -S FIL  Save clipped reads to file\n"
-"    -d      Output lots of random debugging stuff\n"
+"    -h       This help\n"
+"    -o FIL   Output file (stats to stdout)\n"
+"    -s N.N   Log scale for adapter minimum-length-match (2.2)\n"
+"    -t N     %% occurance threshold before adapter clipping (0.25)\n"
+"    -m N     Minimum clip length, overrides scaled auto (1)\n"
+"    -p N     Maximum adapter difference percentage (10)\n"
+"    -l N     Minimum remaining sequence length (19)\n"
+"    -L N     Maximum remaining sequence length (none)\n"
+"    -k N     sKew percentage-less-than causing cycle removal (2)\n"
+"    -x N     'N' (Bad read) percentage causing cycle removal (20)\n"
+"    -q N     quality threshold causing base removal (10)\n"
+"    -Q SPEC  quality filters causing discard (see below)\n"
+"    -w N     window-size for quality trimming (1)\n"
+"    -f       force output, even if not much will be done\n"
+//"    -F FIL  remove sequences that align to FIL\n"
+"    -0       Set all default parameters to zero/do nothing\n"
+"    -U|u     Force disable/enable Illumina PF filtering (auto)\n"
+"    -P N     Phred-scale (auto)\n"
+"    -R       Don't remove N's from the fronts/ends of reads\n"
+"    -n       Don't clip, just output what would be done\n"
+"    -C N     Number of reads to use for subsampling (300k)\n"
+"    -S       Save all discarded reads to '.skip' files\n"
+"    -d       Output lots of random debugging stuff\n"
+/*
 "Config:\n"
 "\n"
 "Some options are best set globally, such as the aligner to use\n"
@@ -1064,11 +1071,35 @@ void usage(FILE *f, const char *msg) {
 //"\n"
 //"Command lines must return SAM formatted lines, %%i is the filter FIL,\n"
 //"%%1 and %%2 are the first and second fastq's\n"
+*/
+"\n"
+"Adapter files are 'fasta' formatted:\n"
+"\n"
+"Specify n/a to turn off adapter clipping, and just use filters\n"
 "\n"
 "Increasing the scale makes recognition-lengths longer, a scale\n"
-"of 100 will force full-length recognition.\n"
+"of 100 will force full-length recognition of adapters.\n"
 "\n"
-"Set the skew (-k) or N-pct (-x) to 100 or 0 to turn it off\n"
+"Adapter sequences with _5p in their label will match 'end's,\n"
+"and sequences with _3p in their label will match 'start's,\n"
+"otherwise the 'end' is auto-determined.\n"
+"\n"
+"Skew is when one cycle is poor, skewed towrd a particular base.\n"
+"If any nucleotide is less than the skew percentage, then the\n"
+"whole cycle is removed.  Disable for methyl-seq, etc\n"
+"\n"
+"Set the skew (-k) or N-pct (-x) to 0 to turn it off\n"
+"\n"
+"Quality filtering spec, comma delimited k*eyword=value:\n"
+"\n"
+"    mean=NUM     Minimum mean quality score\n"
+"    median=NUM   Minimum median quality score\n"
+"    ns=NUM       Maxmium N-calls in a read\n"
+"    xgt=I1,I2    At least I1 quals greater than I2\n"
+"\n"
+"Example: -q mean=25,ns=3,xgt=23,30\n"
+"\n"
+"Quality filters are evaluated before clippping/trimming\n"
 	);
 }
 
