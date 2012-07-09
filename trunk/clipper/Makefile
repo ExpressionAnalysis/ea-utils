@@ -33,8 +33,8 @@ getrel:
 $(PKG).spec: $(PKG).spex
 	perl -pe 's/%RELEASE%/${REL}/' $(PKG).spex > $(PKG).spec
 
-$(PKG).tar.gz: Makefile $(SRC) $(PKG).spec fastq-lib.cpp fastq-lib.h sam-stats.cpp fastq-stats.cpp README CHANGES
-	tar -cvzf $(PKG).tar.gz $^
+$(PKG).tar.gz: Makefile $(SRC) $(PKG).spec fastq-lib.cpp fastq-lib.h sam-stats.cpp fastq-stats.cpp README CHANGES google
+	tar --exclude=".svn" -cvzf $(PKG).tar.gz $^
 
 $(PKG).${VER}-${REL}.tar.gz: $(PKG).tar.gz
 	cp $< $@
