@@ -200,18 +200,19 @@ int main (int argc, char **argv) {
 		memset(bcg, 0, sizeof(*bcg) * MAX_GROUP_NUM * MAX_BARCODE_NUM);
 		int bgcnt=0;
 		int b;
-                FILE *lin = fopen(list, "r");
-                if (!lin) {
-                        fprintf(stderr, "Error opening file '%s': %s\n",list, strerror(errno));
-                        return 1;
-                }
-		int ok;
-                while (bgcnt < (MAX_GROUP_NUM * MAX_BARCODE_NUM) && (ok = read_line(lin, bcg[bgcnt].b.id))) {
-                        if (ok <= 0) break;
-                        if (bcg[bgcnt].b.id.s[0]=='#') continue;
-                        bcg[bgcnt].b.id.s=strtok(bcg[bgcnt].b.id.s, "\t\n\r ");
-                        bcg[bgcnt].b.seq.s=strtok(NULL, "\t\n\r ");
-                        char *g=strtok(NULL, "\n\r");
+        FILE *lin = fopen(list, "r");
+        if (!lin) {
+                fprintf(stderr, "Error opening file '%s': %s\n",list, strerror(errno));
+                return 1;
+        }
+        // read barcode groups
+        int ok;
+        while (bgcnt < (MAX_GROUP_NUM * MAX_BARCODE_NUM) && (ok = read_line(lin, bcg[bgcnt].b.id))) {
+            if (ok <= 0) break;
+            if (bcg[bgcnt].b.id.s[0]=='#') continue;
+            bcg[bgcnt].b.id.s=strtok(bcg[bgcnt].b.id.s, "\t\n\r ");
+            bcg[bgcnt].b.seq.s=strtok(NULL, "\t\n\r ");
+            char *g=strtok(NULL, "\n\r");
 			if (!g) {
 				if (bgcnt==0){
 					fprintf(stderr,"Barcode guide list needs to be ID<whitespace>SEQUENCE<whitespace>GROUP");
@@ -225,34 +226,37 @@ int main (int argc, char **argv) {
 					continue;
 				}
 			}
-                        if (!strcmp(bcg[bgcnt].b.seq.s,"seq")) continue;
+            if (!strcmp(bcg[bgcnt].b.seq.s,"seq")) continue;
 
+            // dual indexed indicated by a dash in the sequence...
 			if (bcg[bgcnt].b.dual=strchr(bcg[bgcnt].b.seq.s,'-')) {
 				*bcg[bgcnt].b.dual = '\0';
 				++bcg[bgcnt].b.dual;
 				bcg[bgcnt].b.dual_n = strlen(bcg[bgcnt].b.dual);
 			}
+            // group pointer for this group
 			bcg[bgcnt].gptr = getgroup(g);
-                        bcg[bgcnt].b.id.n=strlen(bcg[bgcnt].b.id.s);
-                        bcg[bgcnt].b.seq.n=strlen(bcg[bgcnt].b.seq.s);
-                        if (debug) fprintf(stderr, "BCG: %d bc:%s n:%d\n", bgcnt, bcg[bgcnt].b.seq.s, bcg[bgcnt].b.seq.n);
-                        ++bgcnt;
-                }
+            bcg[bgcnt].b.id.n=strlen(bcg[bgcnt].b.id.s);
+            bcg[bgcnt].b.seq.n=strlen(bcg[bgcnt].b.seq.s);
+            if (debug) fprintf(stderr, "BCG: %d bc:%s n:%d\n", bgcnt, bcg[bgcnt].b.seq.s, bcg[bgcnt].b.seq.n);
+            ++bgcnt;
+        }
 
 		if (!bgcnt) {
 			fprintf(stderr,"No barcodes %s from guide list %s.\n", group ? "matched" : "read", list);
 			return 1;
 		}
 
-                int sampcnt = 200000;
-                struct stat st;
+        int sampcnt = 200000;
+        struct stat st;
 		int fsum[f_n], fmax[f_n]; int bestcnt=0, besti=-1, bestdual=0;
 		int dfsum[f_n], dfmax[f_n]; int dbestcnt=0, dbesti=-1;
 		meminit(fsum); meminit(fmax); meminit(dfsum); meminit(dfmax);
 
+        // subsample to determine group to use
 		for (i=0;i<f_n;++i) {
-			char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
-			char *q = NULL; size_t nq = 0;
+            char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
+            char *q = NULL; size_t nq = 0;
 			double tots=0, totsq=0;
 			
 			stat(in[i], &st);
@@ -271,9 +275,12 @@ int main (int argc, char **argv) {
 
 				s[--ns]='\0'; q[ns]='\0';
 
+// skip if quality is below average
 				if (st.st_size > (sampcnt * 500) && poorqual(i, ns, s, q)) 
 					continue;
-			
+	
+//                fprintf(stderr, "s: %s\n", s);
+	
 				for (b=0;b<bgcnt;++b) {
 					if (!strncasecmp(s, bcg[b].b.seq.s, bcg[b].b.seq.n)) 
 						++bcg[b].bcnt[i];
@@ -299,15 +306,17 @@ int main (int argc, char **argv) {
 				++nr;
 				if (nr >= sampcnt) break;
 			}
-			for (b=0;b<bgcnt;++b) {
 
+			for (b=0;b<bgcnt;++b) {
 				// highest count
 				int hcnt = (int) (max(bcg[b].bcnt[i],bcg[b].ecnt[i]) * log(bcg[b].b.seq.n));
 				fsum[i]+=hcnt;
 				if (hcnt > fmax[i])
 					fmax[i]=hcnt;
+
+				if (debug > 2) fprintf(stderr,"file-sum %d %d, bestsum %d\n", i, fsum[i], bestcnt);
+
 				if (fsum[i] > bestcnt)  {
-					if (debug > 2) fprintf(stderr,"file-sum %d %d\n", i, fsum[i]);
 					bestcnt=fsum[i];
 					besti=i;
 					bestdual=(bcg[b].b.dual!=NULL);
@@ -331,6 +340,8 @@ int main (int argc, char **argv) {
 			if (debug > 0) fprintf(stderr,"file-best %d sum:%d, max:%d\n", besti, fsum[besti], fmax[besti]);
 			if (debug > 0 && bestdual) fprintf(stderr,"dual file-best %d sum:%d, max:%d\n", dbesti, dfsum[dbesti], dfmax[dbesti]);
 		}
+
+        // chosen file is "besti"
 		i=besti;
 
 		int gmax=0, gindex=-1, scnt = 0, ecnt=0, dscnt = 0, decnt = 0;
@@ -350,12 +361,12 @@ int main (int argc, char **argv) {
 			}
 		}
 		if (gindex == -1) {
-                	fprintf(stderr, "Unable to determine barcode group\n");
+            fprintf(stderr, "Unable to determine barcode group\n");
 			exit(1);
 		}
 //		printf("gmax: %d, gindex %d, %s, thresh: %d\n", gmax, gindex, grs[gindex].id, thresh);
 
-                for (b=0;b<bgcnt;++b) {
+        for (b=0;b<bgcnt;++b) {
 			if (bcg[b].gptr->i == gindex) {
 				if (bcg[b].bcnt[i] > bcg[b].ecnt[i]) {
 					scnt+=bcg[b].dbcnt[i];
@@ -374,8 +385,8 @@ int main (int argc, char **argv) {
 		if (debug) fprintf(stderr,"scnt: %d, ecnt, %d, end: %c\n", scnt, ecnt, end);
 
 		// since this is a known good set, use a very low threshold, just to catch them all
-                fprintf(stderr, "Using Barcode Group: %s on File: %s (%s), Threshold %2.2f%%\n", 
-			grs[gindex].id, in[i], endstr(end), 100.0 * (float) ((float)thresh/15)/sampcnt);
+        fprintf(stderr, "Using Barcode Group: %s on File: %s (%s), Threshold %2.2f%%\n", 
+        grs[gindex].id, in[i], endstr(end), 100.0 * (float) ((float)thresh/15)/sampcnt);
 
 		if (bestdual) {
 			dend = dscnt >= decnt ? 'b' : 'e';
@@ -502,7 +513,7 @@ int main (int argc, char **argv) {
 		pickmax=0;
 		picktab=NULL;
 		bnode * ent = NULL;
-                while (getline(&s, &na, gin) > 0) {
+        while (getline(&s, &na, gin) > 0) {
 			if (*s != '@')  {
 				fprintf(stderr,"Invalid fastq file: %s.\n", in[i]);
 				exit(1);
@@ -520,7 +531,7 @@ int main (int argc, char **argv) {
 			if (st.st_size > (sampcnt * 500) && poorqual(i, ns, s, q)) 
 				continue;
 
-                        ++nr;
+            ++nr;
 
 			char *p;
 			if (end == 'b') {
