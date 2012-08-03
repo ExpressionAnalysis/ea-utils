@@ -5,7 +5,6 @@
 #include <getopt.h>
 #include <string.h>
 #include <errno.h>
-#include <assert.h>
 #include <math.h>
 #include <stdarg.h>
 #include <sys/stat.h>
@@ -16,6 +15,7 @@
 
 #include <google/sparse_hash_map> // or sparse_hash_set, dense_hash_map, ...
 #include <google/dense_hash_map> // or sparse_hash_set, dense_hash_map, ...
+#include "tidx/tidx.h"
 
 #include "fastq-lib.h"
 
@@ -76,10 +76,10 @@ public:
 
 class vcall {
 public:
-    vcall() {base='\0'; fwd=rev=qual=is_ref=0;};
+    vcall() {base='\0'; mn_qual=mq0=fwd=rev=qual=is_ref=qual_ssq=mq_ssq=0;}
     char base;
 	bool is_ref;
-    int qual, fwd, rev;
+    int qual, fwd, rev, mq0, mn_qual, qual_ssq, mq_ssq;
 	vector <string> seqs;
     int depth() const {return fwd+rev;};
 };
@@ -126,9 +126,16 @@ public:
 class PileupVisitor {
     public:
         char InputType;
+
+        string AnnotFile;       // path to file
+        tidx AnnotDex;          // start/stop index file
+        char AnnotType;         // b (bed) or g (gtf - preferred)
+        
         PileupReads Reads;
         PileupVisitor() {InputType ='\0';}
+        PileupVisitor(const char *a) {InputType ='\0'; LoadIndex(a);}
 		void Parse(char *dat) {PileupSummary p(dat, Reads); Visit(p);};
+        void LoadIndex(const char *a);
 		virtual void Visit(PileupSummary &dat)=0;
 		virtual void Finish()=0;
 };
@@ -153,12 +160,15 @@ class VarCallVisitor : public PileupVisitor {
 
     public:
     int WinMax;
-    VarCallVisitor() : PileupVisitor() {SkippedDepth=0;WinMax=0;};
+    VarCallVisitor() : PileupVisitor() {SkippedDepth=0;WinMax=0;Hets=0;Homs=0;Locii=0;};
 
     void Visit(PileupSummary &dat);
     void Finish();
 
 	int SkippedDepth;
+	int Locii;
+	int Hets;
+	int Homs;
 };
 
 bool hasdata(const string &file) {
@@ -188,7 +198,8 @@ double zygosity=.5;		        // set to .1 for 1 10% admixture, or even .05 for h
 
 void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref);
 
-FILE *noise_f=NULL;
+FILE *noise_f=NULL, *var_f = NULL, *varsum_f = NULL, *tgt_f = NULL, *tgtsum_f = NULL, *vcf_f = NULL;
+
 double alpha=.05;
 int phred=33;
 double phi(double x);
@@ -204,14 +215,20 @@ int main(int argc, char **argv) {
 	double upctqdepth=0;
 	int do_stats=0;
 	int do_varcall=0;
-	while ( (c = getopt_long(argc, argv, "?dsvBhe:m:N:x:f:p:a:q:Q:i:D:R:b:",NULL,NULL)) != -1) {
+
+    char *out_prefix = NULL;
+    char *target_annot = NULL;
+
+	while ( (c = getopt_long(argc, argv, "?dsVvBhe:m:N:x:f:p:a:q:Q:i:o:D:R:b:",NULL,NULL)) != -1) {
 		switch (c) {
 			case 'd': ++debug; break;
 			case 'h': usage(stdout); return 0;
 			case 'm': umindepth=atoi(optarg); break;
 			case 'q': min_qual=atoi(optarg); break;
+			case 'o': out_prefix=optarg; break;
 			case 'Q': min_mapq=atoi(optarg); break;
 			case 'R': repeat_filter=atoi(optarg); break;
+			case 'A': target_annot=optarg; break;
 			case 'a': uminadepth=atoi(optarg);break;
 			case 'D': artifact_filter=atof(optarg);break;
 			case 'i': uminidepth=atoi(optarg);break;
@@ -246,12 +263,27 @@ int main(int argc, char **argv) {
 		}
 	}
 
+
+    if (out_prefix) {
+        var_f = fopen(string_format("%s.var", out_prefix).c_str(), "w");
+        vcf_f = fopen(string_format("%s.vcf", out_prefix).c_str(), "w");
+        noise_f = fopen(string_format("%s.noise", out_prefix).c_str(), "w");
+        varsum_f = fopen(string_format("%s.varsum", out_prefix).c_str(), "w");
+        if (target_annot) {
+            tgt_f = fopen(string_format("%s.tgt", out_prefix).c_str(), "w");
+            tgtsum_f = fopen(string_format("%s.tgt", out_prefix).c_str(), "w");
+        }
+    } else {
+        var_f = stdout;
+        varsum_f = stderr;
+    } 
+
 	if (umindepth > minsampdepth) {
 		minsampdepth=umindepth;
 	}
 
 	if (!do_stats && !do_varcall || do_stats && do_varcall) {
-		warn("Specify -s for stats only, or -v to do variant calling\n\n");
+		warn("Specify -s for stats only, or -v/-V to do variant calling\n\n");
 		usage(stderr);
 		return 1;
 	}
@@ -285,91 +317,93 @@ int main(int argc, char **argv) {
 
 		parse_bams(vstat, in_n, in, ref);
 
-		// sort by depth descending
-		sort(vstat.stats.begin(), vstat.stats.end(), noisebydepth);
+        stat_out("min sampling depth\t%d\n", minsampdepth);
+        stat_out("alpha\t%f\n", alpha);
 
-		// flip 3 and 1 because sorted in descending order for sampling (above)
-		double depth_q3=quantile_depth(vstat.stats, .25);
-		double depth_q2=quantile_depth(vstat.stats, .50);
-		double depth_q1=quantile_depth(vstat.stats, .75);
-		double depth_qx=quantile_depth(vstat.stats, .90);
+        if (vstat.stats.size()) {
+            // sort by depth descending
+            sort(vstat.stats.begin(), vstat.stats.end(), noisebydepth);
 
-		// number of locii to compute error rate
-		int ncnt=min(10000,vstat.stats.size());
+            // flip 3 and 1 because sorted in descending order for sampling (above)
+            double depth_q3=quantile_depth(vstat.stats, .25);
+            double depth_q2=quantile_depth(vstat.stats, .50);
+            double depth_q1=quantile_depth(vstat.stats, .75);
+            double depth_qx=quantile_depth(vstat.stats, .90);
 
-		int i;
-		double nsum=0, nssq=0, dsum=0, dmin=vstat.stats[0].depth, qnsum=0, qnssq=0, qualsum=0;
-		for (i=0;i<ncnt;++i) {
-			nsum+=vstat.stats[i].noise;
-			nssq+=vstat.stats[i].noise*vstat.stats[i].noise;
-			dsum+=vstat.stats[i].depth;
-			qnsum+=vstat.stats[i].qnoise;
-			qnssq+=vstat.stats[i].qnoise*vstat.stats[i].qnoise;
-			qualsum+=vstat.stats[i].mnqual;
-			if (vstat.stats[i].depth < dmin) dmin = vstat.stats[i].depth;
-		}
+            // number of locii to compute error rate
+            int ncnt=min(10000,vstat.stats.size());
 
-		double noise_mean =nsum/ncnt;
-		double noise_dev = stdev(ncnt, nsum, nssq);
-		double qnoise_mean =qnsum/ncnt;
-		double qnoise_dev = stdev(ncnt, qnsum, qnssq);
-		double qual_mean = qualsum/ncnt;
+            int i;
+            double nsum=0, nssq=0, dsum=0, dmin=vstat.stats[0].depth, qnsum=0, qnssq=0, qualsum=0;
+            for (i=0;i<ncnt;++i) {
+                nsum+=vstat.stats[i].noise;
+                nssq+=vstat.stats[i].noise*vstat.stats[i].noise;
+                dsum+=vstat.stats[i].depth;
+                qnsum+=vstat.stats[i].qnoise;
+                qnssq+=vstat.stats[i].qnoise*vstat.stats[i].qnoise;
+                qualsum+=vstat.stats[i].mnqual;
+                if (vstat.stats[i].depth < dmin) dmin = vstat.stats[i].depth;
+            }
 
-		stat_out("min sampling depth\t%d\n", minsampdepth);
-		stat_out("alpha\t%f\n", alpha);
+            double noise_mean =nsum/ncnt;
+            double noise_dev = stdev(ncnt, nsum, nssq);
+            double qnoise_mean =qnsum/ncnt;
+            double qnoise_dev = stdev(ncnt, qnsum, qnssq);
+            double qual_mean = qualsum/ncnt;
 
-		stat_out("qual mean\t%.4f\n", qual_mean);
-		stat_out("noise mean\t%.4f\n", noise_mean);
-		stat_out("noise dev\t%.4f\n", noise_dev);
-		stat_out("qnoise mean\t%.4f\n", qnoise_mean);
-		stat_out("qnoise dev\t%.4f\n", qnoise_dev);
+            stat_out("qual mean\t%.4f\n", qual_mean);
+            stat_out("noise mean\t%.4f\n", noise_mean);
+            stat_out("noise dev\t%.4f\n", noise_dev);
+            stat_out("qnoise mean\t%.4f\n", qnoise_mean);
+            stat_out("qnoise dev\t%.4f\n", qnoise_dev);
 
-		if (qnoise_mean >= noise_mean ) {
-			stat_out("error\tpoor quality estimates\n");
-		}
+            if (qnoise_mean >= noise_mean ) {
+                stat_out("error\tpoor quality estimates\n");
+            }
 
-		stat_out("noise depth mean\t%.4f\n", dsum/ncnt);
-		stat_out("noise depth min\t%.4f\n", dmin);
-		stat_out("noise cnt\t%d\n", ncnt);
+            stat_out("noise depth mean\t%.4f\n", dsum/ncnt);
+            stat_out("noise depth min\t%.4f\n", dmin);
+            stat_out("noise cnt\t%d\n", ncnt);
 
-		stat_out("depth q1\t%.4f\n", depth_q1);
-		stat_out("depth median\t%.4f\n", depth_q2);
-		stat_out("depth q3\t%.4f\n", depth_q3);
+            stat_out("depth q1\t%.4f\n", depth_q1);
+            stat_out("depth median\t%.4f\n", depth_q2);
+            stat_out("depth q3\t%.4f\n", depth_q3);
 
-		dsum=0;
-		for (i=0;i<vstat.stats.size();++i) {
-			dsum+=vstat.stats[i].depth;
-		}
+            dsum=0;
+            for (i=0;i<vstat.stats.size();++i) {
+                dsum+=vstat.stats[i].depth;
+            }
 
-		// pick a min depth that makes sense based on available data
-		min_depth=depth_qx > 10 ? (depth_qx < 100 ? depth_qx : 100) : 10;
-		min_depth=max(dmin,min_depth);
+            // pick a min depth that makes sense based on available data
+            min_depth=depth_qx > 10 ? (depth_qx < 100 ? depth_qx : 100) : 10;
+            min_depth=max(dmin,min_depth);
 
-		int locii_gtmin=0;
-		for (i=0;i<vstat.stats.size();++i) {
-			if (vstat.stats[i].depth > min_depth) {
-				++locii_gtmin;
-			}
-		}
-		stat_out("locii gt min depth\t%d\n", locii_gtmin);
+            int locii_gtmin=0;
+            for (i=0;i<vstat.stats.size();++i) {
+                if (vstat.stats[i].depth > min_depth) {
+                    ++locii_gtmin;
+                }
+            }
+            stat_out("locii gt min depth\t%d\n", locii_gtmin);
 
-		double stdevfrommean=-qnorm((alpha/sqrt(locii_gtmin))/2);
-		stat_out("qnorm adj\t%f\n", stdevfrommean);
+            double stdevfrommean=-qnorm((alpha/sqrt(locii_gtmin))/2);
+            stat_out("qnorm adj\t%f\n", stdevfrommean);
 
-		pct_qdepth=qnoise_mean+qnoise_dev*stdevfrommean;
-		stat_out("min pct qual\t%.4f\n", 100*pct_qdepth);
+            pct_qdepth=qnoise_mean+qnoise_dev*stdevfrommean;
+            stat_out("min pct qual\t%.4f\n", 100*pct_qdepth);
 
-	//  qpct has better sens/spec, discourage use
+        //  qpct has better sens/spec, discourage use
 
-	//	pct_depth=noise_mean+noise_dev*stdevfrommean;
-	//	stat_out("minority pct\t%.4f\n", 100*pct_depth);
+        //	pct_depth=noise_mean+noise_dev*stdevfrommean;
+        //	stat_out("minority pct\t%.4f\n", 100*pct_depth);
 
-		// min depth required to make a het call, based on the pct_depth and a p-value based on the # of locii tested
-		double logz = log(1/zygosity);
-		min_adepth = -log(alpha/sqrt(locii_gtmin))/logz;
+            // min depth required to make a het call, based on the pct_depth and a p-value based on the # of locii tested
+            double logz = log(1/zygosity);
+            min_adepth = -log(alpha/sqrt(locii_gtmin))/logz;
 
-		stat_out("min depth\t%d\n", min_depth);
-		stat_out("min call depth\t%d\n", min_adepth);
+            stat_out("min depth\t%d\n", min_depth);
+            stat_out("min call depth\t%d\n", min_adepth);
+        }
 	}
 
 	if (do_varcall) {
@@ -388,6 +422,7 @@ int main(int argc, char **argv) {
 		warn("min pct qual\t%d\n", (int)(100*pct_qdepth));
 
 		warn("min balance\t%d\n", (int)(100*pct_balance));
+		warn("artifact filter\t%f\n", artifact_filter);
 		warn("min qual\t%d\n", min_qual);
 		warn("min map qual\t%d\n", min_mapq);
 
@@ -397,6 +432,9 @@ int main(int argc, char **argv) {
 		    warn("homopolymer filter\t%d\n", repeat_filter);
             vcall.WinMax=repeat_filter+repeat_filter+1;
         }
+
+        if (vcf_f)
+            fprintf(vcf_f, "%s\n", "##fileformat=VCFv4.1");
 
 		parse_bams(vcall, in_n, in, ref);
 
@@ -658,6 +696,13 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 			}
 
 			Calls[j].qual+=q;
+            if (vcf_f) {
+                Calls[j].mn_qual+=min(mq,q);
+                Calls[j].mq_ssq+=mq*mq;
+                Calls[j].qual_ssq+=q*q;
+                if (mq == 0) 
+                    Calls[j].mq0++; 
+            }
 		}
 
 		if (c == '-' || c == '+') {
@@ -690,6 +735,9 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
                     ++Calls[j].fwd;
                 }
                 Calls[j].qual+=q;
+                Calls[j].mn_qual+=min(q, mq);
+                Calls[j].qual_ssq+=q*q;
+                Calls[j].mq_ssq+=mq*mq;
                 Calls[j].seqs.push_back(ins_seq);
             }
             cur_p=end_p+len;
@@ -754,8 +802,8 @@ void VarCallVisitor::Visit(PileupSummary &p) {
         return;
     }
 
-    if (Win.size() && (Win.back().Pos != (p.Pos - 1) )) {
-        if (p.Base != '-') {
+    if (p.Base != '-' && p.Base != '@') {
+        if (Win.size() && (Win.back().Pos != (p.Pos - 1) )) {
             if (Win.back().Pos < p.Pos && ((p.Pos - Win.back().Pos) <= (WinMax/2))) {
                 while (Win.back().Pos < (p.Pos - 1)) {
                     // visit/pop, add a placeholder
@@ -764,18 +812,17 @@ void VarCallVisitor::Visit(PileupSummary &p) {
                     Visit(JunkSummary);
                 }
             } else {
-                while (Win.size()) {
+                while (Win.size() && Win[WinMax/2].Base != '@') {
                     // visit/pop, but don't add anything, until it's empty
                     JunkSummary.Base = '@';
                     JunkSummary.Pos = 0;
                     Visit(JunkSummary);
                 }
             }
-        } 
+        }
     }
 
-    if (p.Base != '@')              // see above, false-add to clear queue
-        Win.push_back(p);
+    Win.push_back(p);
 
     if (Win.size() > WinMax)        // queue too big?  pop
         Win.pop_front();
@@ -791,7 +838,7 @@ void VarCallVisitor::Visit(PileupSummary &p) {
         vx = WinMax/2;              // larger window? look at midpoint
     }
 
-    if (Win[vx].Base == '-') 
+    if (Win[vx].Base == '-' || Win[vx].Base == '@') 
         return;
 
     if (vx > 1) {                   // look left
@@ -868,6 +915,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 	int skipped_indel=0;
 	int skipped_depth=0;
 	int skipped_repeat=0;
+	int allele_count=0;
 	string pil;
 	for (i=0;i<p.Calls.size();++i) {		// all calls
 //		printf("d:%d b: %c, pd: %d\n", (int) p.Calls[i].depth(), p.Calls[i].base, p.Depth);
@@ -912,7 +960,27 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                             if (p.RepeatCount < repeat_filter) {
                                 if (need_out == -1) 
                                     need_out = i;
-                                pil += string_format("\t%c%s:%d,%d", p.Calls[i].base, maxs.c_str(),maxc,p.Calls[i].qual/p.Calls[i].depth());	
+                                pil += string_format("\t%c%s:%d,%d", p.Calls[i].base, maxs.c_str(),maxc,p.Calls[i].qual/p.Calls[i].depth());
+                                ++allele_count;
+                                if (vcf_f && need_out >= 0) {
+                                    int qual = max(40,(p.Calls[i].mn_qual/p.Calls[i].depth() * min((1-pct_depth),(1-pct_qdepth))));
+                                    string base;
+                                    string alt;
+                                    if (p.Calls[i].base =='-') {
+                                        base = p.Base + maxs;
+                                        alt = p.Base;
+                                    } else {
+                                        base = p.Base;
+                                        alt = p.Base + maxs;
+                                    }
+                                    double freq_allele = p.Calls[i].depth() / (double) p.Depth;
+    		                        fprintf(vcf_f,"%s\t%d\t.\t%s\t%s\t%2d\tPASS\tMQ=%d;BQ=%d;DP=%d;AF=%2.2f\n", 
+                                        p.Chr.c_str(), p.Pos, base.c_str(), alt.c_str(), qual, 
+                                        (int) sqrt(p.Calls[i].mq_ssq/p.Calls[i].depth()),
+                                        (int) sqrt(p.Calls[i].qual_ssq/p.Calls[i].depth()),
+                                        p.Depth,
+                                        freq_allele);
+                                }
                                 skipped_indel+=p.Calls[i].depth()-maxc;
                             } else {
                                 skipped_repeat+=p.Calls[i].depth();
@@ -928,7 +996,21 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                         if (need_out == -1)
                             need_out = i;
                     }
-					pil += string_format("\t%c:%d,%d", p.Calls[i].base,p.Calls[i].depth(),p.Calls[i].qual/p.Calls[i].depth());	
+                    ++allele_count;
+					pil += string_format("\t%c:%d,%d", p.Calls[i].base,p.Calls[i].depth(),p.Calls[i].qual/p.Calls[i].depth());
+                    if (vcf_f && need_out >= 0) {
+                        int qual = max(40,p.Calls[i].mn_qual/p.Calls[i].depth() * min((1-pct_depth),(1-pct_qdepth)));
+                        char alt = p.Calls[i].base;
+                        if (p.Calls[i].is_ref) 
+                            alt = '.';
+                        double freq_allele = p.Calls[i].depth() / (double) p.Depth;
+                        fprintf(vcf_f,"%s\t%d\t.\t%c\t%c\t%d\tPASS\tMQ=%d;BQ=%d;DP=%d;AF=%2.2f\n",
+                            p.Chr.c_str(), p.Pos, p.Base, alt, qual,
+                            (int) sqrt(p.Calls[i].mq_ssq/p.Calls[i].depth()),
+                            (int) sqrt(p.Calls[i].qual_ssq/p.Calls[i].depth()),
+                            p.Depth,
+                            freq_allele);
+                    }
 				}
 			} else {
 				skipped_balance+=p.Calls[i].depth();
@@ -938,9 +1020,24 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 			break;
 		}
 	}
+
+    ++Locii;
+
 	if (need_out>=0||debug_xpos) {
-        double pct_allele = 100.0 * p.Calls[need_out].depth() / (double) p.Depth;
-		printf("%s\t%d\t%c\t%d\t%d\t%2.2f%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_depth+skipped_balance+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, pil.c_str());
+
+        double pct_allele = 0;
+        if (need_out >=0) {
+            if (allele_count > 1) {
+                ++Hets;
+            } else {
+                ++Homs;
+            }
+
+            pct_allele = 100.0 * p.Calls[need_out].depth() / (double) p.Depth;
+        }
+
+        fprintf(var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_depth+skipped_balance+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, pil.c_str());
+
 		if (debug_xpos) {
 		    fprintf(stderr,"xpos-skip-dup\t%d\n",p.SkipDupReads);
 		    fprintf(stderr,"xpos-skip-mapq\t%d\n",p.SkipMinMapq);
@@ -958,6 +1055,40 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 	}
 }
 
+
+void PileupVisitor::LoadIndex(const char *path) {
+    FILE *f = fopen(path,"r");
+    if (!f) {
+        warn("Can't open %s : %s\n", path, strerror(errno));
+        exit(1);
+    }
+
+    AnnotType = '\0';
+    line l; meminit(l);
+    int cnt=0;
+    while(read_line(f, l)>0) {
+        vector<char *> d=split(l.s, "\t");
+        if (d.size() < 9) {
+            warn("File must be a GTF or a BED: '%s'\n", path);
+            exit(1);
+        }
+        AnnotType = (*d[5]=='+' || *d[5] == '-') ? 'b' : '\0';  
+        AnnotType = (*d[6]=='+' || *d[5] == '-') ? 'g' : AnnotType;
+        break;
+    }
+
+    if (!AnnotType) {
+        warn("File must be a GTF or a BED: '%s'\n", path);
+        exit(1);
+    }
+
+    if (!AnnotDex.read(path)) {
+        //    void build(const char *path, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c);
+        AnnotDex.build(path, "\t",  0, 1, 2, 0, '#');
+    }
+
+    fclose(f);
+}
 
 void VarStatVisitor::Visit(PileupSummary &p) {
 	if (p.Depth < minsampdepth)
@@ -1053,8 +1184,7 @@ void usage(FILE *f) {
 "Varcalls go to stdout.  Stats go to stdout, or stderr if varcalling too\n"
 "\n"
 "If an output prefix is used, files are created as follows:\n"
-"   PREFIX.vstats    Pileup stats, and param hints\n"
-"   PREFIX.var       Variant calls in tab delimited format\n"
+"   PREFIX.var       Variant calls in tab delimited 'varcall' format\n"
 "   PREFIX.vcf       Variant calls, in vcf format\n"
 "   PREFIX.varsum    Summary of variant calls\n"
 "   PREFIX.tgt       On-target stats detail\n"
@@ -1101,6 +1231,7 @@ void to_upper(const std::string str) {
 // returns quantile depth 
 double quantile_depth(const std::vector<Noise> &vec, double p) {
         int l = vec.size();
+        assert(l > 0);
         double t = ((double)l-1)*p;
         int it = (int) t;
         int v=vec[it].depth;
