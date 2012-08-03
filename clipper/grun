@@ -151,7 +151,7 @@ if ($qinfo) {
 				exit 1 if $error;
 			}
 			sendcmd($host, $port, 'trace', 0) if ($conf{trace});
-		} elsif ((!samehost($host,$conf{bind}) || (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|stat$/)))) {
+		} elsif ((!samehost($host,`hostname`) || (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|stat$/)))) {
 # this could get ugly, if called a lot, may want to make more efficient
 			sendcmd($host, $port, 'trace', 1) if ($conf{trace});
             warn ("waitmsg($host, $port, 'xcmd', $cmd, @arg, %opt)\n") if $opt{debug};
@@ -2734,6 +2734,8 @@ sub killgpid {
 
 sub samehost {
 	my($h1, $h2) = @_;
+    $h1 =~ s/\s+$//;
+    $h2 =~ s/\s+$//;
 	$h1=host2ip($h1);
 	$h2=host2ip($h2);
 	# localhost = dig `hostname`
