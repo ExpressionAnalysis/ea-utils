@@ -148,7 +148,7 @@ bool poorqual(int n, int l, const char *s, const char *q) {
         int i=0, sum=0, ns=0;
         for (i=0;i<l;++i) {
                 if (s[i] == 'N')
-                        ++ns;
+                    ++ns;
                 quals[n].cnt++;
                 quals[n].ssq += q[i] * q[i];
                 sum+=q[i];
@@ -156,19 +156,19 @@ bool poorqual(int n, int l, const char *s, const char *q) {
         quals[n].sum += sum;
         quals[n].ns += ns;
         int xmean = sum/l;
-        if (quals[n].cnt < 10000) {
-                return (xmean > 20) && (ns == 0);
+        if (quals[n].cnt < 20000) {
+                return ((xmean-33) < 20) || (ns != 0);
         }
         int pmean = quals[n].sum / quals[n].cnt;                                // mean q
         double pdev = stdev(quals[n].cnt, quals[n].sum, quals[n].ssq);          // dev q
-        int serr = pdev/sqrt(l);                                                // stderr for length l
+        int serr = max(2,pdev/sqrt(l));                                                // stderr for length l
         if (xmean < (pmean - serr)) {                                           // off by 1 stdev?
-                return 0;                                                       // ditch it
+                return 1;                                                       // ditch it
         }
-        if (ns > (quals[n].ns / quals[n].cnt)) {                                // more n's than average?
-                return 0;                                                       // ditch it
+        if (ns > (l*quals[n].ns / quals[n].cnt)) {                                // more n's than average?
+                return 1;                                                       // ditch it
         }
-        return 1;
+        return 0;
 }
 
 #define comp(c) ((c)=='A'?'T':(c)=='a'?'t':(c)=='C'?'G':(c)=='c'?'g':(c)=='G'?'C':(c)=='g'?'c':(c)=='T'?'A':(c)=='t'?'a':(c))
