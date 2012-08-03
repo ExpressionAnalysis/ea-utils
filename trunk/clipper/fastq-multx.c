@@ -410,7 +410,7 @@ int main (int argc, char **argv) {
 			}
 		}
 
-                for (b=0;b<bgcnt;++b) {
+        for (b=0;b<bgcnt;++b) {
 			if (bcg[b].gptr->i == gindex) {
 				int cnt = (end == 'e' ? (bcg[b].ecnt[i]+bcg[b].escnt[i]) : ( bcg[b].bcnt[i] + bcg[b].bscnt[i] ));
 				if (cnt > thresh/15) {
