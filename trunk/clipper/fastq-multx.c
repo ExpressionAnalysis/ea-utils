@@ -108,7 +108,7 @@ int main (int argc, char **argv) {
 	int i;
 	bool omode = false;	
 	char *bfil = NULL;
-	while (	(c = getopt (argc, argv, "-dzxnbeov:m:B:g:l:G:")) != -1) {
+	while (	(c = getopt (argc, argv, "-dzxnbeov:m:B:g:L:l:G:")) != -1) {
 		switch (c) {
 		case '\1': 
                        	if (omode) {
@@ -281,32 +281,36 @@ int main (int argc, char **argv) {
 				if (st.st_size > (sampcnt * 500) && poorqual(i, ns, s, q)) 
 					continue;
 	
-//                fprintf(stderr, "s: %s\n", s);
-	
 				for (b=0;b<bgcnt;++b) {
-					if (!strncasecmp(s, bcg[b].b.seq.s, bcg[b].b.seq.n)) 
+                    // matches front of read?
+					if (!strncasecmp(s, bcg[b].b.seq.s, bcg[b].b.seq.n)) {
 						++bcg[b].bcnt[i];
-					else if (!strncasecmp(s+1, bcg[b].b.seq.s, bcg[b].b.seq.n)) {
+					} else if (!strncasecmp(s+1, bcg[b].b.seq.s, bcg[b].b.seq.n)) {
+                        // shifted read?
 						++bcg[b].bscnt[i];
-					}
+                    }
 
-					if (ns >= bcg[b].b.seq.n && !strcasecmp(s+ns-bcg[b].b.seq.n, bcg[b].b.seq.s))
+					if (ns >= bcg[b].b.seq.n && !strcasecmp(s+ns-bcg[b].b.seq.n, bcg[b].b.seq.s)) {
 						++bcg[b].ecnt[i]; 
-					else if (ns > bcg[b].b.seq.n && !strncasecmp(s+ns-bcg[b].b.seq.n-1, bcg[b].b.seq.s, bcg[b].b.seq.n)) {
+					} else if (ns > bcg[b].b.seq.n && !strncasecmp(s+ns-bcg[b].b.seq.n-1, bcg[b].b.seq.s, bcg[b].b.seq.n)) {
 						++bcg[b].escnt[i]; 
 					}
 
 					if (bcg[b].b.dual) {
-						if (!strncasecmp(s, bcg[b].b.dual, bcg[b].b.dual_n))
+						if (!strncasecmp(s, bcg[b].b.dual, bcg[b].b.dual_n)) {
 							++bcg[b].dbcnt[i];
+                        }
 
-						if (ns >= bcg[b].b.dual_n && !strcasecmp(s+ns-bcg[b].b.dual_n, bcg[b].b.dual))
+						if (ns >= bcg[b].b.dual_n && !strcasecmp(s+ns-bcg[b].b.dual_n, bcg[b].b.dual)) {
 							++bcg[b].decnt[i];
+                        }
 					}
 				}	
 				
 				++nr;
-				if (nr >= sampcnt) break;
+                // got enough reads?
+				if (nr >= sampcnt) 
+                    break;
 			}
 
 			for (b=0;b<bgcnt;++b) {
