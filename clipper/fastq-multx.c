@@ -103,6 +103,7 @@ int main (int argc, char **argv) {
 	char verify='\0';
 	bool noexec = false;
 	const char *group = NULL;
+    bool usefile1 = false;
 
 	int i;
 	bool omode = false;	
@@ -140,6 +141,7 @@ int main (int argc, char **argv) {
 			out[f_oarg++] = "n/a";
 			break;
 		case 'l': list = optarg; break;
+		case 'L': list = optarg; usefile1=1; break;
 		case 'B': bfil = optarg; list = NULL; break;
 		case 'x': trim = false; break;
 		case 'n': noexec = true; break;
@@ -254,7 +256,7 @@ int main (int argc, char **argv) {
 		meminit(fsum); meminit(fmax); meminit(dfsum); meminit(dfmax);
 
         // subsample to determine group to use
-		for (i=0;i<f_n;++i) {
+		for (i=0;i<(usefile1?1:f_n);++i) {
             char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
             char *q = NULL; size_t nq = 0;
 			double tots=0, totsq=0;
@@ -342,7 +344,7 @@ int main (int argc, char **argv) {
 		}
 
         // chosen file is "besti"
-		i=besti;
+		i=usefile1?0:besti;
 
 		int gmax=0, gindex=-1, scnt = 0, ecnt=0, dscnt = 0, decnt = 0;
 		int thresh = (int) (pickmaxpct*fmax[i]); 
@@ -583,19 +585,19 @@ int main (int argc, char **argv) {
 				fprintf(stderr, "Barcode file '%s' required format is 'ID SEQ'\n",bfil);
 				return 1;
 			}
-                        if (bc[bcnt].dual=strchr(bc[bcnt].seq.s,'-')) {
-                                *bc[bcnt].dual = '\0';
-                                ++bc[bcnt].dual;
+            if (bc[bcnt].dual=strchr(bc[bcnt].seq.s,'-')) {
+                *bc[bcnt].dual = '\0';
+                ++bc[bcnt].dual;
 				bc[bcnt].dual_n = strlen(bc[bcnt].dual);
 				dual=true;
-                        }
+            }
 			bc[bcnt].id.n=strlen(bc[bcnt].id.s);
 			bc[bcnt].seq.n=strlen(bc[bcnt].seq.s);
 			if (debug) fprintf(stderr, "BC: %d bc:%s n:%d\n", bcnt, bc[bcnt].seq.s, bc[bcnt].seq.n);
 			++bcnt; 
 		}
 
-                fprintf(stderr, "Using Barcode File: %s\n", bfil);
+        fprintf(stderr, "Using Barcode File: %s\n", bfil);
 	}
 
 	if (noexec) {
@@ -963,9 +965,9 @@ void usage(FILE *f) {
 "Usage: fastq-multx [-g|-l|-B] <barcodes.fil> <read1.fq> -o r1.%.fq [mate.fq -o r2.%.fq] ...\n"
 "\n"
 "Output files must contain a '%' sign which is replaced with the barcode id in the barcodes file.\n"
-"Output file can be n/a to discard the corresponding data\n"
+"Output file can be n/a to discard the corresponding data (use this for the barcode read)\n"
 "\n"
-"Barcodes file looks like this:\n"
+"Barcodes file (-B) looks like this:\n"
 "\n"
 "<id1> <sequence1>\n"
 "<id2> <sequence2> ...\n"
@@ -976,7 +978,7 @@ void usage(FILE *f) {
 "\n"
 "If -l is used then all barcodes in the file are tried, and the *group* with the *most* matches is chosen.\n" 
 "\n"
-"Grouped barcodes file looks like this:\n"
+"Grouped barcodes file (-l or -L) looks like this:\n"
 "\n"
 "<id1> <sequence1> <group1>\n"
 "<id1> <sequence1> <group1>\n"
@@ -986,16 +988,17 @@ void usage(FILE *f) {
 "\n"
 "Options:\n"
 "\n"
-"-o FIL1 [FIL2]	Output files (one per input, required)\n"
-"-g FIL		Determine barcodes from indexed read FIL\n"
-"-l FIL		Determine barcodes from any read, using FIL as a master list\n"
-"-B FIL		Use barcodes from the specified file only\n"
-"-b		Force beginning of line\n"
-"-e		Force end of line\n"
-"-G NAME	Group(s) matching NAME only\n"
-"-x		Don't trim barcodes before writing\n"
-"-n		Don't execute, just print likely barcode list\n"
-"-v C		Verify that mated id's match up to character C (Use ' ' for illumina)\n"
-"-m N		Allow up to N mismatches, as long as they are unique (1)\n"
+"-o FIL1     Output files (one per input, required)\n"
+"-g SEQFIL   Determine barcodes from indexed read SEQFIL\n"
+"-l BCFIL    Determine barcodes from any read, using BCFIL as a master list\n"
+"-L BCFIL    Determine barcodes from <read1.fq>, using BCFIL as a master list\n"
+"-B BCFIL    Use barcodes from the specified file, don't run a determination step\n"
+"-b          Force beginning of line (5') for barcode matching\n"
+"-e          Force end of line (3') for batcode matching\n"
+"-G NAME     Use group(s) matching NAME only\n"
+"-x          Don't trim barcodes off before writing out destination\n"
+"-n          Don't execute, just print likely barcode list\n"
+"-v C        Verify that mated id's match up to character C (Use ' ' for illumina)\n"
+"-m N        Allow up to N mismatches, as long as they are unique (1)\n"
 	,f);
 }
