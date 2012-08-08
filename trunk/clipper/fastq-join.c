@@ -44,7 +44,7 @@ int main (int argc, char **argv) {
 
 	int i;
 	int mino = 6;
-	int pctdiff = 20;				// this number tested well on exome data... tweak for best results
+	int pctdiff = 8;				// this number tested well on exome data... tweak for best results
 	bool omode = false;	
 	char *bfil = NULL;
 
@@ -315,7 +315,7 @@ void usage(FILE *f) {
 "-o FIL		See 'Output' below\n"
 "-v C		Verifies that the 2 files probe id's match up to char C\n"
 "		  use '/' for Illumina reads\n"
-"-p N		N-percent maximum difference (20)\n"
+"-p N		N-percent maximum difference (8)\n"
 "-m N		N-minimum overlap (6)\n"
 "-r FIL		Verbose stitch length report\n"
 "\n"
