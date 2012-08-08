@@ -1,6 +1,6 @@
 CC=g++
 PREFIX?=/opt
-CFLAGS?=-O3
+CFLAGS?="-O3 -I."
 CPPFLAGS?=-O3
 
 PKG=ea-utils
