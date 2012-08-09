@@ -2,6 +2,7 @@
 
 # qsub -pe smp ${NPROC} -S /bin/bash -V -q secondary -N ${JOB_ID} -o ${STDOUT_FILE} -e ${STDERR_FILE} ${EXTRAS} ${CMD}
 
+use strict;
 use Getopt::Long qw(:config no_ignore_case);
 use Data::Dumper;
 use Cwd qw(cwd);
@@ -20,6 +21,8 @@ open Z, ">qtmp/common/settings.sh";
 close Z;
 chmod 0755, "qtmp/common/settings.sh";
 
+my %opt;
+
 my $nproc;
 # get rid of weird 2-argument -pe option
 for (my $i=0;$i<@ARGV;++$i) {
@@ -28,7 +31,7 @@ for (my $i=0;$i<@ARGV;++$i) {
         $opt{pe} = $ARGV[$i+1];
         $nproc = $ARGV[$i+2];
         splice @ARGV, $i, 3;
-        break;
+        last;
     }
 }
 
@@ -61,6 +64,8 @@ if ($opt{o}) {
 }
 
 
+my @opj;
+
 if ($opt{N}) {
 	@opj = ("-j", "qsub$opt{N}");
     $opt{e} = "STDIN.e$opt{N}" if !$opt{e};
@@ -77,8 +82,9 @@ $cmd = "$cmd 2> $opt{e}";
 $opt{memory} = 1000 * $nproc; 
 
 if ($opt{hold_jid}) {
-    my $running = `grun -q jo -f "%jid\t%jobx | grep '$opt{hold_jid}\$'\n"`;
-    $running =~ s/\s+//g;
+    my $running = `/opt/bin/grun -q jo -f '%jid\t%jobx' | grep '$opt{hold_jid}\$'`;
+	print "/opt/bin/grun -q jo -f '%jid\t%jobx' | grep '$opt{hold_jid}\$'\n";
+	$running =~ s/\s+//g;
     while ($running) {
         sleep(30);
     }
@@ -103,22 +109,41 @@ if ($opt{t}) {
         $ENV{SGE_TASK_ID} = $i;
         push @jobl, dojob();
     }
+	print "DEBUG START $opt{N}: jobs @jobl\n";
     if($opt{sync}) {
         my $running = 1;
         while ($running) {
             sleep(15);
-            my %runl = map {chomp; $_=>1} `grun -q jo -f '%jid\\n'`;
+            my $runl = `/opt/bin/grun -q jo -f '%jid\\n'`;
+            #my $runl = `/opt/bin/grun -q jo`;
+			if (!$runl) {
+				print "DEBUG NO JOBS???? [$?] $opt{N}: ((($runl)))\n";
+				next;
+			}
+            my %runl = map {chomp; $_=>1} $runl;
+			my @runl = %runl;
             $running = 0;
             for (@jobl) {
-                if ($runl{$_}) {
+                #if ($runl{$_}) {
+                if ($runl =~ /$_/) {
                     $running = 1;
                 }
             }
-        }
+			if (!$running) {
+				print "DEBUG DONE $opt{N}: ((( $runl )))\n";
+			} else {
+		        print "DEBUG WAITING $opt{N}: ( $runl )\n";
+			}
+		}
+        sleep(15);
+    } else {
+        print "DEBUG NOSYNC $opt{N}\n";
     }
 } else {
     if(!$opt{sync}) {
         push @opj, "-nowait";
+    } else {
+        print "DEBUG SYNC 1 JOB $opt{N}\n";
     }
     dojob();
 }
