@@ -55,7 +55,8 @@ struct ad {
 };
 
 int read_fa(FILE *in, int rno, struct ad *ad);		// 0=done, 1=ok, -1=err+continue
-int meanq(const char *q, int qn, int i, int w);
+int meanqwin(const char *q, int qn, int i, int w);     // mean quality within window win, at position i
+bool evalqual(struct fq &fq, int file_num);
 
 int char2bp(char c);
 char bp2char(int b);
@@ -69,6 +70,13 @@ int warncount = 0;
 
 const char *cmd_align_se = "bowtie -S %i -f %1";
 const char *cmd_align_pe = "bowtie -S %i -1 %1 -2 %2";
+
+// quality filter args
+int qf_mean=0, qf_max_ns=0, qf_xgt_num=0, qf_xgt_min=0;
+int qf2_mean=0, qf2_max_ns=0, qf2_xgt_num=0, qf2_xgt_min=0;
+
+// phred used
+char phred = 0;
 
 int main (int argc, char **argv) {
 	char c;
@@ -86,8 +94,6 @@ int main (int argc, char **argv) {
 	bool rmns = 1;				// remove n's at the end of the read
 	int qthr = 7;				// remove end of-read with quality < qthr
 	int qwin = 1;				// remove end of read with mean quality < qthr
-	char phred = 0;
-	bool force = 0;
 	int ilv3 = -1;
     bool noexec = 0;
 
@@ -104,8 +110,49 @@ int main (int argc, char **argv) {
 	int fref_n = 0;
     char *qspec = NULL;
 
-	while (	(c = getopt_long(argc, argv, "-nf0uUVSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:",NULL,NULL)) != -1) {
+    static struct option long_options[] = {
+       {"qual-mean", 1, 0, 0},
+       {"max-ns", 1, 0, 0},
+       {"qual-gt", 1, 0, 0},
+       {"min-len", 1, 0, 'l'},
+       {"mate-qual-mean", 1, 0, 0},
+       {"mate-max-ns", 1, 0, 0},
+       {"mate-qual-gt", 1, 0, 0},
+       {"mate-min-len", 1, 0, 0},
+       {0, 0, 0, 0}
+    };
+
+    int option_index = 0;
+    while (	(c = getopt_long(argc, argv, "-nf0uUVSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:",long_options,&option_index)) != -1) {
 		switch (c) {
+			case '\0':
+                { 
+                    const char *oname=long_options[option_index].name;
+                    if(!strcmp(oname,        "qual-mean")) {
+                        qf_mean=atoi(optarg);
+                    } else if(!strcmp(oname, "mate-qual-mean")) {
+                        qf2_mean=atoi(optarg);
+                    } else if(!strcmp(oname, "qual-gt")) {
+                        if (!strchr(optarg, ',')) {
+                            fprintf(stderr, "Error, %s requires NUM,THR as argument\n", oname);
+                            exit(1);
+                        }
+                        qf_xgt_num=atoi(optarg);
+                        qf_xgt_min=atoi(strchr(optarg, ',')+1);
+                    } else if(!strcmp(oname, "mate-qual-gt")) {
+                        if (!strchr(optarg, ',')) { 
+                            fprintf(stderr, "Error, %s requires NUM,THR as argument\n", oname);
+                            exit(1);
+                        }
+                        qf2_xgt_num=atoi(optarg);
+                        qf2_xgt_min=atoi(strchr(optarg, ',')+1);
+                    } else if(!strcmp(oname, "max-ns")) {
+                        qf_max_ns=atoi(optarg);
+                    } else if(!strcmp(oname, "mate-max-ns")) {
+                        qf2_max_ns=atoi(optarg);
+                    }
+                    break;
+                }
 			case '\1': 
 				if (!afil) 
 					afil = optarg; 
@@ -122,7 +169,6 @@ int main (int argc, char **argv) {
 			case '0': nmax=0; skewpct=0; pctns=0; rmns=0; qthr=0; nkeep=0; ilv3=-1;  break;
 			case 'u': ilv3=1; break;
 			case 'U': ilv3=0; break;
-			case 'f': force = true; break;
 			case 'k': skewpct = atof(optarg); break;
 			case 'q': qthr = atoi(optarg); break;
 			case 'Q': qspec = optarg; break;
@@ -221,9 +267,8 @@ int main (int argc, char **argv) {
 			++acnt;
 		}
 
-		if (acnt == 0 && !force) {
+		if (acnt == 0) {
 			fprintf(stderr, "No adapters in file '%s'\n",afil);
-			exit(1);
 		}
 	}
 
@@ -616,15 +661,14 @@ int main (int argc, char **argv) {
 
 	acnt=newc;
 
-	if (acnt == 0 && !someskew && !force && !needqtrim && !ilv3) {
+	if (acnt == 0 && !someskew && !needqtrim && !ilv3) {
 		fprintf(fstat, "No adapters found");
 		if (skewpct > 0) fprintf(fstat, ", no skewing detected"); 
 		if (qthr > 0) fprintf(fstat, ", and no trimming needed");
 		fprintf(fstat, ".\n");
 		if (noclip) exit (1);			// for including in a test
-		exit(0);				// not really an error, check size of output files
 	} else {
-		if (debug) fprintf(stderr, "acnt: %d, ssk: %d, force: %d, needq: %d\n", acnt, someskew, force, needqtrim);
+		if (debug) fprintf(stderr, "acnt: %d, ssk: %d, needq: %d\n", acnt, someskew, needqtrim);
 		if (noclip) {
 			if (acnt == 0) fprintf(fstat, "No adapters found. ");
 			if (someskew) fprintf(fstat, "Skewing detected. "); 
@@ -677,6 +721,7 @@ int main (int argc, char **argv) {
 	int nerr=0;
 	int nok=0;
 	int ntooshort=0;
+	int nfiltered=0;
 	// total per read
 	int ntrim[MAX_FILES]; meminit(ntrim);
 
@@ -763,7 +808,7 @@ int main (int argc, char **argv) {
 
 				// trim qual from the begin
 				for (i=dotrim[f][0];i<(fq[f].seq.n);++i) {
-					if (qwin > 1 && (meanq(fq[f].qual.s,fq[f].seq.n,i,qwin)-phred) < qthr) {
+					if (qwin > 1 && (meanqwin(fq[f].qual.s,fq[f].seq.n,i,qwin)-phred) < qthr) {
 						++trimqb[f];
 						istrimq = true;
 						dotrim[f][0] = i + 1;
@@ -776,7 +821,7 @@ int main (int argc, char **argv) {
 				}
 
 				for (i=dotrim[f][1];i<(fq[f].seq.n);++i) {
-					if (qwin > 1 && (meanq(fq[f].qual.s,fq[f].seq.n,fq[f].seq.n-i-1,qwin)-phred) < qthr) {
+					if (qwin > 1 && (meanqwin(fq[f].qual.s,fq[f].seq.n,fq[f].seq.n-i-1,qwin)-phred) < qthr) {
 						++trimqb[f];
 						istrimq = true;
 						dotrim[f][1] = i + 1;
@@ -923,13 +968,23 @@ int main (int argc, char **argv) {
 						fq[f].qual.s[nmax]='\0';
 					}
 				}
-				fputs(fq[f].id.s,fout[f]);
-				fputs(fq[f].seq.s,fout[f]);
-				fputc('\n',fout[f]);
-				fputs(fq[f].com.s,fout[f]);
-				fputs(fq[f].qual.s,fout[f]);
-				fputc('\n',fout[f]);
+                if (avgns[f]>=11 && !evalqual(fq[f],f)) {
+                    skip = 1;
+                }
 			}
+            if (!skip) {
+                for (f=0;f<o_n;++f) {
+                    fputs(fq[f].id.s,fout[f]);
+                    fputs(fq[f].seq.s,fout[f]);
+                    fputc('\n',fout[f]);
+                    fputs(fq[f].com.s,fout[f]);
+                    fputs(fq[f].qual.s,fout[f]);
+                    fputc('\n',fout[f]);
+                }
+            } else {
+                if (skipb) saveskip(fskip, i_n, fq);
+                ++nfiltered;
+            }
 		} else {
 			if (skipb) saveskip(fskip, i_n, fq);
 			++ntooshort;
@@ -944,6 +999,8 @@ int main (int argc, char **argv) {
 
 	fprintf(fstat, "Total reads: %d\n", nrec);
 	fprintf(fstat, "Too short after clip: %d\n", ntooshort);
+    if (nfiltered)
+	fprintf(fstat, "Filtered on quality: %d\n", nfiltered);
 
 	int f;
 	if (i_n == 1) {
@@ -1035,9 +1092,7 @@ void usage(FILE *f, const char *msg) {
 "    -k N     sKew percentage-less-than causing cycle removal (2)\n"
 "    -x N     'N' (Bad read) percentage causing cycle removal (20)\n"
 "    -q N     quality threshold causing base removal (10)\n"
-"    -Q SPEC  quality filters causing discard (see below)\n"
 "    -w N     window-size for quality trimming (1)\n"
-"    -f       force output, even if not much will be done\n"
 //"    -F FIL  remove sequences that align to FIL\n"
 "    -0       Set all default parameters to zero/do nothing\n"
 "    -U|u     Force disable/enable Illumina PF filtering (auto)\n"
@@ -1047,6 +1102,14 @@ void usage(FILE *f, const char *msg) {
 "    -C N     Number of reads to use for subsampling (300k)\n"
 "    -S       Save all discarded reads to '.skip' files\n"
 "    -d       Output lots of random debugging stuff\n"
+"\n"
+"Quality filtering options*:\n"
+"    --[mate-]qual-mean  NUM       Minimum mean quality score\n"
+"    --[mate-]qual-gt    NUM,THR   At least NUM quals > THR\n" 
+"    --[mate-]max-ns     NUM       Maxmium N-calls in a read\n"
+"    --[mate-]min-len    NUM       Minimum remaining length (same as -l)\n"
+"\n"
+"If mate- prefix is used, then applies to second non-barcode read only\n"
 /*
 "Config:\n"
 "\n"
@@ -1090,16 +1153,7 @@ void usage(FILE *f, const char *msg) {
 "\n"
 "Set the skew (-k) or N-pct (-x) to 0 to turn it off\n"
 "\n"
-"Quality filtering spec, comma delimited k*eyword=value:\n"
-"\n"
-"    mean=NUM     Minimum mean quality score\n"
-"    median=NUM   Minimum median quality score\n"
-"    ns=NUM       Maxmium N-calls in a read\n"
-"    xgt=I1,I2    At least I1 quals greater than I2\n"
-"\n"
-"Example: -q mean=25,ns=3,xgt=23,30\n"
-"\n"
-"Quality filters are evaluated before clippping/trimming\n"
+"*Quality filters are evaluated after clipping/trimming\n"
 	);
 }
 
@@ -1131,15 +1185,64 @@ void saveskip(FILE **fout, int fo_n, struct fq *fq)  {
 	}
 }
 
-int meanq(const char *q, int qn, int i, int w) {
-	if (w > qn) w=qn/4;
-	int s = i-w/2;
+int meanqwin(const char *q, int qn, int i, int w) {
+	if (w > qn) w=qn/4;                         // maximum window is length/4
+	int s = i-w/2;                              // start/end window
 	int e = i+w/2;
-	if (s < 0) {e-=s;s=0;}
-	if (e >= qn) {s-=((e-qn)+1);e=qn-1;}
+	if (s < 0) {e-=s;s=0;}                      // shift window over if you're past the start
+	if (e >= qn) {s-=((e-qn)+1);e=qn-1;}        // shift window over if you're past the end
 	int t = 0;
 	for (i=s;i<=e;++i) {
 		t+=q[i];	
 	}
-	return t / (e-s+1);
+	return t / (e-s+1);                         // mean quality within the window at that position
+}
+
+bool evalqual(struct fq &fq, int file_num) {
+    int t_mean, t_max_ns, t_xgt_num, t_xgt_min;
+
+    if (file_num <= 0) {
+        t_mean=qf_mean;
+        t_max_ns=qf_max_ns;
+        t_xgt_num=qf_xgt_num;
+        t_xgt_min=qf_xgt_min;
+    } else {
+        t_mean=qf2_mean > 0 ? qf2_mean : qf_mean;
+        t_max_ns=qf_max_ns > 0 ? qf2_max_ns : qf_max_ns;
+        t_xgt_num=qf_xgt_num > 0 ? qf2_xgt_num : qf_xgt_num;
+        t_xgt_min=qf_xgt_min > 0 ? qf2_xgt_min : qf_xgt_min;
+    }
+
+    if (t_mean > 0) {
+        int t = 0;
+        int i;
+        for (i=0;i<=fq.qual.n;++i) {
+            t+=fq.qual.s[i];
+        }
+        if ((t/fq.qual.n-phred) < t_mean) {
+            return false;
+        }
+    }
+    if (t_max_ns > 0) {
+        int t = 0;
+        int i;
+        for (i=0;i<=fq.seq.n;++i) {
+            t+=(fq.seq.s[i]=='N');
+        }
+        if (t > t_max_ns) {
+            return false;
+        }
+    }
+    if (t_xgt_num > 0) {
+        int t = 0;
+        int i;
+        int h = t_xgt_min+phred;
+        for (i=0;i<=fq.qual.n;++i) {
+            t+=(fq.qual.s[i]>=h);
+        }
+        if (t < t_xgt_num) {
+            return false;
+        }
+    }
+    return true;
 }
