@@ -82,6 +82,7 @@ int main (int argc, char **argv) {
 	char c;
 	bool eol;
 	int nmin = 1, nkeep = 19, nmax=0;
+    int qf2_min_len=0;
 	float minpct = 0.25;
 	int pctdiff = 10;
 	int sampcnt = 300000;			// # of reads to sample to determine adapter profile, and base skewing
@@ -150,6 +151,8 @@ int main (int argc, char **argv) {
                         qf_max_ns=atoi(optarg);
                     } else if(!strcmp(oname, "mate-max-ns")) {
                         qf2_max_ns=atoi(optarg);
+                    } else if(!strcmp(oname, "mate-min-len")) {
+                        qf2_min_len=atoi(optarg);
                     }
                     break;
                 }
@@ -917,7 +920,10 @@ int main (int argc, char **argv) {
 			if (debug) printf("totclip %d\n", totclip);
 
 			if (totclip > 0) {
-				if ( (fq[f].seq.n-totclip) < nkeep) {
+                // keep length > X, X based on mate
+                int tkeep = f == 0 ? nkeep : qf2_min_len > 0 ? qf2_min_len : nkeep;
+
+				if ( (fq[f].seq.n-totclip) < tkeep) {
 					// skip all reads if one is severely truncated ??
 					// maybe not... ?
 					skip = 1;
@@ -1202,11 +1208,13 @@ bool evalqual(struct fq &fq, int file_num) {
     int t_mean, t_max_ns, t_xgt_num, t_xgt_min;
 
     if (file_num <= 0) {
+        // applies to file 1
         t_mean=qf_mean;
         t_max_ns=qf_max_ns;
         t_xgt_num=qf_xgt_num;
         t_xgt_min=qf_xgt_min;
     } else {
+        // applies to file 2 or greater, only if they are set
         t_mean=qf2_mean > 0 ? qf2_mean : qf_mean;
         t_max_ns=qf_max_ns > 0 ? qf2_max_ns : qf_max_ns;
         t_xgt_num=qf_xgt_num > 0 ? qf2_xgt_num : qf_xgt_num;
