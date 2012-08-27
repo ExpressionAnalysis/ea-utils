@@ -19,7 +19,8 @@ my $o = shift @ARGV;
 
 die "Usage: $0 [-n] [-f <index>] <input-bam> <output-bam>
 
-Convert a bam file into a file suitable for passing to RSEM.
+Convert a BWA style BAM with XA tags, to a BOWTIE styled BAM
+that has no mismatch reads, and multiple mate-pairs per hit.
 
     -f  gene index (samtools faidx results), used to discard XA
         alignments that go beyone the edge of the file (bug in 
