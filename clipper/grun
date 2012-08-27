@@ -29,7 +29,7 @@ use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
 use Safe;
 use Cwd;
 
-our $VERSION = 0.8.141;				# 0.9 will be feature lock.   1.0 will be config backward lock
+our $VERSION = '0.8.151';				# 0.9 will be feature lock, after sql impl.   1.0 will be config backward lock
 
 my $WIN32 = ($^O =~ /Win32/);
 my $EOT = pack("cc",0,4);
@@ -67,11 +67,13 @@ $def{hostname} = $ENV{HOSTNAME} ? $ENV{HOSTNAME} : $ENV{COMPUTERNAME} ? $ENV{COM
 $def{log_types} = "note error warn";	# log all
 chomp $def{hostname};
 
-my ($qinfo, $help, $config);
+my ($qinfo, $help, $config, $ver);
 
 Getopt::Long::Configure qw(require_order no_ignore_case passthrough);
-GetOptions("daemon"=>\$daemon, "CONF:s"=>\$config, "trace"=>\$def{trace}, "query"=>\$qinfo) ||
+GetOptions("daemon"=>\$daemon, "CONF:s"=>\$config, "trace"=>\$def{trace}, "query"=>\$qinfo, "version"=>\$ver) ||
 	die usage();
+
+(print "grun $VERSION\n") && exit(0) if $ver;
 
 if ($ARGV[0] eq '-?') {
 	shift @ARGV;
