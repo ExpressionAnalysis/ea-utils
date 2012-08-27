@@ -1,0 +1,341 @@
+#!/usr/bin/perl
+
+# LICENSE:  LMK1.0:  This software is free.   There's no warranty.  This license 
+#  must be preserved.  Also, if you use this software, please let me know....so i 
+# don't think it was a waste of time writing it.
+# AUTHOR: Erik Aronesty (erik@q32.com)
+
+use strict;
+use POSIX qw(mkfifo);
+use Data::Dumper;
+
+use Getopt::Long;
+
+my %opt;
+GetOptions(\%opt, "sort", "fai=s","noindel");
+
+my $f = shift @ARGV;
+my $o = shift @ARGV;
+
+die "Usage: $0 [-n] [-f <index>] <input-bam> <output-bam>
+
+Convert a bam file into a file suitable for passing to RSEM.
+
+    -f  gene index (samtools faidx results), used to discard XA
+        alignments that go beyone the edge of the file (bug in 
+        some versions of sampe can do this)
+
+    -n  no indels ... removes indels and soft-clip information
+        from the cigar string... ruining the validity of the MD tag
+        and any variation results... but good for pipelines (like
+        rna counting) that don't use/want this info
+" unless $f =~ /\.bam$/ && $o =~ /bam$/;
+
+my %FAI;
+if ($opt{fai}) {
+    $opt{fai} = $opt{fai} =~ /fa$/ ? "$opt{fai}.fai" : $opt{fai};
+    die "Failed to open $opt{fai}\n" unless open(IN, $opt{fai});
+    while(<IN>) {
+        my ($id, $len) = split /\t/, $_;
+        die "Invalid file $opt{fai}\n" unless $len > 0;
+        $FAI{$id}=$len+0;
+    }
+    close(IN);
+}
+
+open IN, "samtools view $f |";
+open OUT, "|samtools view -S -b - > $o 2> /dev/null";
+
+my ($pe, $cnt, @lens);
+while (<IN>) {
+    my ($id, $bits, $nmo, $pos, $qual, $cig, $f1, $f2, $f3, $seq, $qseq, @fdx) = split /\t/, $_;
+    next unless $pos > 0;
+    ++$cnt;
+    if (abs($f3)>0) {
+        if ($f3 > 0) {
+            push @lens, $f3;
+        }
+        $pe = 1;
+    }
+    last if $cnt > 5000;
+}
+close IN;
+
+@lens=sort {$a<=>$b} (@lens);
+$cnt = 0;
+my $insert = 0;
+for(my $i=(@lens*.10);$i<(@lens*.90);++$i) {
+    $insert+=$lens[$i];  $cnt+=1;
+}
+$insert/=$cnt;
+
+if (!$cnt) {
+    die "No alignments in $0, quitting\n";
+}
+
+if ($opt{sort}) {
+    my $sb = $f;
+    $sb =~ s/\.bam$//;
+    $sb .= ".ntmp";
+
+    unlink("$sb.bam");
+    warn("+mkfifo $sb.bam\n");
+    if (!mkfifo("$sb.bam", 0664)) {
+        die "Can't create fifo $sb.bam: $!\n";
+    }
+    if (!fork()) {
+        # write to sb.bam fifo in a fork
+        system("samtools sort -n $f $sb");
+        exit(0);
+    }
+    # now read from the id-sorted bam, instead of the chromosome-sorted bam
+    $f = "$sb.bam";
+}
+
+# read from fifo
+open IN, "samtools view -h $f |";
+
+my (@m);
+
+sub saveout {
+    my ($out, $mate, $nmo, $pos, $len, $isrev, $origid, $cig) = @_;
+    if ($pe) {
+        if ($mate == 0) {
+            if ($m[1]) {
+                # first pair is bwa's default
+                my $f1 = shift @{$m[0]};
+                my $f2 = shift @{$m[1]};
+
+                if ($f1->[1] eq $f2->[1] ) {
+                    if (!($f1->[1] eq '*') && !($f2->[1] eq '*') && !($f1->[6] eq '*') && !($f2->[6] eq '*')) {
+                    if (!$opt{fai} || ((($f1->[2]+$f1->[3]) < $FAI{$f1->[1]}) &&
+                                       (($f2->[2]+$f2->[3]) < $FAI{$f2->[1]}))) {
+                        # only output proper pair, with '*' nmo's and cigs, and where both alignments are within the fai
+                        print OUT $f1->[0];
+                        print OUT $f2->[0];
+                    }
+                    }
+                }
+
+                if (@{$m[0]} && @{$m[1]}) {
+
+                    # prune proper ... only matching mates
+                    my %have;
+                    for (@{$m[0]}) {
+                        next if $_->[6] eq '*';
+                        next if $opt{fai} && (($_->[2]+$_->[3]) > $FAI{$_->[1]});
+                        $have{$_->[1]}=1;
+                    }
+                    for (@{$m[1]}) {
+                        next if $_->[6] eq '*';
+                        next if $opt{fai} && (($_->[2]+$_->[3]) > $FAI{$_->[1]});
+                        $have{$_->[1]}=2 if $have{$_->[1]} == 1;
+                    }
+
+                    %have = map { $have{$_}==2 ? ($_=>1) : () } keys(%have);
+
+                    $have{'*'} = undef;
+
+                    my (@m1, @m0);
+
+                    # only keep good alignments
+                    for (@{$m[0]}) {
+                        next if $opt{fai} && (($_->[2]+$_->[3]) > $FAI{$_->[1]});
+                        push @m0, $_ if $have{$_->[1]} && !($_->[6] eq '*');
+                    }
+                    for (@{$m[1]}) {
+                        next if $opt{fai} && (($_->[2]+$_->[3]) > $FAI{$_->[1]});
+                        push @m1, $_ if $have{$_->[1]} && !($_->[6] eq '*');
+                    }
+
+                    @{$m[0]}=@m0;
+                    @{$m[1]}=@m1;
+                    
+                    my %taken;
+                    @m0 = ();
+                    @m1 = ();
+                    # now pick best mate from the pruned set (first part above not really necessary, but might speed things up)
+                    for my $a (@{$m[0]}) {
+                        my $min = 1000000;
+                        my $best;
+                        for my $b (@{$m[1]}) {
+                            if ($a->[1] eq $b->[1]) {
+                                # distance closest to true insert size
+                                my $dist = abs(abs($a->[2]-$b->[2])+$b->[3]-$insert);
+                                if ($dist < $min && !$taken{scalar $b} && $dist < $insert) {
+                                    # if distance no more than double insert size, then it's OK (bwa should filter, but doesn't always)
+                                    $min=$dist;
+                                    $best=$b;
+                                }
+                            }
+                        }
+                        if ($best) {
+                            # found a mate? output it
+                            $taken{scalar $best}=1;
+                            push @m0, $a;
+                            push @m1, $best;
+                        }
+                    }
+
+                    @{$m[0]}=@m0;
+                    @{$m[1]}=@m1;
+
+                    for (my $i=0;$i<@{$m[0]};++$i) {
+                        if ($m[0][$i][5] gt $m[1][$i][5]) {
+                            # swap mates so they are in the ORIGINAL-ID (read1, read2) order
+                            my @tmp = @{$m[0][$i]};
+                            @{$m[0][$i]} = @{$m[1][$i]};
+                            @{$m[1][$i]} = @tmp;
+                        }
+
+                        my ($out1, $nmo1, $pos1, $len1, $isrev1, $origid, $cig) = @{$m[0][$i]};
+                        my ($out2, $nmo2, $pos2, $len2, $isrev2, $origid, $cig) = @{$m[1][$i]};
+
+                        # replace insert-size and mate-pos
+                        my $dist1 = $pos2-$pos1-$len2 if $isrev1 && $pos2 && $pos1;
+                        $dist1 = $pos2-$pos1+$len2 if !$isrev1 && $pos2 && $pos1;
+                        $out1 = replacetab($out1, 8, $dist1);
+                        $out1 = replacetab($out1, 7, $pos2);
+                        print OUT $out1;
+
+                        my $dist2 = -$dist1;
+                        $out2 = replacetab($out2, 8, $dist2);
+                        $out2 = replacetab($out2, 7, $pos1);
+                        print OUT $out2;
+                    }
+                }
+                @m = ();
+            }
+        }
+        push @{$m[$mate]}, [$out, $nmo, $pos, $len, $isrev, $origid, $cig];
+    } elsi {
+        print OUT $out if (!($nmo eq '*')) && (!($cig eq '*'));
+    }
+}
+
+my $mate = 1;
+my $previd;
+while (<IN>) {
+	next if /^\@PG/ && $opt{rsem};
+	print(OUT) && next if /^\@/;
+	chomp;
+
+    $mate = !$mate;
+
+    my ($id, $bits, $nmo, $pos, $qual, $cig, $f1, $f2, $f3, $seq, $qseq, @fdx) = split /\t/, $_;
+
+    my $origid = $id;
+
+    if (!$pe && $cig eq '*' || $nmo eq '*') {
+        next;
+    }
+
+    if ($pe && $mate  && $previd) {
+        # paired-end read id's have to match each other ... IE: bowtie output
+        $_ = replacetab($_, 0, $previd);
+        $id = $previd;
+    }
+
+    # previd set
+    $previd = $id;
+
+	my ($xa, $nm);
+	for (@fdx) {
+        # get rid of XA tag
+		if (s/^XA:Z://) {
+			$xa = $_;
+			$_ = '';
+		}
+        # get rid of NM tag
+		if (s/^NM:i://) {
+			$nm = $_;
+			$_ = '';
+		}
+	}
+
+    if ($opt{noindel}) {
+        # clean cig  : todo: maybe remove innacurate MD tag?  or keep it because it *was* OK?
+        $cig =~ s/(\d+)I/\1M/g;
+        $cig =~ s/(\d+)D//g;
+        $cig =~ s/(\d+)S/\1M/g;
+        while ($cig =~ s/(\d+)M(\d+)M/($1+$2)."M"/e) {};
+    }
+
+    $_=replacetab($_, 5, $cig);
+
+	saveout($_."\n", $mate, $nmo, $pos, length($seq), $bits & 16, $origid, $cig) && next if !$xa;
+    
+    # remove XA tag
+	$_ =~ s/\tXA:Z:[^\t]+//;
+
+	saveout($_."\n", $mate, $nmo, $pos, length($seq), $bits & 16, $origid, $cig);
+
+	my $isrev = $bits & 16;
+
+	for (split /;/, $xa) {
+        # for each x alignment
+		my ($nmo, $pos, $cig, $mm) = split /,/, $_;
+
+        # set reverse bits as appropriate
+        $bits = $bits & ~16;
+		$bits = $bits | 16 if $pos =~ /^-/;
+
+        if ($pos =~ /^-/) {
+            # mate not rev
+            $bits = $bits & ~0x020;
+        } else {
+            # mate rev
+            $bits = $bits | 0x020;
+        }
+
+        if ($pe) {
+            $bits = $bits & ~0x040;
+            $bits = $bits & ~0x080;
+
+            $bits = $bits | 0x040 if !$mate;
+            $bits = $bits | 0x080 if $mate;
+        }
+
+		my $s = $seq;
+		my $q = $qseq;
+		if ( ($bits & 16) != $isrev) {
+            # reverse sequence if reverse alignment
+			$s=revcomp($s);
+			$q=reverse($q);
+		}
+
+        if (!$opt{noindel}) {
+            # clean cigar of all indels/soft-clips
+            $cig =~ s/(\d+)I/\1M/g;
+            $cig =~ s/(\d+)D//g;
+            $cig =~ s/(\d+)S/\1M/g;
+            while ($cig =~ s/(\d+)M(\d+)M/($1+$2)."M"/e) {};
+        }
+
+		$pos =~ s/^[+-]//;
+		my @tmp=@fdx;
+		push @tmp, "NM:i:$nm";
+        @tmp = grep /:/, @tmp;
+		my $fdx = join "\t", @tmp;
+
+        # save output
+        saveout("$id\t$bits\t$nmo\t$pos\t$qual\t$cig\t$f1\t$f2\t$f3\t$s\t$q\t$fdx\n", $mate, $nmo, $pos, length($seq), $bits & 16, $origid, $cig);
+	}
+}
+
+$mate = !$mate;
+saveout("",$mate) if $mate == 0;
+
+sub revcomp {
+        my $r = reverse(shift @_);
+        $r =~ tr/ACGT/TGCA/;
+        return $r;
+}
+
+sub replacetab {
+    my ($str, $p, $rep) = @_;
+    $p;
+    $str=~ s/((?:[^\t]+\t){$p})[^\t]+\t/$1$rep\t/;
+    return $str;
+}
+
