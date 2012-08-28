@@ -3,7 +3,6 @@
 # LICENSE:  LMK1.0:  This software is free.   There's no warranty.  This license 
 #  must be preserved.  Also, if you use this software, please let me know....so i 
 # don't think it was a waste of time writing it.
-# AUTHOR: Erik Aronesty (erik@q32.com)
 
 use strict;
 use POSIX qw(mkfifo);
@@ -19,8 +18,9 @@ my $o = shift @ARGV;
 
 die "Usage: $0 [-n] [-f <index>] <input-bam> <output-bam>
 
-Convert a BWA style BAM with XA tags, to a BOWTIE styled BAM
-that has no mismatch reads, and multiple mate-pairs per hit.
+Convert a bam file into a file suitable for passing to RSEM.
+
+    -s  sort by id, use if the source bam is not sorted by id
 
     -f  gene index (samtools faidx results), used to discard XA
         alignments that go beyone the edge of the file (bug in 
@@ -209,7 +209,7 @@ sub saveout {
             }
         }
         push @{$m[$mate]}, [$out, $nmo, $pos, $len, $isrev, $origid, $cig];
-    } elsi {
+    } else {
         print OUT $out if (!($nmo eq '*')) && (!($cig eq '*'));
     }
 }
