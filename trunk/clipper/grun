@@ -70,7 +70,7 @@ chomp $def{hostname};
 my ($qinfo, $help, $config, $ver);
 
 Getopt::Long::Configure qw(require_order no_ignore_case passthrough);
-GetOptions("daemon"=>\$daemon, "CONF:s"=>\$config, "trace"=>\$def{trace}, "query"=>\$qinfo, "version"=>\$ver) ||
+GetOptions("daemon"=>\$daemon, "CONF:s"=>\$config, "trace"=>\$def{trace}, "query"=>\$qinfo, "V"=>\$ver) ||
 	die usage();
 
 (print "grun $VERSION\n") && exit(0) if $ver;
@@ -2198,7 +2198,7 @@ EOF
 Common Options:
     -C FILE         (/etc/grun.conf) Config file location
     -t|race         Turn on debugging in the log file
-    -v|ersion       Print version and exit
+    -V              Print version and exit
     -?              Show this help page
 EOF
 
