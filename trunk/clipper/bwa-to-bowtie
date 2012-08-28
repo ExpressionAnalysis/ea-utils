@@ -11,12 +11,12 @@ use Data::Dumper;
 use Getopt::Long;
 
 my %opt;
-GetOptions(\%opt, "sort", "fai=s","noindel");
+GetOptions(\%opt, "sort", "fai=s", "noindel");
 
 my $f = shift @ARGV;
 my $o = shift @ARGV;
 
-die "Usage: $0 [-n] [-f <index>] <input-bam> <output-bam>
+die "Usage: $0 [options] <input-bam> <output-bam>
 
 Convert a bam file into a file suitable for passing to RSEM.
 
@@ -197,6 +197,7 @@ sub saveout {
                         $dist1 = $pos2-$pos1+$len2 if !$isrev1 && $pos2 && $pos1;
                         $out1 = replacetab($out1, 8, $dist1);
                         $out1 = replacetab($out1, 7, $pos2);
+
                         print OUT $out1;
 
                         my $dist2 = -$dist1;
@@ -217,7 +218,7 @@ sub saveout {
 my $mate = 1;
 my $previd;
 while (<IN>) {
-	next if /^\@PG/ && $opt{rsem};
+	next if /^\@PG/ && $opt{noindel};
 	print(OUT) && next if /^\@/;
 	chomp;
 
@@ -305,7 +306,7 @@ while (<IN>) {
 			$q=reverse($q);
 		}
 
-        if (!$opt{noindel}) {
+        if ($opt{noindel}) {
             # clean cigar of all indels/soft-clips
             $cig =~ s/(\d+)I/\1M/g;
             $cig =~ s/(\d+)D//g;
