@@ -283,7 +283,7 @@ int main(int argc, char **argv) {
 	}
 
 	if (!do_stats && !do_varcall || do_stats && do_varcall) {
-		warn("Specify -s for stats only, or -v/-V to do variant calling\n\n");
+		warn("Specify -s for stats only, or -v to do variant calling\n\n");
 		usage(stderr);
 		return 1;
 	}
@@ -412,7 +412,7 @@ int main(int argc, char **argv) {
 		if (uminadepth) min_adepth=uminadepth;
 		if (uminidepth) min_idepth=uminidepth;
 
-		if (min_depth || (!pct_depth  && !pct_qdepth)) {
+		if (!min_depth || (!pct_depth  && !pct_qdepth)) {
 			warn("warning\toutputting all variations, no minimum depths specified\n");
 		}
 
@@ -444,6 +444,7 @@ int main(int argc, char **argv) {
 	}
 }
 
+// normal distribution
 double qnorm(double q) {
      if(q == .5)
           return 0;
@@ -1167,7 +1168,6 @@ void usage(FILE *f) {
 "-D FLOAT    Max duplicate read fraction (depth/length per position) (1)\n"
 "-B          Turn off BAQ correction (false)\n"
 "-R          Homopolymer repeat indel filtering (8)\n"
-"-V          Output vcf format\n"
 "-x CHR:POS  Output this pos only, then quit\n"
 "-N FIL      Output noise stats to file\n"
 "-S FIL      Read statistics and params from previous run with -s\n"
