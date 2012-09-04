@@ -108,3 +108,7 @@ base qual stdev 4.6959
 %chrX   1.21
 %chrY   0.01
 }}}
+
+DETAILED OVERVIEW OF STATISTICS:
+
+Click SamStatsDetails for more information on each stat, how it's calculated and what it means.
