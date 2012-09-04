@@ -1,11 +1,6 @@
 #summary Details on the statistics produced by sam-stats, what they mean and how they are calculated.
 
-= Introduction =
-
-Details on the statistics produced by sam-stats, what they mean and how they are calculated.
-
-
-= Details =
+= Sam-stats statistics by name =
 
 ===reads===
 
