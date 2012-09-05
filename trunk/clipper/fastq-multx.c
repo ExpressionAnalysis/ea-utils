@@ -782,7 +782,7 @@ int main (int argc, char **argv) {
 						return 1;
 					}
 					int l = p-fq[i].id.s;
-					if (strncmp(fq[0].id.s, fq[0].id.s, l)) {
+					if (strncmp(fq[0].id.s, fq[i].id.s, l)) {
 						fprintf(stderr, "File %s, id doesn't match file %s at line %d", in[0], in[i], nrec*4+1);
 						return 1;
 					}
