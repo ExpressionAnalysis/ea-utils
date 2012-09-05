@@ -5,3 +5,5 @@ r171	- paired-ends get trimmed like anything else....other behavior was too cons
 r258    - gzip support on input and output, append barcode to unmatched id
 r353    - support for dual-indexed nextera reads in fastq-multx, new defaults based on ROC curve analysis
 r401    - added -L, included google dir, included build for sam-stats
+r408    - updated fast-join docs, changed default mismatch to 8%
+r425    - fastq-mcf filtering options, multx verif char fixed
