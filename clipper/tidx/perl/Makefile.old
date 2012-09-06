@@ -13,8 +13,9 @@
 
 #     BUILD_REQUIRES => {  }
 #     CONFIGURE_REQUIRES => {  }
+#     DISTNAME => q[Text-Tidx]
 #     NAME => q[Text::Tidx::SWIG]
-#     OBJECT => q[../tidx_wrap.so]
+#     OBJECT => q[tidx_wrap.so]
 #     PM => { Text/Tidx.pm=>q[$(INST_LIBDIR)/Tidx.pm], blib/lib/Text/Tidx/SWIG.pm=>q[$(INST_LIBDIR)/Tidx/SWIG.pm] }
 #     PREREQ_PM => {  }
 
@@ -148,7 +149,7 @@ BASEEXT = SWIG
 PARENT_NAME = Text::Tidx
 DLBASE = $(BASEEXT)
 VERSION_FROM = 
-OBJECT = ../tidx_wrap.so
+OBJECT = tidx_wrap.so
 LDFROM = $(OBJECT)
 LINKTYPE = dynamic
 BOOTDEP = 
@@ -263,8 +264,8 @@ CI = ci -u
 RCS_LABEL = rcs -Nv$(VERSION_SYM): -q
 DIST_CP = best
 DIST_DEFAULT = tardist
-DISTNAME = Text-Tidx-SWIG
-DISTVNAME = Text-Tidx-SWIG-
+DISTNAME = Text-Tidx
+DISTVNAME = Text-Tidx-
 
 
 # --- MakeMaker macro section:
@@ -576,7 +577,7 @@ metafile : create_distdir
 	$(NOECHO) $(ECHO) 'meta-spec:' >> META_new.yml
 	$(NOECHO) $(ECHO) '  url: http://module-build.sourceforge.net/META-spec-v1.4.html' >> META_new.yml
 	$(NOECHO) $(ECHO) '  version: 1.4' >> META_new.yml
-	$(NOECHO) $(ECHO) 'name: Text-Tidx-SWIG' >> META_new.yml
+	$(NOECHO) $(ECHO) 'name: Text-Tidx' >> META_new.yml
 	$(NOECHO) $(ECHO) 'no_index:' >> META_new.yml
 	$(NOECHO) $(ECHO) '  directory:' >> META_new.yml
 	$(NOECHO) $(ECHO) '    - t' >> META_new.yml
@@ -599,7 +600,7 @@ metafile : create_distdir
 	$(NOECHO) $(ECHO) '      "url" : "http://search.cpan.org/perldoc?CPAN::Meta::Spec",' >> META_new.json
 	$(NOECHO) $(ECHO) '      "version" : "2"' >> META_new.json
 	$(NOECHO) $(ECHO) '   },' >> META_new.json
-	$(NOECHO) $(ECHO) '   "name" : "Text-Tidx-SWIG",' >> META_new.json
+	$(NOECHO) $(ECHO) '   "name" : "Text-Tidx",' >> META_new.json
 	$(NOECHO) $(ECHO) '   "no_index" : {' >> META_new.json
 	$(NOECHO) $(ECHO) '      "directory" : [' >> META_new.json
 	$(NOECHO) $(ECHO) '         "t",' >> META_new.json
