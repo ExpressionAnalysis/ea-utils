@@ -21,7 +21,7 @@ sub lookup {
 
 sub query {
     my $self = shift;
-    my $res = Text::Tidx::SWIG::tidx::lookup_c($self, @ARGV[0..1], '^');
+    my $res = Text::Tidx::SWIG::tidx::lookup_c($self, @_[0..1], '^');
     if (!$res) {
         return ();
     }
