@@ -32,15 +32,21 @@ int main (int argc, char **argv) {
     char *point = NULL;
     int nchr = 1, nbeg = 2, nend = 3;
     char skip_c = '#';
+    char sub_e = 0;
     int skip_i = 0;
+    bool dump = 0;
 
     char c;
-    while ( (c = getopt (argc, argv, "hdt:r:c:b:T:e:p:i:s:a:nB")) != -1) {
+    while ( (c = getopt (argc, argv, "Dlhdt:r:c:b:T:e:p:i:s:a:nB")) != -1) {
         switch (c) {
             case 'd':
                 debug=true; break;
+            case 'D':
+                dump=true; break;
             case 'n':
                 echo=false; break;
+            case 'l':
+                sub_e=true; break;
             case 'B':
                 build = true; break;
             case 'h':
@@ -87,11 +93,11 @@ int main (int argc, char **argv) {
         fail("Error: at least one -i index file is required\n"); usage(stderr);
     }
 
-    if (! build && ! ain && !point) { 
-        fail("Error: one of -B, -p or -a is required\n"); usage(stderr);
+    if (! build && ! ain && !point && !dump) { 
+        fail("Error: one of -D -B, -p or -a is required\n"); usage(stderr);
     }
 
-    if ((!!build + !!ain + !!point) > 1) {
+    if ((!!build + !!ain + !!point + !!dump) > 1) {
         fail("Error: only one of -B, -p or -a is allowed\n"); usage(stderr);
     }
 
@@ -103,7 +109,7 @@ int main (int argc, char **argv) {
             tidx x;
             if (debug) 
                 x.debug=true;
-            x.build(vin[f_i], sep, nchr, nbeg, nend, skip_i, skip_c);
+            x.build(vin[f_i], sep, nchr, nbeg, nend, skip_i, skip_c, sub_e);
         }
     } else {
 	    struct line l; meminit(l);
@@ -114,6 +120,12 @@ int main (int argc, char **argv) {
             vmap[f_i]=new tidx(vin[f_i]);
             if (debug) 
                 vmap[f_i]->debug=true;
+            if (dump) {
+                vmap[f_i]->dump(stdout);
+            }
+        }
+        if (dump) {
+            exit(0);
         }
 
         if ( point ) {
@@ -134,7 +146,7 @@ int main (int argc, char **argv) {
             if (found) fputc('\n',stdout);
             return !found;
         } else {
-            FILE *fin = fopen(ain, "r");
+            FILE *fin = !strcmp(ain,"-") ? stdin : fopen(ain, "r");
             if (!fin)
                 fail("error '%s':%s", ain,strerror(errno));
 
@@ -195,7 +207,11 @@ fputs(
 "-b INT         Begin region column (2) (or position for annot)\n"
 "-e INT         End region column (3)\n"
 "-s INT or CHAR Skip rows starting with CHAR (#), or skip INT rows\n"
+"-l             Less than end, not less than or equal-to\n"
 "-n             Don't echo input lines\n"
+//"-d             Verbose debug output\n"
+//"-D             Dump input table (debug)\n"
+//"-p CHR:POS     Single point lookup (debug, slow)\n"
 "\n"
         ,f);
 }

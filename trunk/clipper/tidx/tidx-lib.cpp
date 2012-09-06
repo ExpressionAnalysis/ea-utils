@@ -131,7 +131,7 @@ const vector<long int> &tidx::lookup(const char *chr, int pos) {
     int b=0, t=va.size(), c=0;
     while (t>b) {
         c=(t+b)/2;
-//        printf("here: c:%d, t:%d, b:%d, pos:%d, beg:%d, end:%d\n", c, t, b, pos, va[c].beg, va[c].end);
+//        printf("here1: c:%d, t:%d, b:%d, pos:%d, beg:%d, end:%d, res:%d\n", c, t, b, pos, va[c].beg, va[c].end, va[c].pos[0]);
         if (pos == va[c].beg)
             break;
         else if (pos < va[c].beg)
@@ -146,7 +146,7 @@ const vector<long int> &tidx::lookup(const char *chr, int pos) {
     
     if (t == b)
         c = t;
-//    printf("here: c:%d, t:%d, b:%d, pos:%d, beg:%d, end:%d\n", c, t, b, pos, va[c].beg, va[c].end);
+//    printf("here2: c:%d, t:%d, b:%d, pos:%d, beg:%d, end:%d, res:%d\n", c, t, b, pos, va[c].beg, va[c].end, va[c].pos[0]);
     if (pos >= va[c].beg && pos <= va[c].end) {
         return va[c].pos;
     }
@@ -202,20 +202,20 @@ void tidx::init() {
 }
 
 void tidx::dump(FILE *fh) {
-    dense_hash_map<string,vector<annot> >::iterator it;
-    fprintf(fh,"%s",path.c_str());
+    fprintf(fh,"#file\t%s\n",path.c_str());
+    dense_hash_map<string,vector<annot> >::iterator it = map.begin();;
     while (it != map.end()) {
         vector<annot> &van = it->second;
         int i;
-        if (debug) fprintf(stderr, "frag %s : %ld -> ", it->first.c_str(), van.size());
-        for (i=0;i<van.size()-1;++i) {
-            fprintf(fh, "%s\t%d\t%d\t%ld", it->first.c_str(), van[i].beg, van[i].end, van[i].pos.size());
+        for (i=0;i<van.size();++i) {
+            fprintf(fh, "%s\t%d\t%d\t%ld\t%ld\n", it->first.c_str(), van[i].beg, van[i].end, van[i].pos.size(), van[i].pos[0]);
         }
+        ++it;
     }    
 }
 
 // fun part
-void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c) {
+void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c, bool sub_e) {
 	FILE *fin=fopen(in,"r");
 
     if (!fin)
@@ -227,7 +227,7 @@ void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, 
     string out = string_format("gzip -c > %s.tidx", in);
     FILE *fout=popen(out.c_str(),"w");
     if (!fout)
-        fail("%s:%s", out.c_str(),strerror(errno));
+        fail("%s:%s\n", out.c_str(),strerror(errno));
 
     double xst = xtime();
 
@@ -254,6 +254,7 @@ void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, 
             annot a;
             a.beg=atoi(v[nbeg]);
             a.end=atoi(v[nend]);
+            if (sub_e) --a.end;
             if (a.beg > a.end) {
                 fail("error, file %s, line %d: beg > end : %d > %d\n", in, nl, a.beg, a.end);
             }
@@ -275,7 +276,7 @@ void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, 
         // sort the annotation file by beginning of region
         sort(van.begin(), van.end(), annot_comp);
         int i;
-        if (debug) fprintf(stderr, "frag %s : %ld -> ", it->first.c_str(), van.size());
+        if (debug) fprintf(stderr, "frag %s : %ld ->", it->first.c_str(), van.size());
         for (i=0;i<van.size()-1;++i) {
             if (van[i].beg >= van[i+1].beg && van[i].end == van[i+1].end) {
                 // exact match
@@ -286,13 +287,13 @@ void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, 
                 assert(van[i].beg == van[i+1].beg);
                 van[i].pos.clear();
             } else if (van[i].end >= van[i+1].beg) {
-                if (debug) fprintf(stderr, " [ovr %d]", van[i].beg);
+                if (debug) fprintf(stderr, " [ovr %d-%d:%ld ]", van[i].beg, van[i].end, van[i].pos[0]);
                 // overlap next
                 int new_st;
                 int new_en;
 
                 // forced to initialize here so we can use a reference (for efficiency)
-                vector<long> &new_ro = van[i].pos;
+                vector<long> new_ro = van[i].pos;
                 
                 if (van[i].end < van[i+1].end) {
                     // contained within next, so new frag starting after i stop
@@ -310,7 +311,12 @@ void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, 
 
                 van[i].end=van[i+1].beg-1;                  // shorten my end to less than the next's start
                 
+                if (debug) fprintf(stderr, " [i:%d:%d:%ld]", van[i].beg, van[i].end, van[i].pos[0]);
+                if (debug) fprintf(stderr, " [i+1:%d:%d:%ld]", van[i+1].beg, van[i+1].end, van[i+1].pos[0]);
+
                 if (new_en >= new_st) {                     // is this a real one?
+                    if (debug) fprintf(stderr, " [n:%d:%d:%ld]", new_st, new_en, new_ro[0]);
+
                     int j = i+2;                            // figure out where it goes (shouldn't be far)
                     while (j < van.size() & new_st > van[j].beg) {
                         ++j;
@@ -328,7 +334,7 @@ void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, 
         long j = 0;
         for (i=0;i<van.size();++i) {
             // overlap next
-            if (van[i].pos.size() != 0)
+            if (van[i].pos.size() != 0 && van[i].beg <= van[i].end)
                 if (i != j) 
                     van[j++]=van[i];
                 else
@@ -338,7 +344,7 @@ void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, 
             if (debug) fprintf(stderr, "(rm %ld) ", van.size()-j);
             van.resize(j);
         }
-        if (debug) fprintf(stderr, "%ld\n", van.size());
+        if (debug) fprintf(stderr, " %ld\n", van.size());
         ++it;
     }
 

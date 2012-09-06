@@ -26,7 +26,7 @@ sub query {
         return ();
     }
     $res =~ s/^\^//;
-    return split /^/, $res;
+    return split /\^/, $res;
 }
 
 sub build {
