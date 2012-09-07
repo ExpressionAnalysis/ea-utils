@@ -22,7 +22,7 @@ public:
 
     void dump(FILE *stream);
     bool read(const char *path);
-    void build(const char *path, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c);
+    void build(const char *path, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c, bool sub_e);
 
     const std::vector <long int> & lookup(const char *chr, int pos);
     std::string lookup(const char *chr, int pos, const char *msep);
@@ -39,5 +39,5 @@ public:
 void chomp_line(struct line &l);
 
 // build, with no return value, for API use
-void tidx_build(const char *path, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c);
+void tidx_build(const char *path, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c, bool sub_e);
 

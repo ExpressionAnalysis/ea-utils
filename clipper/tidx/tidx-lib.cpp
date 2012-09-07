@@ -372,7 +372,7 @@ double xtime() {
 }
 
 // for the api
-void tidx_build(const char *file, const char *sep, int chr, int beg, int end, int skip_i, char skip_c) {
+void tidx_build(const char *file, const char *sep, int chr, int beg, int end, int skip_i, char skip_c, bool sub_e) {
     tidx n;
-    n.build(file, sep, chr, beg, end, skip_i, skip_c); 
+    n.build(file, sep, chr, beg, end, skip_i, skip_c, sub_e); 
 }
