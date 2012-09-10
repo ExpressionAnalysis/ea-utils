@@ -1,0 +1,8 @@
+Changes
+Makefile.PL
+MANIFEST
+ppport.h
+README
+Tidx.xs
+t/Text-Tidx.t
+lib/Text/Tidx.pm
