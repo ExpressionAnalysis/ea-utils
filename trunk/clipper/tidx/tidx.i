@@ -2,7 +2,7 @@
 %module "Text::Tidx::SWIG"
 %{
 #include "tidx.h"
-void tidx_build(const char *path, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c);
+void tidx_build(const char *path, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c, bool sub_e);
 %}
 #endif
 
@@ -33,4 +33,4 @@ public:
     const std::vector <long int> & lookup_r(const char *chr, int beg, int end);
 };
 
-void tidx_build(const char *path, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c);
+void tidx_build(const char *path, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c, bool sub_e);
