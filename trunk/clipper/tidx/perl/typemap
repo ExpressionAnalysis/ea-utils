@@ -1,0 +1,2 @@
+TYPEMAP
+tidx *         O_OBJECT

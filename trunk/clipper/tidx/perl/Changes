@@ -1,0 +1,6 @@
+Revision history for Perl extension Text::Tidx.
+
+0.01  Mon Sep 10 15:24:21 2012
+	- original version; created by h2xs 1.23 with options
+		-A -n Text::Tidx
+
