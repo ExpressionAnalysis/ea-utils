@@ -63,9 +63,13 @@ sub build {
     $op{skip_i} = $op{skip} =~ /^\d+$/ ? $op{skip} : 0;
     $op{sub_e} = $op{sub} || $op{sub_e} ? 1 : 0;
     $op{sep} = "\t" if !$op{sep};
-    $op{chr} = 0 if !defined($op{chr});
-    $op{beg} = 1 if !$op{beg};
-    $op{end} = 2 if !$op{end};
+    $op{chr} = 1 if !defined($op{chr});
+    $op{beg} = 2 if !$op{beg};
+    $op{end} = 3 if !$op{end};
+    # one based index, consistend with command-line version
+    --$op{chr};
+    --$op{beg};
+    --$op{end};
     tidx_build($file, $op{sep}, $op{chr}, $op{beg}, $op{end}, $op{skip_i}, $op{skip_c}, $op{sub_e});
 }
 
@@ -75,45 +79,88 @@ __END__
 
 =head1 NAME
 
-Text::Tidx - Perl extension for blah blah blah
+Text::Tidx - Index a delimited text file containing start-stop positions
 
 =head1 SYNOPSIS
 
   use Text::Tidx;
-  blah blah blah
+  Text::Tidx::build("annot.txt");
+  $idx = Text::Tidx->new("annot.txt");
+  print $idx->query("chr1",240034);
+
+=head1 FUNCTION
+
+=head2 new(FILE)
+
+Loads an index from a file.
+
+=head2 query(CHR, POS)
+
+Query a loaded index, returning an array of text lines corresponding to the specified
+chr string and integer pos.
+
+=head2 build(FILE [, option1=>value1, ...])
+
+Builds an index.  Default is to index on the first 3 columns.
+
+The following options may be used:
+
+=over 4
+
+=item sep
+
+Field separator, default to a tab
+
+=item chr
+
+1-based index of the string key field, can be -1 for "Not applicable", default is 1
+
+=item beg
+
+1-based index of the field containing the start of the integer numeric range, default is 2
+
+=item end
+
+1-based index of the field containing the end of the integer numeric range, default is 3
+
+=item skip
+
+If an integer, then it is the number of rows to skip.  If it's 
+a character, then skips all rows beginning with that character.
+Default is '#', skipping comment chars (compatible with gffs, vcfs, etc.)
+
+=item sub_e
+
+If nonzero, then the "end" of the range is not included in the range, ie: 
+one is subtracted from the end positions.
+
+=back
 
 =head1 DESCRIPTION
 
-Stub documentation for Text::Tidx, created by h2xs. It looks like the
-author of the extension was negligent enough to leave the stub
-unedited.
+Text:Tidx allows you to index any text file using a key field
+and range coordinates, and, later, use that index for O(log(n))
+range-lookups into the file.
 
-Blah blah blah.
+This was written because it was, for me significantly faster, for very large
+files (>100k rows) and many searches ( > 10k), then entering
+all of the information into a database and doing range querys,
+even faster than SQLITE's rtree extension, or the "tabix" program
+both of which are do similar things and do them rather well.
 
-=head2 EXPORT
+Although it was designed for chromosome, stop, start indexing,
+it is not genome specific, and can index any delimited text file.
 
-None by default.
-
-
-
-=head1 SEE ALSO
-
-Mention other useful documentation such as the documentation of
-related modules or operating system documentation (such as man pages
-in UNIX), or any relevant external documentation such as RFCs or
-standards.
-
-If you have a mailing list set up for your module, mention it here.
-
-If you have a web site set up for your module, mention it here.
+Indexes are loaded into RAM.  If you only have a few lookups
+to do perl instance, this is expensive, and a database will be faster.
 
 =head1 AUTHOR
 
-A. U. Thor, E<lt>earonesty@E<gt>
+Erik Aronesty, E<lt>earonesty@cpan.org<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2012 by A. U. Thor
+Copyright (C) 2012 by Erik Aronesty
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.10.1 or,

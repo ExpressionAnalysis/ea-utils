@@ -8,11 +8,8 @@ perlobject.map
 ppport.h
 README
 t/annot.txt
-t/annot.txt.tidx
 t/Text-Tidx.t
 tidx-lib.cpp
-Tidx.bs
-Tidx.c
 tidx.h
 Tidx.xs
 typemap
@@ -22,7 +19,6 @@ sparsehash/template_util.h
 sparsehash/sparse_hash_map
 sparsehash/sparsetable
 sparsehash/sparse_hash_set
-sparsehash/internal
 sparsehash/internal/densehashtable.h
 sparsehash/internal/sparseconfig.h
 sparsehash/internal/hashtable-common.h
