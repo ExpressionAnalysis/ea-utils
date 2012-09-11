@@ -8,10 +8,13 @@ all: tidx tidx.a perl/Tidx.bs
 debug:
 	CPPFLAGS=-g	${MAKE} $(MFLAGS) all
 
-tidx: tidx.cpp tidx-lib.cpp utils.cpp fastq-lib.cpp tidx.h
+# no fPIC for linking main module
+tidx: tidx.cpp tidx-lib.cpp fastq-lib.cpp utils.cpp tidx.h
 
+# fPIC needed for shared linkage of perl module
 tidx.a: tidx-lib.cpp fastq-lib.cpp utils.cpp tidx.h
-	g++ -O3 -fPIC tidx-lib.cpp fastq-lib.cpp utils.cpp -shared -o tidx.a
+	g++ -O3 -fPIC -c tidx-lib.cpp fastq-lib.cpp utils.cpp
+	ar rvs tidx.a tidx-lib.o fastq-lib.o utils.o
 
 perl/Tidx.bs perl/Makefile: perl/Makefile.PL tidx.a
 	cd perl; perl Makefile.PL; ${MAKE} $(MFLAGS) INSTALL_BASE=${PREFIX}
@@ -27,4 +30,4 @@ clean:
 	cd perl; ${MAKE} $(MFLAGS) clean
 
 test: all
-	cd perl; perl test.pl > test.tmp; diff test.tmp test.ok; rm test.tmp
+	cd perl; make test
