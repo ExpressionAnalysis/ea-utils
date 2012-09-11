@@ -3,6 +3,7 @@ package Text::Tidx;
 use 5.010001;
 use strict;
 use warnings;
+use Carp;
 
 require Exporter;
 
@@ -52,6 +53,20 @@ sub query {
     return () if (!$r);
     $r =~ s/^\^//;
     return split /\^/, $r;
+}
+
+sub build {
+    my ($file, %op) = @_;
+    croak "usage: build(file, options)\n" unless $file;
+    $op{skip} = '#' if !defined($op{skip});
+    $op{skip_c} = $op{skip} !~ /^\d+$/ ? $op{skip} : '';
+    $op{skip_i} = $op{skip} =~ /^\d+$/ ? $op{skip} : 0;
+    $op{sub_e} = $op{sub} || $op{sub_e} ? 1 : 0;
+    $op{sep} = "\t" if !$op{sep};
+    $op{chr} = 0 if !defined($op{chr});
+    $op{beg} = 1 if !$op{beg};
+    $op{end} = 2 if !$op{end};
+    tidx_build($file, $op{sep}, $op{chr}, $op{beg}, $op{end}, $op{skip_i}, $op{skip_c}, $op{sub_e});
 }
 
 1;
