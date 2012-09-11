@@ -1,16 +1,21 @@
-Text-Tidx version 0.01
+Text-Tidx version 0.91
 ======================
 
-The README is used to introduce the module and provide instructions on
-how to install the module, any machine dependencies it may have (for
-example C compilers and installed libraries) and any other information
-that should be provided before the module is installed.
+Text:Tidx allows you to index any text file using key fields
+start-stop coordinates, and, later, use that index for binary-search 
+lookups into the file, even though there is a range of responses.
 
-A README file is required for CPAN modules since CPAN extracts the
-README file from a module distribution so that people browsing the
-archive can use it get an idea of the modules uses. It is usually a
-good idea to provide version information here so that people can
-decide whether fixes for the module are worth downloading.
+This was written because it was, for me significantly faster, for very large 
+files (>100k rows) and many searches ( > 10k), then entering 
+all of the information into a database and doing range querys, 
+even faster than SQLITE's rtree extension, or the "tabix" program
+both of which are do similar things and do them rather well.
+
+Although it was designed for chromosome, stop, start indexing, 
+it is not genome specific, and can index any delimited text file.
+
+Indexes are loaded into RAM.  If you only have a few lookups
+to do perl instance, this is expensive, and a database will be faster.
 
 INSTALLATION
 
@@ -23,18 +28,14 @@ To install this module type the following:
 
 DEPENDENCIES
 
-This module requires these other modules and libraries:
-
-  blah blah blah
+This module includes google's sparsehash, some code from ea-utils, as
+well as the tidx-lib source because they're small, however, they can 
+be replaced with newer versions of those libraries if desired.
 
 COPYRIGHT AND LICENCE
 
-Put the correct copyright and licence information here.
-
-Copyright (C) 2012 by A. U. Thor
+Copyright (C) 2012 Erik Aronesty
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.10.1 or,
 at your option, any later version of Perl 5 you may have available.
-
-
