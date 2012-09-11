@@ -1,0 +1,28 @@
+#!/bin/bash -e
+
+if [ "" = "$1" ]; then
+        echo "Specify the file you want to upload"
+        exit
+fi
+
+if [ -s ~/.cpan-user ]; then
+        USER=`cat ~/.cpan-user`
+else
+        read -p "Enter username: " USER
+        echo $USER > ~/.cpan-user
+fi
+
+if [ -s ~/.cpan-pass ]; then
+        PASS=`cat ~/.cpan-pass`
+else
+        read -p "Enter password: " PASS
+        echo $PASS > ~/.cpan-pass
+        chmod 600 ~/.cpan-pass
+fi
+
+
+ncftpput pause.perl.org incoming $1
+
+sleep 1
+
+wget "http://$USER:$PASS@pause.perl.org/pause/authenquery" -O /tmp/cpan-upload.out --post-data="pause99_add_uri_upload=$1&HIDDENNAME=$USER&SUBMIT_pause99_add_uri_upload=+Upload+the+checked+file+"
