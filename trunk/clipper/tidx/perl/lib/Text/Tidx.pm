@@ -26,7 +26,7 @@ our @EXPORT = qw(
 	
 );
 
-our $VERSION = '0.01';
+our $VERSION = '0.91';
 
 require XSLoader;
 XSLoader::load('Text::Tidx', $VERSION);
