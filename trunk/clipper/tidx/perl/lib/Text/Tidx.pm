@@ -38,6 +38,7 @@ sub lookup {
         return lookup_c(@_, "^");
     }
     if (@_ == 4) {
+        die "TODO: support range lookups\n";
         return lookup_cr(@_, "^");
     }
 }
@@ -48,6 +49,7 @@ sub query {
         $r = lookup_c(@_, "^");
     }
     if (@_ == 4) {
+        die "TODO: support range lookups\n";
         $r = lookup_cr(@_, "^");
     }
     return () if (!$r);
