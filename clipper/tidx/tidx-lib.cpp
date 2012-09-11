@@ -182,12 +182,14 @@ const char *tidx::lookup_c(const char *chr, int pos, const char *msep) {
     return api_ret.c_str();
 }
 
-/*
 const char *tidx::lookup_cr(const char *chr, int beg, int end, const char *msep) {
-    api_ret = lookup_r(chr, beg, end, msep);
+/*    api_ret = lookup_r(chr, beg, end, msep);
+    return api_ret.c_str();
+*/
+    api_ret = "";
     return api_ret.c_str();
 }
-*/
+
 bool tidx::read(const char *in) {
     string uin = string_format("gunzip -c %s.tidx", in);
 
