@@ -1,0 +1,84 @@
+#!/usr/bin/perl
+
+use strict;
+
+use IO::File;
+use Data::Dumper;
+use Getopt::Long;
+
+my $min_seen = 0;
+GetOptions("minvar=i"=>\$min_seen);
+
+die "usage: $0 [opts] varcall-files...\n" if !@ARGV;
+
+my @in;  my $i = 0;
+for (@ARGV) {
+    open($in[$i++], "$_")||die"$_:$!\n";
+}
+
+my $ok = 1;
+my @keep;
+while ($ok) {
+$ok = 0;
+
+my ($l, @d);
+my ($min_i, $min_id, $min_pos);
+for (my $i = 0; $i < @in; ++$i ) {
+    if (!defined($keep[$i])) {
+        $l = $in[$i]->getline; chomp $l;
+        next unless $l;
+        # id, pos, ref, depth, skipped, pct, call1, call2...
+        $d[$i] = [split /\t/, $l];
+    } else {
+        # reuse last rounds read
+        $d[$i] = $keep[$i];
+        next unless $d[$i];
+    }
+    $ok = 1;
+    if ( ( $d[$i][0] && !defined($min_id) ) ||
+         ( $d[$i][0] lt $min_id ) || 
+         ( ($d[$i][0] eq $min_id) && ($d[$i][1] < $min_pos) )
+       ) {
+        # minimum id
+        $min_i = $i;
+        $min_id = $d[$i][0];
+        $min_pos = $d[$i][1];
+    }
+}
+
+last if !$ok;
+
+die "Error: no id found: ", Dumper \@d if !$min_id;
+
+my $seen;
+for ($i = 0; $i < @in; ++$i ){
+    if ($d[$i] && ($d[$i][0] eq $min_id && $d[$i][1] eq $min_pos) ) {
+        ++$seen;
+        $keep[$i] = undef;
+    } else {
+        $keep[$i] = $d[$i];
+    }
+}
+
+if ($seen < $min_seen) {
+    next;
+}
+
+print "$min_id\t$min_pos\t", $d[$min_i][2];
+
+for ($i = 0; $i < @in; ++$i ){
+    print "\t";
+    if ($d[$i] && ($d[$i][0] eq $min_id && $d[$i][1] eq $min_pos) ) {
+        # output data
+        # todo support alternate matrix formats
+        my $count = $#{$d[$i]};
+        print join ";", sort { substr($b,index($b,':')+1) <=> substr($a,index($a,':')+1) } @{$d[$i]}[6 .. $count];
+    } else {
+        # output blank, keep read for later
+        print "";
+    }
+}
+
+print "\n";
+
+};
