@@ -7,7 +7,8 @@ use Data::Dumper;
 use Getopt::Long;
 
 my $min_seen = 0;
-GetOptions("minvar=i"=>\$min_seen);
+my $distance = 0;
+GetOptions("minvar=i"=>\$min_seen, "distance"=>\$distance);
 
 die "usage: $0 [opts] varcall-files...\n" if !@ARGV;
 
@@ -64,7 +65,8 @@ if ($seen < $min_seen) {
     next;
 }
 
-print "$min_id\t$min_pos\t", $d[$min_i][2];
+my $ref = $d[$min_i][2];
+print "$min_id\t$min_pos\t", $ref;
 
 for ($i = 0; $i < @in; ++$i ){
     print "\t";
@@ -72,10 +74,30 @@ for ($i = 0; $i < @in; ++$i ){
         # output data
         # todo support alternate matrix formats
         my $count = $#{$d[$i]};
-        print join ";", sort { substr($b,index($b,':')+1) <=> substr($a,index($a,':')+1) } @{$d[$i]}[6 .. $count];
+        if ($distance) {
+            for (@{$d[$i]}[6 .. $count]) {
+                $distance = 2;
+                if (uc($ref) eq substr($_,0,1)) {
+                    --$distance;
+                }
+                if (substr($_,0,1) eq '*') {
+                    ++$distance;
+                }
+                if (substr($_,0,1) eq '+') {
+                    ++$distance;
+                }
+            }
+            print $distance;
+        } else {
+            print join ";", sort { substr($b,index($b,':')+1) <=> substr($a,index($a,':')+1) } @{$d[$i]}[6 .. $count];
+        }
     } else {
         # output blank, keep read for later
-        print "";
+        if ($distance) {
+            print 0;
+        } else {
+            print "";
+        }
     }
 }
 
