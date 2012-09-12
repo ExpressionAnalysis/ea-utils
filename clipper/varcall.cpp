@@ -67,7 +67,6 @@ std::vector<char *> split(char* str, const char* delim);
 std::string string_format(const std::string &fmt, ...);
 void to_upper(const std::string str);
 
-int debug=0;
 int errs=0;
 extern int optind;
 
@@ -209,7 +208,7 @@ double pct_balance=0;
 char *debug_xchr=NULL;
 int debug_xpos=0;
 int min_depth=0;
-int min_mapq=1;
+int min_mapq=0;
 int min_qual=3;
 int repeat_filter=8;
 double artifact_filter=1;
@@ -241,9 +240,8 @@ int main(int argc, char **argv) {
     char *out_prefix = NULL;
     char *target_annot = NULL;
 
-	while ( (c = getopt_long(argc, argv, "?dsVvBhe:m:N:x:f:p:a:q:Q:i:o:D:R:b:",NULL,NULL)) != -1) {
+	while ( (c = getopt_long(argc, argv, "?svBhe:m:N:x:f:p:a:q:Q:i:o:D:R:b:",NULL,NULL)) != -1) {
 		switch (c) {
-			case 'd': ++debug; break;
 			case 'h': usage(stdout); return 0;
 			case 'm': umindepth=atoi(optarg); break;
 			case 'q': min_qual=atoi(optarg); break;
@@ -256,7 +254,7 @@ int main(int argc, char **argv) {
 			case 'i': uminidepth=atoi(optarg);break;
 			case 'x': {
 					debug_xchr=optarg;
-					char *p=strchr(debug_xchr, ':');
+					char *p=strrchr(debug_xchr, ':');
 					if (!p) die("Invalid param for -x");
 					*p='\0';
 					debug_xpos=atoi(++p);
@@ -399,6 +397,7 @@ int main(int argc, char **argv) {
             // pick a min depth that makes sense based on available data
             min_depth=depth_qx > 10 ? (depth_qx < 100 ? depth_qx : 100) : 10;
             min_depth=max(dmin,min_depth);
+	        if (umindepth > 0) min_depth = umindepth;
 
             int locii_gtmin=0;
             for (i=0;i<vstat.stats.size();++i) {
@@ -593,13 +592,15 @@ void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref) {
 
     line l; meminit(l);
 	int cnt=0;
-    while(read_line(fin, l)>0) {
-	//	chr      2       G       6       ^9,^+.^*,^2,^&.^&,      &.'&*-  9+*2&&  166,552,643,201,299,321
-		v.Parse(l.s);
-		++cnt;
-	}
+    if (fin) {
+        while(read_line(fin, l)>0) {
+        //	chr      2       G       6       ^9,^+.^*,^2,^&.^&,      &.'&*-  9+*2&&  166,552,643,201,299,321
+            v.Parse(l.s);
+            ++cnt;
+        }
 
-	if (is_popen) pclose(fin); else fclose(fin);
+        if (is_popen) pclose(fin); else fclose(fin);
+    }
 
 	if (cnt == 0) {
 		warn("No data in pileup, quitting\n");
@@ -811,6 +812,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 		Depth+=Calls[i].depth();
 	}
 
+
 	TotQual=0;
 	for (i=0;i<5 && i < Calls.size();++i) {		// total depth (exclude inserts for tot depth, otherwise they are double-counted)
 		TotQual+=Calls[i].qual;
@@ -916,16 +918,22 @@ void VarCallVisitor::Finish() {
 }
 
 void VarCallVisitor::VisitX(PileupSummary &p) {
-	if (p.Depth < min_depth) {
-		++SkippedDepth;
-		return;
-	}
-
 	if (debug_xpos) {
 		if (p.Pos != debug_xpos)
 			return;
 		if (strcmp(debug_xchr,p.Chr.data())) 
 			return;
+	}
+
+	if (p.Depth < min_depth) {
+        if (debug_xpos) {
+            fprintf(stderr,"xpos-skip-depth\t%d < %d\n",p.Depth, min_depth);
+		    fprintf(stderr,"xpos-skip-dup\t%d\n",p.SkipDupReads);
+		    fprintf(stderr,"xpos-skip-mapq\t%d\n",p.SkipMinMapq);
+		    fprintf(stderr,"xpos-skip-qual\t%d\n",p.SkipMinQual);
+        }
+		++SkippedDepth;
+		return;
 	}
 
 	int i;
@@ -1107,7 +1115,7 @@ void PileupVisitor::LoadIndex(const char *path) {
 
     if (!AnnotDex.read(path)) {
         //    void build(const char *path, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c);
-        AnnotDex.build(path, "\t",  0, 1, 2, 0, '#');
+        AnnotDex.build(path, "\t",  0, 1, 2, 0, '#', 1);
     }
 
     fclose(f);
@@ -1176,25 +1184,25 @@ void usage(FILE *f) {
 "\n"
 "Either outputs summry stats for the list of files, or performs variant calling\n"
 "\n"
-"Options:\n"
+"Options (later options override earlier):\n"
 "\n"
 "-s          Calculate statistics\n"
-"-v          Calculate variants bases on supplied parameters\n"
-"-f          Reference fasta (required if using bams)\n"
+"-v          Calculate variants bases on supplied parameters (see -S)\n"
+"-f          Reference fasta (required if using bams, ignored otherwise)\n"
 "-m          Min locii depth (0)\n"
 "-a          Min allele depth (0)\n"
 "-p          Min allele pct by quality (0)\n"
 "-q          Min qual (3)\n"
-"-C          Min mapping quality (1)\n"
+"-Q          Min mapping quality (0)\n"
 "-b          Min pct balance (strand/total) (0)\n"
 "-D FLOAT    Max duplicate read fraction (depth/length per position) (1)\n"
 "-B          Turn off BAQ correction (false)\n"
 "-R          Homopolymer repeat indel filtering (8)\n"
 "-x CHR:POS  Output this pos only, then quit\n"
-"-N FIL      Output noise stats to file\n"
-"-S FIL      Read statistics and params from previous run with -s\n"
+"-N FIL      Output noise stats to FIL\n"
+"-S FIL      Read in statistics and params from previous run with -s\n"
 "-A ANNOT    Calculate in-target stats using the annotation file (requires -o)\n"
-"-o PREFIX   Output prefix\n"
+"-o PREFIX   Output prefix (note: overlaps with -N)\n"
 "\n"
 "Input files\n"
 "\n"
