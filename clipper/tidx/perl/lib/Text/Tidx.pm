@@ -158,7 +158,7 @@ to do perl instance, this is expensive, and a database will be faster.
 
 =head1 AUTHOR
 
-Erik Aronesty, E<lt>earonesty@cpan.org<gt>
+Erik Aronesty, E<lt>earonesty@cpan.orgE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
