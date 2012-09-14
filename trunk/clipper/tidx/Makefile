@@ -3,7 +3,7 @@
 PREFIX?=/usr
 CPPFLAGS?=-O3
 REL := $(shell svnversion 2>/dev/null | perl -ne 'print $$1 if /:(\d+)/' )
-VER := $(shell perl -e "do 'perl/lib/Text/Tidx.pm'; print '$Text::Tidx::VERSION\n'" )
+VER := $(shell perl -e 'do "perl/lib/Text/Tidx.pm"; print "$$Text::Tidx::VERSION\n"' )
 
 all: tidx tidx.a perl/Tidx.bs
 
