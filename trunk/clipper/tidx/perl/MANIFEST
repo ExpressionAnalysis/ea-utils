@@ -8,7 +8,10 @@ perlobject.map
 ppport.h
 README
 t/annot.txt
+t/res1.txt
+t/res2.txt
 t/Text-Tidx.t
+tidx.cpp
 tidx-lib.cpp
 tidx.h
 Tidx.xs
