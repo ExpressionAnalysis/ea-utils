@@ -153,6 +153,34 @@ const vector<long int> &tidx::lookup(const char *chr, int pos) {
     return empty_vector;
 }
 
+vector<long int> tidx::lookup_r(const char *chr, int beg, int end) {
+    dense_hash_map<string,vector<annot> >::iterator it=map.find(chr);
+    if (it == map.end()) return empty_vector;
+    vector<annot> &va = it->second;
+    if (debug) fprintf(stderr,"lookup_r: %s:%d.%d -> %d\n", chr, beg, end, (int) va.size());
+    int b=0, t=va.size(), c=0;
+    while (t>b) {
+        c=(t+b)/2;
+        if (beg == va[c].beg)
+            break;
+        else if (beg < va[c].beg)
+            t=c-1;
+        else if (beg > va[c].beg) {
+            if (beg <= va[c].end) 
+                break;
+            b=c+1;
+        }
+    }
+    if (t == b)
+        c = t;
+    vector<long int> res;
+    while (c<va.size() && end >= va[c].beg && beg <= va[c].end) {
+        append(res,va[c].pos);
+        ++c;
+    }
+    return res;
+}
+
 string tidx::lookup(const char *chr, int pos, const char *msep) { 
 //    printf("here2\n");
     const vector<long int> &v = lookup(chr, pos);
@@ -175,6 +203,27 @@ string tidx::lookup(const char *chr, int pos, const char *msep) {
     return res;
 }
 
+string tidx::lookup_r(const char *chr, int beg, int end, const char *msep) {
+//    printf("here2\n");
+    const vector<long int> &v = lookup_r(chr, beg, end);
+    string res;
+    if (!fh) {
+        fh=fopen(path.c_str(),"rb");
+        if (!fh)
+            fail("%s:%s\n",path.c_str(),strerror(errno));
+    }
+    string line;
+    int i;
+    struct line l; meminit(l);
+    for (i=0;i<v.size();++i) {
+        fseek(fh,v[i],0);
+        read_line(fh, l);
+        chomp_line(l);
+        res += msep;
+        res += string(l.s, l.n);
+    }
+    return res;
+}
 
 string api_ret = "";
 const char *tidx::lookup_c(const char *chr, int pos, const char *msep) {
@@ -183,10 +232,7 @@ const char *tidx::lookup_c(const char *chr, int pos, const char *msep) {
 }
 
 const char *tidx::lookup_cr(const char *chr, int beg, int end, const char *msep) {
-/*    api_ret = lookup_r(chr, beg, end, msep);
-    return api_ret.c_str();
-*/
-    api_ret = "";
+    api_ret = lookup_r(chr, beg, end, msep);
     return api_ret.c_str();
 }
 
