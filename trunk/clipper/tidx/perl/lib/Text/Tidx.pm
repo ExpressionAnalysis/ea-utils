@@ -26,7 +26,7 @@ our @EXPORT = qw(
 	
 );
 
-our $VERSION = '0.91';
+our $VERSION = '0.93';
 
 require XSLoader;
 XSLoader::load('Text::Tidx', $VERSION);
@@ -38,7 +38,6 @@ sub lookup {
         return lookup_c(@_, "^");
     }
     if (@_ == 4) {
-        die "TODO: support range lookups\n";
         return lookup_cr(@_, "^");
     }
 }
@@ -49,7 +48,6 @@ sub query {
         $r = lookup_c(@_, "^");
     }
     if (@_ == 4) {
-        die "TODO: support range lookups\n";
         $r = lookup_cr(@_, "^");
     }
     return () if (!$r);
@@ -68,10 +66,11 @@ sub build {
     $op{chr} = 1 if !defined($op{chr});
     $op{beg} = 2 if !$op{beg};
     $op{end} = 3 if !$op{end};
-    # one based index, consistend with command-line version
+    # one based index, consistent with command-line version
     --$op{chr};
     --$op{beg};
     --$op{end};
+    # todo... for kicks: allow indexing on text only, no positions
     tidx_build($file, $op{sep}, $op{chr}, $op{beg}, $op{end}, $op{skip_i}, $op{skip_c}, $op{sub_e});
 }
 
