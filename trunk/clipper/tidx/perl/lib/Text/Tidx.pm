@@ -95,10 +95,11 @@ Text::Tidx - Index a delimited text file containing start-stop positions
 
 Loads an index from a file.
 
-=head2 query(CHR, POS)
+=head2 query(CHR, POS [, END])
 
 Query a loaded index, returning an array of text lines corresponding to the specified
-chr string and integer pos.
+chr string and integer pos.   If an end is specified, then all overlapping regions
+are returned.
 
 =head2 build(FILE [, option1=>value1, ...])
 
