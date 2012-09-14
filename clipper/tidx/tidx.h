@@ -28,7 +28,7 @@ public:
     std::string lookup(const char *chr, int pos, const char *msep);
 
 // range lookup
-    const std::vector <long int> & lookup_r(const char *chr, int beg, int end);
+    std::vector <long int> lookup_r(const char *chr, int beg, int end);
     std::string lookup_r(const char *chr, int beg, int end, const char *msep);
 
 // const char * return value
