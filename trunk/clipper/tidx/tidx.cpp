@@ -90,15 +90,15 @@ int main (int argc, char **argv) {
     }
 
     if (!vin.size())  {
-        fail("Error: at least one -i index file is required\n"); usage(stderr);
+        if (argc>1) warn("Error: at least one -i index file is required\n"); usage(stderr); exit(1);
     }
 
     if (! build && ! ain && !point && !dump) { 
-        fail("Error: one of -D -B, -p or -a is required\n"); usage(stderr);
+        fail("Error: one of -D -B, -p or -a is required\n");
     }
 
     if ((!!build + !!ain + !!point + !!dump) > 1) {
-        fail("Error: only one of -B, -p or -a is allowed\n"); usage(stderr);
+        warn("Error: only one of -B, -p or -a is allowed\n");
     }
 
     --nchr; --nbeg; --nend;
