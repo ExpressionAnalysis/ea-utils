@@ -13,7 +13,16 @@ fastq-join
 Similar to audy's stitch program, but in C, more efficient and supports some automatic benchmarking and tuning. It uses the same "squared distance for anchored alignment" as other tools.
 
 fastq-stats
-Outputs stats
+Outputs stats for fastqs
+
+sam-stats
+Output stats for sam/bam files
+
+REQUIRES:
+
+For building sam-stats, please install this first!
+
+https://github.com/pezmaster31/bamtools/wiki/Building-and-installing
 
 QUICK FAQ:
 
