@@ -22,6 +22,24 @@ for (@ARGV) {
     open($in[$i++], "$_")||die"$_:$!\n";
 }
 
+# print header
+print "chr\tpos\tref";
+# strip common path info
+my $pre = common_prefix(@ARGV); $pre =~ s/[^\/]+$//; $pre = quotemeta($pre);
+my $suf = common_suffix(@ARGV); $suf =~ s/^[^.]+//; $suf = quotemeta($suf);
+for (my $i = 0; $i < @in; ++$i ){
+    print "\t";
+    my $th = $ARGV[$i];
+    if ($strip == -1) {
+        $th =~ s/^$pre//;
+    } elsif ($strip) {
+        $th =~ s/^.*\///;
+    }
+    $th =~ s/$suf$//;
+    print $th;
+}
+print "\n";
+
 my $ok = 1;
 my @keep;
 while ($ok) {
@@ -29,7 +47,9 @@ $ok = 0;
 
 my ($l, @d);
 my ($min_i, $min_id, $min_pos);
+# for each file
 for (my $i = 0; $i < @in; ++$i ) {
+    # read if needed
     if (!defined($keep[$i])) {
         $l = $in[$i]->getline; chomp $l;
         next unless $l;
@@ -40,6 +60,7 @@ for (my $i = 0; $i < @in; ++$i ) {
         $d[$i] = $keep[$i];
         next unless $d[$i];
     }
+    # find the min id
     $ok = 1;
     if ( ( $d[$i][0] && !defined($min_id) ) ||
          ( $d[$i][0] lt $min_id ) || 
@@ -66,28 +87,13 @@ for ($i = 0; $i < @in; ++$i ){
     }
 }
 
+# if you don't see enough in common, skip
 if ($seen < $min_seen) {
     next;
 }
 
-print "chr\tpos\tref";
-# strip common path info
-my $pre = common_prefix(@ARGV); $pre =~ s/[^\/]+$//; $pre = quotemeta($pre);
-my $suf = common_suffix(@ARGV); $suf =~ s/^[^.]+//; $suf = quotemeta($suf);
 
-for (my $i = 0; $i < @in; ++$i ){
-    print "\t";
-    my $th = $ARGV[$i];
-    if ($strip == -1) {
-        $th =~ s/^$pre//;
-    } elsif ($strip) {
-        $th =~ s/^.*\///;
-    }
-    $th =~ s/$suf$//;
-    print $th;
-}
-print "\n";
-die;
+# print the variant
 my $ref = $d[$min_i][2];
 print "$min_id\t$min_pos\t", $ref;
 
