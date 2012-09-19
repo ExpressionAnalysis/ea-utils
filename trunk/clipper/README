@@ -12,6 +12,9 @@ Demultiplexes a fastq. Capable of auto-determining barcode id's based on a maste
 fastq-join
 Similar to audy's stitch program, but in C, more efficient and supports some automatic benchmarking and tuning. It uses the same "squared distance for anchored alignment" as other tools.
 
+fastq-stats
+Outputs stats
+
 QUICK FAQ:
 
 This is based on feedback/emails, etc.
