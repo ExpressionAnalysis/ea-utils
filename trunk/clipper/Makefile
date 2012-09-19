@@ -1,16 +1,19 @@
 CC=g++
 PREFIX?=/opt
-CFLAGS?=-O3 -I.
-CPPFLAGS?=-O3
+CFLAGS?=-O3 -I. 
+CPPFLAGS?=-O3 -I.
 
 PKG=ea-utils
 REL := $(shell svnversion 2>/dev/null | perl -ne 'print $$1 if /:(\d+)/' )
 VER := $(shell grep '%define ver' ${PKG}.spec | perl -ne 'print $$1 if / (\S+) *$$/')
 
 SRC=fastq-clipper.c fastq-mcf.c fastq-multx.c fastq-join.c fastq-stats.cpp
-BIN=fastq-mcf fastq-multx fastq-join  fastq-stats fastq-clipper
+BIN=fastq-mcf fastq-multx fastq-join  fastq-stats fastq-clipper sam-stats varcall
 
 all: $(BIN)
+
+debug: 
+	CPPFLAGS=-g ${MAKE} $(MFLAGS) varcall
 
 install: $(BIN) $(PREFIX)/bin/fastq-clipper $(PREFIX)/bin/fastq-mcf $(PREFIX)/bin/fastq-multx $(PREFIX)/bin/fastq-join $(PREFIX)/bin/fastq-stats
 
@@ -28,13 +31,19 @@ dist: getrel $(PKG).${VER}-${REL}.tar.gz
 getrel:
 	grep "${REL}" $(PKG).spec || touch $(PKG).spex
 
-.PHONY: getrel
+.PHONY: getrel debug
 
 $(PKG).spec: $(PKG).spex
 	perl -pe 's/%RELEASE%/${REL}/' $(PKG).spex > $(PKG).spec
 
-$(PKG).tar.gz: Makefile $(SRC) $(PKG).spec fastq-lib.cpp fastq-lib.h sam-stats.cpp fastq-stats.cpp README CHANGES google sparsehash
-	tar --exclude=".svn" -cvzf $(PKG).tar.gz $^
+$(PKG).tar.gz: Makefile $(SRC) $(PKG).spec fastq-lib.cpp fastq-lib.h sam-stats.cpp fastq-stats.cpp varcall.cpp utils.h README CHANGES google sparsehash
+	rm -rf $(PKG).${VER}-${REL}
+	mkdir $(PKG).${VER}-${REL}
+	mkdir $(PKG).${VER}-${REL}/tidx
+	cp -nr $^ $(PKG).${VER}-${REL}
+	cp -nr tidx/*.cpp tidx/*.h $(PKG).${VER}-${REL}/tidx
+	tar --exclude=".svn" -cvzf $(PKG).tar.gz $(PKG).${VER}-${REL}
+	rm -rf $(PKG).${VER}-${REL}
 
 $(PKG).${VER}-${REL}.tar.gz: $(PKG).tar.gz
 	cp $< $@
@@ -47,4 +56,7 @@ $(PKG).${VER}-${REL}.tar.gz: $(PKG).tar.gz
 
 # this requires bamtools and google's sparsehash headers
 sam-stats: sam-stats.cpp
-	$(CC) $(CFLAGS) -I. fastq-lib.cpp -lbamtools -o $@ $<
+	$(CC) $(CFLAGS) fastq-lib.cpp -lbamtools -o $@ $<
+
+varcall: varcall.cpp fastq-lib.cpp tidx/tidx-lib.cpp
+	$(CC) $(CFLAGS) fastq-lib.cpp tidx/tidx-lib.cpp -lbamtools -o $@ $<
