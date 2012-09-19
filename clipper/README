@@ -18,6 +18,9 @@ Outputs stats for fastqs
 sam-stats
 Output stats for sam/bam files
 
+varcall
+Variant caller, takes bam or pileup output and does variant calling with advanced features like PCR duplicate filtering, homopolymer repeat filtering, calculation of error rate and dectectibility (minimum percentage) thresholds.
+
 REQUIRES:
 
 For building sam-stats, please install this first!
