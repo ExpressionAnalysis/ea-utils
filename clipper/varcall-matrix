@@ -10,7 +10,7 @@ my $min_seen = 0;
 my $distance = 0;
 my $strip = -1;
 
-GetOptions("minvar=i"=>\$min_seen, "distance"=>\$distance, "strip"=>\$strip);
+GetOptions("minvar=i"=>\$min_seen, "distance"=>\$distance, "strip!"=>\$strip);
 
 die "Usage: $0 [opts] varcall-files...
     -m      Minimum number of samples with a variant (1)
@@ -79,15 +79,15 @@ for (my $i = 0; $i < @in; ++$i ){
     print "\t";
     my $th = $ARGV[$i];
     if ($strip == -1) {
-        $th =~ s/$suf$//;
+        $th =~ s/^$pre//;
     } elsif ($strip) {
         $th =~ s/^.*\///;
     }
-    $th =~ s/^$pre//;
+    $th =~ s/$suf$//;
     print $th;
 }
 print "\n";
-
+die;
 my $ref = $d[$min_i][2];
 print "$min_id\t$min_pos\t", $ref;
 
