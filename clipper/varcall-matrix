@@ -8,7 +8,9 @@ use Getopt::Long;
 
 my $min_seen = 0;
 my $distance = 0;
-GetOptions("minvar=i"=>\$min_seen, "distance"=>\$distance);
+my $strip = -1;
+
+GetOptions("minvar=i"=>\$min_seen, "distance"=>\$distance, "strip"=>\$strip);
 
 die "Usage: $0 [opts] varcall-files...
     -m      Minimum number of samples with a variant (1)
@@ -69,11 +71,19 @@ if ($seen < $min_seen) {
 }
 
 print "chr\tpos\tref";
+# strip common path info
+my $pre = common_prefix(@ARGV); $pre =~ s/[^\/]+$//; $pre = quotemeta($pre);
+my $suf = common_suffix(@ARGV); $suf =~ s/^[^.]+//; $suf = quotemeta($suf);
+
 for (my $i = 0; $i < @in; ++$i ){
     print "\t";
     my $th = $ARGV[$i];
-    $th =~ s/\.txt$//;
-    $th =~ s/\.varcall$//;
+    if ($strip == -1) {
+        $th =~ s/$suf$//;
+    } elsif ($strip) {
+        $th =~ s/^.*\///;
+    }
+    $th =~ s/^$pre//;
     print $th;
 }
 print "\n";
@@ -117,3 +127,34 @@ for ($i = 0; $i < @in; ++$i ){
 print "\n";
 
 };
+
+
+sub common_suffix {
+    my $comm = shift @_;
+    while ($_ = shift @_) {
+        $_ = substr($_,-length($comm)) if (length($_) > length($comm));
+        $comm = substr($comm,-length($_)) if (length($_) < length($comm));
+        if (( $_ ^ $comm ) =~ /(\0*)$/) {
+            $comm = substr($comm, -length($1));
+        } else {
+            return undef;
+        }
+    }
+    return $comm;
+}
+
+sub common_prefix {
+    my $comm = shift @_;
+    while ($_ = shift @_) {
+        $_ = substr($_,0,length($comm)) if (length($_) > length($comm));
+        $comm = substr($comm,0,length($_)) if (length($_) < length($comm));
+        if (( $_ ^ $comm ) =~ /^(\0*)/) {
+            $comm = substr($comm, 0, length($1));
+        } else {
+            return undef;
+        }
+    }
+    return $comm;
+}
+
+
