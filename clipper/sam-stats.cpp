@@ -55,6 +55,7 @@ void usage(FILE *f);
 //#define min(a,b) (a<b?a:b)
 #define meminit(l) (memset(&l,0,sizeof(l)))
 #define debugout(s,...) if (debug) fprintf(stderr,s,##__VA_ARGS__)
+#undef warn
 #define warn(s,...) ((++errs), fprintf(stderr,s,##__VA_ARGS__))
 #define stdev(cnt, sum, ssq) sqrt((((double)cnt)*ssq-pow((double)sum,2)) / ((double)cnt*((double)cnt-1)))
 
