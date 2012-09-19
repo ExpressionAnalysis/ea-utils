@@ -52,6 +52,7 @@ void usage(FILE *f);
 
 #define meminit(l) (memset(&l,0,sizeof(l)))
 #define debug(s,...) if (debug) fprintf(stderr,s,##__VA_ARGS__)
+#undef warn
 #define warn(s,...) ++errs; fprintf(stderr,s,##__VA_ARGS__)
 #define die(s,...) (fprintf(stderr,s,##__VA_ARGS__), exit(1))
 #define stat_out(s,...) fprintf(stat_fout,s,##__VA_ARGS__)
