@@ -48,6 +48,7 @@ THE SOFTWARE.
 #define min(a,b) ((a)<(b)?(a):(b))
 #define meminit(l) (memset(&l,0,sizeof(l)))
 #define fail(s,...) ((fprintf(stderr,s,##__VA_ARGS__), exit(1)))
+#define warn(s,...) ((fprintf(stderr,s,##__VA_ARGS__)))
 #define stdev(cnt, sum, ssq) sqrt((((double)cnt)*ssq-pow((double)sum,2)) / ((double)cnt*((double)cnt-1)))
 
 // maximum number of files that can be tracked by poorquals lib
