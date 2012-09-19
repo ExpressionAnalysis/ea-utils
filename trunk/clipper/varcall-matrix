@@ -10,7 +10,10 @@ my $min_seen = 0;
 my $distance = 0;
 GetOptions("minvar=i"=>\$min_seen, "distance"=>\$distance);
 
-die "usage: $0 [opts] varcall-files...\n" if !@ARGV;
+die "Usage: $0 [opts] varcall-files...
+    -m      Minimum number of samples with a variant (1)
+    -d      Output a distance matrix instead (1=het, 2=hom, 3=indel)
+" if !@ARGV;
 
 my @in;  my $i = 0;
 for (@ARGV) {
@@ -64,6 +67,16 @@ for ($i = 0; $i < @in; ++$i ){
 if ($seen < $min_seen) {
     next;
 }
+
+print "chr\tpos\tref";
+for (my $i = 0; $i < @in; ++$i ){
+    print "\t";
+    my $th = $ARGV[$i];
+    $th =~ s/\.txt$//;
+    $th =~ s/\.varcall$//;
+    print $th;
+}
+print "\n";
 
 my $ref = $d[$min_i][2];
 print "$min_id\t$min_pos\t", $ref;
