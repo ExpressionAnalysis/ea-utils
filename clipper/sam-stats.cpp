@@ -35,21 +35,21 @@
 
 #include <string>
 #include <google/sparse_hash_map> // or sparse_hash_set, dense_hash_map, ...
-#include <google/dense_hash_map> // or sparse_hash_set, dense_hash_map, ...
+#include <google/dense_hash_map>  // or sparse_hash_set, dense_hash_map, ...
 
-#include <api/BamReader.h>
-#include <api/BamWriter.h>
+#include <samtools/sam.h>         // samtools api
 
 #include "fastq-lib.h"
 
 const char * VERSION = "1.32";
 
-using namespace BamTools;
 using namespace std;
 
 void usage(FILE *f);
 
 #define MAX_MAPQ 300
+// this factor is based on a quick empirical look at a few bam files....
+#define VFACTOR 1.5
 
 //#define max(a,b) (a>b?a:b)
 //#define min(a,b) (a<b?a:b)
@@ -59,7 +59,9 @@ void usage(FILE *f);
 #define warn(s,...) ((++errs), fprintf(stderr,s,##__VA_ARGS__))
 #define stdev(cnt, sum, ssq) sqrt((((double)cnt)*ssq-pow((double)sum,2)) / ((double)cnt*((double)cnt-1)))
 
-double quantile(const std::vector<int> &vec, double p);
+template <class vtype> 
+    double quantile(const vtype &vec, double p);
+
 std::string string_format(const std::string &fmt, ...);
 
 int debug=0;
@@ -67,16 +69,52 @@ int errs=0;
 extern int optind;
 int histnum=30;
 bool isbwa=false;
+int rnamode = 0;
+
+// from http://programerror.com/2009/10/iterative-calculation-of-lies-er-stats/
+class cRunningStats
+{
+private:
+  double m_n;  // count
+  double m_m1; // mean
+  double m_m2; // second moment
+  double m_m3; // third moment
+  double m_m4; // fourth moment
+public:
+  cRunningStats() : m_n(0.0), m_m1(0.0), m_m2(0.0), m_m3(0.0), m_m4(0.0)
+    { ; }
+  void Push(double x)
+  {
+    m_n++;
+    double d = (x - m_m1);
+    double d_n = d / m_n;
+    double d_n2 = d_n * d_n;
+    m_m4 += d * d_n2 * d_n * ((m_n - 1) * ((m_n * m_n) - 3 * m_n + 3)) +
+            6 * d_n2 * m_m2 - 4 * d_n * m_m3;
+    m_m3 += d * d_n2 * ((m_n - 1) * (m_n - 2)) - 3 * d_n * m_m2;
+    m_m2 += d * d_n * (m_n - 1);
+    m_m1 += d_n;
+  }
+  double Mean() { return m_m1; }
+  double StdDeviation() { return sqrt(Variance()); }
+  double StdError() { return (m_n > 1.0) ? sqrt(Variance() / m_n) : 0.0; }
+  double Variance() { return (m_n > 1.0) ? (m_m2 / (m_n - 1.0)) : 0.0; }
+  double Skewness() { return sqrt(m_n) * m_m3 / pow(m_m2, 1.5); }
+  double Kurtosis() { return m_n * m_m4 / (m_m2 * m_m2); }
+};
+
 /// if we use this a lot may want to make it variable size
 class scoverage {
 public:
-	scoverage() {mapb=reflen=0; dist.resize(histnum+2);};
+	scoverage() {mapb=reflen=0; dist.resize(histnum+2); mapr=0;};
 	long long int mapb;
+	long int mapr;
+    cRunningStats spos;
 	int reflen;
 	vector <int> dist;
 };
 
-// sorted integer bucket ... good for ram, slow to access
+// sorted integer bucket ... good for ram with small max size, slow to access
 class ibucket {
 public:
 	int tot;
@@ -101,8 +139,6 @@ public:
 		++tot;
 	}
 };
-
-double quantile(const ibucket &vec, double p);
 
 class sstats {
 public:
@@ -135,8 +171,8 @@ public:
 	google::dense_hash_map<std::string, scoverage> covr;	// # mapped per ref seq
 	google::sparse_hash_map<std::string, int> dups;		// alignments by read-id (not necessary for some pipes)
 
-	// file-format neutral ... called per read
-	void dostats(string name, int rlen, int bits, const string &ref, int pos, int mapq, const string &materef, int nmate, const string &seq, const string &qual, int nm, int del, int ins);
+	// file-format neutral ... called per read... warning seq/qual are not necessarily null-terminated
+	void dostats(string name, int rlen, int bits, const string &ref, int pos, int mapq, const string &materef, int nmate, const string &seq, const char *qual, int nm, int del, int ins);
 
 	// read a bam/sam file and call dostats over and over
 	bool parse_bam(const char *in);
@@ -158,14 +194,17 @@ int basemap[256];
 int main(int argc, char **argv) {
 	const char *ext = NULL;
 	bool multi=0, newonly=0, inbam=0;
+    const char *rnafile = NULL;
 	char c;
 	optind = 0;
-    while ( (c = getopt (argc, argv, "?BADdx:MhS:")) != -1) {
+    while ( (c = getopt (argc, argv, "?BArR:Ddx:MhS:")) != -1) {
                 switch (c) {
                 case 'd': ++debug; break;
                 case 'D': ++trackdup; break;
                 case 'B': inbam=1; break;
                 case 'A': max_chr=1000000; break;
+                case 'R': rnafile=optarg;
+                case 'r': max_chr=1000000; rnamode=1; histnum=60; break;
                 case 'S': histnum=atoi(optarg); break;
                 case 'x': ext=optarg; break;
                 case 'M': newonly=1; break;
@@ -209,6 +248,7 @@ int main(int argc, char **argv) {
 		const char *in = argv[optind];
 		FILE *f;
 		FILE *o=NULL;
+		FILE *rnao=NULL;
 		bool needpclose = 0;
 
 		// decide input format
@@ -374,6 +414,11 @@ int main(int argc, char **argv) {
 		}
 
 		if (s.dat.mapn > 0) {
+            if (rnafile) {
+                rnao=fopen(rnafile,"w");
+            } else {
+                rnao=o;
+            }
 			fprintf(o, "phred\t%d\n", phred);
 			fprintf(o, "forward\t%d\n", s.dat.nfor);
 			fprintf(o, "reverse\t%d\n", s.dat.nrev);
@@ -451,15 +496,52 @@ int main(int argc, char **argv) {
 				sort(vtmp.begin(),vtmp.end());
 				vector<string>::iterator vit=vtmp.begin();
 				double logb=log(2);
+                vector<double> vcovrvar;
+                vector<double> vcovr;
+                vector<double> vskew;
 				while (vit != vtmp.end()) {
 					scoverage &v = s.covr[*vit];
 					if (v.reflen && histnum > 0) {
 						string sig;
-						int d;
+						int d; double logd, lsum=0, lssq=0;
+
 						for (d=0;d<histnum;++d) {
-							sig += ('0' + (v.dist[d] ? (int) (log(v.dist[d])/logb) : 0));
+                            logd = log(1+v.dist[d])/logb;
+                            lsum+=logd;
+                            lssq+=logd*logd;
+							sig += ('0' + (int) logd);
 						}
-                        if (max_chr < 100) {
+                        if (rnamode) {
+                            // variability of coverage
+                            double cv = stdev(histnum, lsum, lssq)/(lsum/histnum);
+                            // percent coverage estimated using historgram... maybe track real coverage some day, for now this is fine
+                            double covr = 0;
+                            for (d=0;d<histnum;++d) {
+                                // VFAC = % greater than 1 that a bin must be to be considered 100%
+                                if (v.dist[d] > VFACTOR*v.reflen/histnum) {
+                                    ++covr;     // 100% covered this bin
+                                } else {
+                                    // calc bases/(factor * size of bin)
+                                    covr += ((double)v.dist[d] / ((double)VFACTOR*v.reflen/histnum));
+                                }
+                            }
+                            double origcovr = covr;
+                            covr /= (double) histnum;
+                            covr = min(100.0*((double)v.mapb/v.reflen),100.0*covr);
+                            // when dealing with "position skewness", you need to anchor things
+                            v.spos.Push(v.reflen);
+                            v.spos.Push(1);
+                            double skew = -v.spos.Skewness();
+                            // if there's some coverage
+                            if (v.mapr > 0) {
+                                vcovr.push_back(covr);              // look at varition
+                                vcovrvar.push_back(cv);              // look at varition
+                                vskew.push_back(skew);               // and skew
+                                if (rnao) {
+        						    fprintf(rnao,"%s\t%d\t%ld\t%.2f\t%.4f\t%.4f\t%s\n", vit->c_str(), v.reflen, v.mapr, covr, skew, cv, sig.c_str());
+                                }
+                            }
+                        } else if (max_chr < 100) {
     						fprintf(o,"%%%s\t%.2f\t%s\n", vit->c_str(), 100.0*((double)v.mapb/s.dat.lensum), sig.c_str());
                         } else {
     						fprintf(o,"%%%s\t%.6f\t%s\n", vit->c_str(), 100.0*((double)v.mapb/s.dat.lensum), sig.c_str());
@@ -473,6 +555,17 @@ int main(int argc, char **argv) {
 					}
 					++vit;
 				}
+                if (rnamode) {
+		            sort(vcovr.begin(), vcovr.end());
+		            sort(vcovrvar.begin(), vcovrvar.end());
+		            sort(vskew.begin(), vskew.end());
+                    double medcovrvar = quantile(vcovrvar,.5);
+                    double medcovr = quantile(vcovr,.5);
+                    double medskew = quantile(vskew,.5);
+                    fprintf(o,"median skew\t%.2f\n", medskew);
+                    fprintf(o,"median coverage cv\t%.2f\n", medcovrvar);
+                    fprintf(o,"median coverage\t%.2f\n", medcovr);
+                }
 			}
 			if (s.covr.size() > 1) {
 				fprintf(o,"num ref seqs\t%d\n", (int) s.covr.size());
@@ -495,7 +588,7 @@ int main(int argc, char **argv) {
 #define S_QUAL 10
 #define S_TAG 11
 
-void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos, int mapq, const string &materef, int nmate, const string &seq, const string &qual, int nm, int del, int ins) {
+void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos, int mapq, const string &materef, int nmate, const string &seq, const char *qual, int nm, int del, int ins) {
 
 	++dat.n;
 
@@ -515,9 +608,8 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 
 	dat.mapsum += mapq;
 	dat.mapssq += mapq*mapq;
+    vmapq.push(mapq);
 
-	vmapq.push(mapq);
-	
 	if (nm > 0) {
 		dat.nmnz += 1;
 		dat.nmsum += nm;
@@ -529,18 +621,35 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 		scoverage *sc = &(covr[ref]);
 		if (sc) {
 			sc->mapb+=rlen;
-			if (histnum > 0 && sc->reflen > 0) {
+            if (rnamode) {
+                int i;
+			    sc->mapr+=1;
+                for (i=0;i<rlen;++i) {
+                    sc->spos.Push(pos+i);       // position stats
+                }
+			    if (histnum > 0 && sc->reflen > 0) {
+                    for (i=0;i<rlen;++i) {
+				        int x = histnum * ((double)(pos+i) / sc->reflen);
+                        if (x < histnum) {
+                            sc->dist[x]+=1;
+                        } else {
+                            // out of bounds.... what to do?
+                            sc->dist[histnum] += 1;
+                        }
+                    }
+                }
+            } else if (histnum > 0 && sc->reflen > 0) {
 				int x = histnum * ((double)pos / sc->reflen);
 				if (debug > 1) { 
 					warn("chr: %s, hn: %d, pos: %d, rl: %d, x: %x\n", ref.c_str(), histnum, pos, sc->reflen, x);
 				}
 				if (x < histnum) {
-	                                sc->dist[x]+=rlen;
+                    sc->dist[x]+=rlen;
 				} else {
 					// out of bounds.... what to do?
 					sc->dist[histnum] +=rlen;
 				}
-			}	
+			}
 		}
 	}
 	dat.tmapb+=rlen;
@@ -559,7 +668,7 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 	}
 
 	int i, j;
-	for (i=0;i<qual.length();++i) {
+	for (i=0;i<seq.length();++i) {
 		if (qual[i]>dat.qualmax) dat.qualmax=qual[i];
 		if (qual[i]<dat.qualmin) dat.qualmin=qual[i];
 		dat.qualsum+=qual[i];
@@ -646,34 +755,46 @@ bool sstats::parse_sam(FILE *f) {
 }
 
 bool sstats::parse_bam(const char *in) {
-        BamReader inbam;
-        if ( !inbam.Open(in) ) {
-                warn("Error reading '%s': %s\n", in, strerror(errno));
-                return false;
+    samfile_t *fp;
+    if (!(fp=samopen(in, "rb", NULL))) {
+            warn("Error reading '%s': %s\n", in, strerror(errno));
+            return false;
+    }
+    if (fp->header) {
+        int i;
+        for (i = 0; i < fp->header->n_targets; ++i) {
+            covr[fp->header->target_name[i]].reflen=fp->header->target_len[i];
         }
-	SamHeader theader = inbam.GetHeader();
-	RefVector references = inbam.GetReferenceData();
-	int i;
-	for (i = 0; i < references.size(); ++i) {
-		covr[references[i].RefName].reflen=references[i].RefLength;
-	}
-	BamAlignment al;
-        while ( inbam.GetNextAlignment(al) ) {
-		int nm=0;
-		al.GetTag("NM",nm);
+    }
+	bam1_t *al=bam_init1();
+    while ( samread(fp, al) > 0 ) {
+        uint32_t *cig = bam1_cigar(al);
+        char *name = bam1_qname(al);
+        int len = al->core.l_qseq;
+        uint8_t *tag=bam_aux_get(al, "NM");
+		int nm = tag ? bam_aux2i(tag) : 0;
 		int ins=0, del=0;
 		int i;
-		for (i=0;i<al.CigarData.size();++i) {
-			if (al.CigarData[i].Type=='I') {
-				ins+=al.CigarData[i].Length;
-			} else if (al.CigarData[i].Type=='D') {
-				del+=al.CigarData[i].Length;
+		for (i=0;i<al->core.n_cigar;++i) {
+            int op = cig[i] & BAM_CIGAR_MASK;
+			if (op == BAM_CINS) {
+				ins+=(cig[i] >> BAM_CIGAR_SHIFT);
+			} else if (op == BAM_CDEL) {
+				del+=(cig[i] >> BAM_CIGAR_SHIFT);
 			}
 		}
-		if (al.CigarData.size() == 0) {
-			al.Position=-1;
-		}
-		dostats(al.Name,al.Length,al.AlignmentFlag,al.RefID>=0?references.at(al.RefID).RefName:"",al.Position+1,al.MapQuality, al.MateRefID>=0?references.at(al.MateRefID).RefName:"", al.InsertSize, al.QueryBases, al.Qualities, nm, ins, del);
+		if (al->core.n_cigar == 0) 
+			al->core.pos=-1;                 // not really a match if there's no cigar string... this deals with bwa's issue
+
+        char *qual = (char *) bam1_qual(al);
+        uint8_t * bamseq = bam1_seq(al);
+        string seq; seq.resize(len);
+        for (i=0;i<len;++i) {
+            seq[i] = bam_nt16_rev_table[bam1_seqi(bamseq, i)];
+            qual[i] += 33;
+        }
+
+		dostats(name,len,al->core.flag,al->core.tid>=0?fp->header->target_name[al->core.tid]:"",al->core.pos+1,al->core.qual, al->core.mtid>=0?fp->header->target_name[al->core.mtid]:"", al->core.isize, seq, qual, nm, ins, del);
 	}
 	return true;
 }
@@ -690,6 +811,7 @@ void usage(FILE *f) {
 "-D             Keep track of multiple alignments (slower!)\n"
 "-M             Only overwrite if newer (requires -x, or multiple files)\n"
 "-A             Report all chr sigs, even if there are more than 1000\n"
+"-R             RNA-Seq stats output (coverage, 3' bias, etc)\n"
 "-B             Input is bam, don't bother looking at magic\n"
 "-x FIL         File extension for multiple files (stats)\n"
 "-b INT         Number of reads to sample for per-base stats (1M)\n"
@@ -750,22 +872,12 @@ std::string string_format(const std::string &fmt, ...) {
        }
 }
 
-// R-compatible quantile code
+// R-compatible quantile code : TODO convert to template
 
-double quantile(const ibucket &vec, double p) {
+template <class vtype>
+double quantile(const vtype &vec, double p) {
         int l = vec.size();
-        double t = ((double)l-1)*p;
-        int it = (int) t;
-        int v=vec[it];
-        if (t > (double)it) {
-                return (v + (t-it) * (vec[it+1] - v));
-        } else {
-                return v;
-        }
-}
-
-double quantile(const std::vector<int> &vec, double p) {
-        int l = vec.size();
+        if (!l) return 0;
         double t = ((double)l-1)*p;
         int it = (int) t;
         int v=vec[it];
