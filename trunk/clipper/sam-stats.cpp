@@ -62,6 +62,9 @@ void usage(FILE *f);
 template <class vtype> 
     double quantile(const vtype &vec, double p);
 
+template <class itype> 
+    double quantile(const vector<itype> &vec, double p);
+
 std::string string_format(const std::string &fmt, ...);
 
 int debug=0;
@@ -881,6 +884,20 @@ double quantile(const vtype &vec, double p) {
         double t = ((double)l-1)*p;
         int it = (int) t;
         int v=vec[it];
+        if (t > (double)it) {
+                return (v + (t-it) * (vec[it+1] - v));
+        } else {
+                return v;
+        }
+}
+
+template <class itype>
+double quantile(const vector<itype> &vec, double p) {
+        int l = vec.size();
+        if (!l) return 0;
+        double t = ((double)l-1)*p;
+        int it = (int) t;
+        itype v=vec[it];
         if (t > (double)it) {
                 return (v + (t-it) * (vec[it+1] - v));
         } else {
