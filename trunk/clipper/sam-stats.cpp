@@ -605,9 +605,15 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 	dat.lenssq += rlen*rlen;
 
 	if (bits & 16) 
-		++dat.nrev;
+	    if (bits & 0x40) 
+    		++dat.nrev;
+		else
+            ++dat.nfor;
 	else
-		++dat.nfor;
+	    if (bits & 0x40) 
+		    ++dat.nfor;
+        else
+		    ++dat.nrev;
 
 	dat.mapsum += mapq;
 	dat.mapssq += mapq*mapq;
