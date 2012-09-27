@@ -422,6 +422,16 @@ int main(int argc, char **argv) {
             } else {
                 rnao=o;
             }
+
+            if (s.dat.mapn > 1000) {
+                if (s.dat.nrev && (s.dat.nfor/(double)s.dat.nrev) > 30) {
+                    fprintf(o, "stranded\tforward\n");
+                }
+                if (s.dat.nfor && (s.dat.nrev/(double)s.dat.nfor) > 30) {
+                    fprintf(o, "stranded\treverse\n");
+                }
+            }
+
 			fprintf(o, "phred\t%d\n", phred);
 			fprintf(o, "forward\t%d\n", s.dat.nfor);
 			fprintf(o, "reverse\t%d\n", s.dat.nrev);
