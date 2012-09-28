@@ -23,7 +23,8 @@ for (@ARGV) {
 }
 
 # print header
-print "chr\tpos\tref";
+print "chr\tpos\tref" if !$distance;
+print "chr-pos" if $distance;
 # strip common path info
 my $pre = common_prefix(@ARGV); $pre =~ s/[^\/]+$//; $pre = quotemeta($pre);
 my $suf = common_suffix(@ARGV); $suf =~ s/^[^.]+//; $suf = quotemeta($suf);
@@ -63,7 +64,7 @@ for (my $i = 0; $i < @in; ++$i ) {
     # find the min id
     $ok = 1;
     if ( ( $d[$i][0] && !defined($min_id) ) ||
-         ( $d[$i][0] lt $min_id ) || 
+         ( chrlt($d[$i][0],$min_id) ) || 
          ( ($d[$i][0] eq $min_id) && ($d[$i][1] < $min_pos) )
        ) {
         # minimum id
@@ -81,9 +82,9 @@ my $seen;
 for ($i = 0; $i < @in; ++$i ){
     if ($d[$i] && ($d[$i][0] eq $min_id && $d[$i][1] eq $min_pos) ) {
         ++$seen;
-        $keep[$i] = undef;
+        $keep[$i] = undef;                  # read next
     } else {
-        $keep[$i] = $d[$i];
+        $keep[$i] = $d[$i];                 # don't read
     }
 }
 
@@ -95,7 +96,8 @@ if ($seen < $min_seen) {
 
 # print the variant
 my $ref = $d[$min_i][2];
-print "$min_id\t$min_pos\t", $ref;
+print "$min_id-$min_pos\t", $ref if $distance;
+print "$min_id\t$min_pos" if !$distance;
 
 for ($i = 0; $i < @in; ++$i ){
     print "\t";
@@ -163,4 +165,10 @@ sub common_prefix {
     return $comm;
 }
 
+sub chrlt {
+    my ($a, $b) = @_;
+    $a =~ tr/:/\0/;
+    $b =~ tr/:/\0/;
+    return $a lt $b;
+}
 
