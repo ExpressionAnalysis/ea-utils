@@ -96,8 +96,8 @@ if ($seen < $min_seen) {
 
 # print the variant
 my $ref = $d[$min_i][2];
-print "$min_id-$min_pos\t", $ref if $distance;
-print "$min_id\t$min_pos" if !$distance;
+print "$min_id-$min_pos" if $distance;
+print "$min_id\t$min_pos\t", $ref if !$distance;
 
 for ($i = 0; $i < @in; ++$i ){
     print "\t";
