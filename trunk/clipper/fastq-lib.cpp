@@ -175,8 +175,8 @@ bool poorqual(int n, int l, const char *s, const char *q) {
 
 void revcomp(struct fq *d, struct fq *s) {
         if (!d->seq.s) {
-                d->seq.s=(char *) malloc(d->seq.a=s->seq.n);
-                d->qual.s=(char *) malloc(d->qual.a=s->qual.n);
+                d->seq.s=(char *) malloc(d->seq.a=s->seq.n+1);
+                d->qual.s=(char *) malloc(d->qual.a=s->qual.n+1);
         } else if (d->seq.a <= s->seq.n) {
                 d->seq.s=(char *) realloc(d->seq.s, d->seq.a=(s->seq.n+1));
                 d->qual.s=(char *) realloc(d->qual.s, d->qual.a=(s->qual.n+1));
@@ -199,8 +199,8 @@ void revcomp(struct fq *d, struct fq *s) {
         }
         d->seq.n=s->seq.n;
         d->qual.n=s->qual.n;
-        s->seq.s[s->seq.n]='\0';
-        s->qual.s[s->seq.n]='\0';
+        d->seq.s[s->seq.n]='\0';
+        d->qual.s[s->seq.n]='\0';
 }
 
 
