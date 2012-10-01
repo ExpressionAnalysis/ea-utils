@@ -423,13 +423,9 @@ int main(int argc, char **argv) {
                 rnao=o;
             }
 
-            if (s.dat.mapn > 1000) {
-                if (s.dat.nrev && (s.dat.nfor/(double)s.dat.nrev) > 30) {
-                    fprintf(o, "stranded\tforward\n");
-                }
-                if (s.dat.nfor && (s.dat.nrev/(double)s.dat.nfor) > 30) {
-                    fprintf(o, "stranded\treverse\n");
-                }
+            if (s.dat.mapn > 100) {
+                // at least 100 mappings to call a meaningful "percentage" 
+    			fprintf(o, "pct forward\t%.3f\n", 100*(s.dat.nfor/(double)(s.dat.nfor+s.dat.nrev)));
             }
 
 			fprintf(o, "phred\t%d\n", phred);
