@@ -28,7 +28,7 @@ template <typename L, typename R> void append(L& lhs, R const& rhs) { lhs.insert
 template <typename L, typename R> void prepend(L& lhs, R const& rhs) { lhs.insert(lhs.begin(), rhs.begin(), rhs.end()); }
 
 struct string_annot_serializer {
-  bool operator()(FILE* fp, const std::pair<const string&, const vector<annot>& >& value) const {
+  bool operator()(FILE* fp, const std::pair<const string&, const vector<annot> >& value) const {
 
     {
     assert(value.first.length() <= UCHAR_MAX);
