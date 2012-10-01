@@ -29,9 +29,7 @@ use Data::Dumper;
 my $in = shift @ARGV;
 
 open (IN, ($in =~ /\.gz$/ ? "gunzip -c $in|" : $in =~ /\.zip$/ ? "unzip -p $in|" : "$in")) || die "$!";
-my $gff; 
-my %tids;
-my (%mrnas, %gids);
+my (%mrnas, %gids, %tids, $haveexon, $gff);
 while (<IN>) {
 	$gff = 2 if /^##gff-version 2/;
 	$gff = 3 if /^##gff-version 3/;
@@ -55,6 +53,7 @@ while (<IN>) {
         for (split(/,/,$tid)) {
             push @{$tids{$_}}, \@f;
         }
+        $haveexon = 1 if $typ eq 'exon';
     }
 	if ($typ eq 'mRNA') {
         $mrnas{$id} = $tid;
@@ -97,6 +96,7 @@ for my $tid (keys(%tids)) {
 # for some this is needed... not for others?
 #        --$beg; --$end;
         print "$chr\t$fil\t$typ\t$beg\t$end\t0\t$dir\t$frame\tgene_id \"$id\"; transcript_id \"$tid\";$ex\n";
+        print "$chr\t$fil\texon\t$beg\t$end\t0\t$dir\t$frame\tgene_id \"$id\"; transcript_id \"$tid\";$ex\n" if !$haveexon;
 	}
 }
 
