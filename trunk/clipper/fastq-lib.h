@@ -53,6 +53,7 @@ THE SOFTWARE.
 
 // maximum number of files that can be tracked by poorquals lib
 #define MAX_FILENO_QUALS 6
+#define SVNREV  "$LastChangedRevision: 412 $"
 
 // read line, read fq
 typedef struct line {
