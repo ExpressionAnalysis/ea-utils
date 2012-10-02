@@ -41,7 +41,7 @@
 
 #include "fastq-lib.h"
 
-const char * VERSION = "1.32";
+const char * VERSION = "1.33";
 
 using namespace std;
 
@@ -366,7 +366,7 @@ int main(int argc, char **argv) {
 			continue;
 		}
 		fprintf(o, "reads\t%d\n", s.dat.n);
-		fprintf(o, "version\t%s\n", VERSION);
+		fprintf(o, "version\t%s.%d\n", VERSION, SVNREV);
 
 		// mapped reads is the number of reads that mapped at least once (either mated or not)
 		if (s.dat.mapn > 0) {
@@ -817,7 +817,7 @@ bool sstats::parse_bam(const char *in) {
 void usage(FILE *f) {
         fprintf(f,
 "Usage: sam-stats [options] [file1] [file2...filen]\n"
-"Version: %s\n"
+"Version: %s.%d\n"
 "\n"
 "Produces lots of easily digested statistics for the files listed\n"
 "\n"
@@ -866,7 +866,7 @@ void usage(FILE *f) {
 "  It is only output if the original SAM/BAM has a header. The values\n"
 "  are the log2 of the # of mapped reads at each position + ascii '0'.\n"
 "\n"
-        ,VERSION);
+        ,VERSION, SVNREV);
 }
 
 std::string string_format(const std::string &fmt, ...) {

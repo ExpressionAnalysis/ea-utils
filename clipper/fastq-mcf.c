@@ -179,7 +179,7 @@ int main (int argc, char **argv) {
 			case 'F': fref[fref_n++] = optarg; break;
 			case 'x': pctns = atof(optarg); break;
 			case 'R': rmns = false; break;
-			case 'V': printf("Revision: %d\n", atoi(strchr(SVNREV, ':')+1)); return 0; break;
+			case 'V': printf("Revision: %d\n", SVNREV); return 0; break;
 			case 'p': pctdiff = atoi(optarg); break;
 			case 'P': phred = (char) atoi(optarg); break;
 			case 'h': usage(stdout); return 1; 
