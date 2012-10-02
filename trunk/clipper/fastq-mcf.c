@@ -39,7 +39,6 @@ See "void usage" below for usage.
 #define B_T     3
 #define B_N     4
 #define B_CNT   5
-#define SVNREV  "$LastChangedRevision$"
 #define MAXWARN 10
 
 struct ad {
