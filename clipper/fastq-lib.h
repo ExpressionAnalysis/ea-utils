@@ -53,7 +53,7 @@ THE SOFTWARE.
 
 // maximum number of files that can be tracked by poorquals lib
 #define MAX_FILENO_QUALS 6
-#define SVNREV atoi(strchr("$LastChangedRevision: 412 $", ':')+1)
+#define SVNREV atoi(strchr("$LastChangedRevision$", ':')+1)
 
 // read line, read fq
 typedef struct line {
