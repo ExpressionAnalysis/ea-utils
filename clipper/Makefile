@@ -55,17 +55,17 @@ disttest: $(PKG).tar.gz
 $(PKG).${VER}-${REL}.tar.gz: $(PKG).tar.gz
 	cp $< $@
 
-%: %.c fastq-lib.cpp
+%: %.c fastq-lib.cpp fastq-lib.h
 	$(CC) $(CFLAGS) fastq-lib.cpp -o $@ $<
 
-%: %.cpp fastq-lib.cpp
+%: %.cpp fastq-lib.cpp fastq-lib.h
 	$(CC) $(CFLAGS) fastq-lib.cpp -o $@ $<
 
 # why the libbam.a doesn't work?  not sure... *.o works
-sam-stats: sam-stats.cpp samtools/libbam.a samtools/bam.h
+sam-stats: sam-stats.cpp samtools/libbam.a samtools/bam.h fastq-lib.h
 	$(CC) $(CFLAGS) samtools/*.o -lz fastq-lib.cpp $< -o $@
 
-samtools/libbam.a: samtools/*.c
+samtools/libbam.a: samtools/*.c samtools/*.h
 	cd samtools && make libbam.a
 
 varcall: varcall.cpp fastq-lib.cpp tidx/tidx-lib.cpp
