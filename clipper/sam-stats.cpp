@@ -202,11 +202,11 @@ int main(int argc, char **argv) {
 	optind = 0;
     while ( (c = getopt (argc, argv, "?BArR:Ddx:MhS:")) != -1) {
                 switch (c) {
-                case 'd': ++debug; break;
+                case 'd': ++debug; break;                                       // increment debug level
                 case 'D': ++trackdup; break;
                 case 'B': inbam=1; break;
-                case 'A': max_chr=1000000; break;
-                case 'R': rnafile=optarg;
+                case 'A': max_chr=1000000; break;                               // max chrom
+                case 'R': rnafile=optarg;                                       // pass through
                 case 'r': max_chr=1000000; rnamode=1; histnum=60; break;
                 case 'S': histnum=atoi(optarg); break;
                 case 'x': ext=optarg; break;
@@ -226,7 +226,7 @@ int main(int argc, char **argv) {
                 }
     }
 
-	// recompute argc owing to getopt
+	// recompute argc owing to getopt (is this necessary? i don't think so)
 	const char *stdv[3] = {argv[0],"-",NULL}; 
 	if (!argv[optind]) {
 		argc=2;
@@ -234,13 +234,11 @@ int main(int argc, char **argv) {
 		optind=1;
 	}
 
-	multi = (argc-optind-1) > 0;
-
+	multi = (argc-optind-1) > 0;                // more than 1 input? 
 	if (multi && !ext) 
-		ext = "stats";
-
+		ext = "stats";                          // force serial processed extension-mode
 	
-	build_basemap();
+	build_basemap();                            // precompute matrices for rabit base->integer (A->0, C->1,. ...etc) lookups
 
 	debugout("argc:%d, argv[1]:%s, multi:%d, ext:%s\n", argc,argv[optind],multi,ext);
 
@@ -508,13 +506,14 @@ int main(int argc, char **argv) {
                 vector<double> vcovrvar;
                 vector<double> vcovr;
                 vector<double> vskew;
+                // for each chromosome or reference sequence...
 				while (vit != vtmp.end()) {
-					scoverage &v = s.covr[*vit];
-					if (v.reflen && histnum > 0) {
+					scoverage &v = s.covr[*vit];                    // coverage vector
+					if (v.reflen && histnum > 0) {                  // user asked for histogram
 						string sig;
 						int d; double logd, lsum=0, lssq=0;
 
-						for (d=0;d<histnum;++d) {
+						for (d=0;d<histnum;++d) {                   // log counts for each portion of the histogram
                             logd = log(1+v.dist[d])/logb;
                             lsum+=logd;
                             lssq+=logd*logd;
@@ -544,13 +543,13 @@ int main(int argc, char **argv) {
                             // if there's some coverage
                             if (v.mapr > 0) {
                                 vcovr.push_back(covr);              // look at varition
-                                vcovrvar.push_back(cv);              // look at varition
-                                vskew.push_back(skew);               // and skew
-                                if (rnao) {
+                                vcovrvar.push_back(cv);             // look at varition
+                                vskew.push_back(skew);              // and skew
+                                if (rnao) {                         // "rna mode"  = more detailed output of coverage and skewness of coverage
         						    fprintf(rnao,"%s\t%d\t%ld\t%.2f\t%.4f\t%.4f\t%s\n", vit->c_str(), v.reflen, v.mapr, covr, skew, cv, sig.c_str());
                                 }
                             }
-                        } else if (max_chr < 100) {
+                        } else if (max_chr < 100) {                 // normal dna mode, just print percent alignment to each
     						fprintf(o,"%%%s\t%.2f\t%s\n", vit->c_str(), 100.0*((double)v.mapb/s.dat.lensum), sig.c_str());
                         } else {
     						fprintf(o,"%%%s\t%.6f\t%s\n", vit->c_str(), 100.0*((double)v.mapb/s.dat.lensum), sig.c_str());
@@ -702,6 +701,7 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 	}
 }
 
+// parse a sam file... maybe let samtools do this, and then handle stats in "bam mode"... faster for sure
 bool sstats::parse_sam(FILE *f) {
 	line l; meminit(l);
 	while (read_line(f, l)>0)  {
@@ -769,6 +769,7 @@ bool sstats::parse_sam(FILE *f) {
 	return true;
 }
 
+// let samtools parse the bam
 bool sstats::parse_bam(const char *in) {
     samfile_t *fp;
     if (!(fp=samopen(in, "rb", NULL))) {
@@ -786,10 +787,12 @@ bool sstats::parse_bam(const char *in) {
         uint32_t *cig = bam1_cigar(al);
         char *name = bam1_qname(al);
         int len = al->core.l_qseq;
-        uint8_t *tag=bam_aux_get(al, "NM");
+        uint8_t *tag=bam_aux_get(al, "NM");     // NM tag
 		int nm = tag ? bam_aux2i(tag) : 0;
 		int ins=0, del=0;
 		int i;
+
+        // count inserts and deletions
 		for (i=0;i<al->core.n_cigar;++i) {
             int op = cig[i] & BAM_CIGAR_MASK;
 			if (op == BAM_CINS) {
@@ -798,17 +801,20 @@ bool sstats::parse_bam(const char *in) {
 				del+=(cig[i] >> BAM_CIGAR_SHIFT);
 			}
 		}
-		if (al->core.n_cigar == 0) 
-			al->core.pos=-1;                 // not really a match if there's no cigar string... this deals with bwa's issue
 
-        char *qual = (char *) bam1_qual(al);
-        uint8_t * bamseq = bam1_seq(al);
-        string seq; seq.resize(len);
+        // crappy cigar?
+		if (al->core.n_cigar == 0) 
+			al->core.pos=-1;                    // not really a match if there's no cigar string... this deals with bwa's issue
+
+        char *qual = (char *) bam1_qual(al);    // qual string
+        uint8_t * bamseq = bam1_seq(al);        // sequence string
+        string seq; seq.resize(len);            // ok... really make it a string
         for (i=0;i<len;++i) {
             seq[i] = bam_nt16_rev_table[bam1_seqi(bamseq, i)];
             qual[i] += 33;
         }
 
+        // now do stats
 		dostats(name,len,al->core.flag,al->core.tid>=0?fp->header->target_name[al->core.tid]:"",al->core.pos+1,al->core.qual, al->core.mtid>=0?fp->header->target_name[al->core.mtid]:"", al->core.isize, seq, qual, nm, ins, del);
 	}
 	return true;
