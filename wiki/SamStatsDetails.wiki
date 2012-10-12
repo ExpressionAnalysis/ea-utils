@@ -110,7 +110,7 @@ The number of unique reference sequences that have at least one alignment.
 
 ===median skew===
 
-Only enabled in "rna mode", the median skewness of all transcripts with coverage > 10%.  An "overall bias" metric, useful for detecting degradation/primer bias and outliers.
+Only enabled in "rna mode", the median skewness of all transcripts with coverage.  An "overall bias" metric, useful for detecting 3'bias.
 
 ===median coverage ===
 
