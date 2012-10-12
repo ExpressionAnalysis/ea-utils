@@ -108,6 +108,18 @@ The number of reference sequences in the original SAM headers.
 
 The number of unique reference sequences that have at least one alignment.
 
+===median skew===
+
+Only enabled in "rna mode", the median skewness of all transcripts with coverage > 10%.  An "overall bias" metric, useful for detecting degradation/primer bias and outliers.
+
+===median coverage ===
+
+Median of nonzero coverage (see rna mode below)
+
+===median coverage cv===
+
+Median of nonzero coverage variability (see rna mode below)
+
 ===%chr1, %gene, and signature values===
 
 For each mapped reference chromosome or gene, the total number of mapped bases is totaled.   The percentages are the total mapped bases for that gene or chromosome divided by the total mapped bases.
@@ -121,3 +133,14 @@ Each chromosome/gene is divided in to 30 evenly sized "buckets".
 The values in the signature are the log2 of the # of mapped reads in  each position bucket times the length of those reads + ascii '0'.  
 
 Long reads caveat: There is no attempt to break-up long reads that align across multiple regions however.  So these signatures are not (yet) useful for very long reads.   If a read's first position maps to histogram bucket 1, but spans across to bucket 2, all of the bases are currently counted in bucket 1.   For short reads, this is not significant.
+
+
+==="RNA-seq" mode coverage matrix===
+
+A "coverage" file is output with one row per reference sequence, the _7 columns_ are: transcript id, length, count, coverage percentage, skewness (bias), and coverage cv, and a signature (see above).
+
+  * Coverage: statistics are 1x, and approximate, and are intended to measure exon bias - not appropriate for assembly!
+
+  * Skewness: is the standard pearsons 3rd order skewness applies to the alignment positions across the transcript.
+
+  * Coverage CV: the coefficient of variation of the coverage histogram (can be computed from the signature).
