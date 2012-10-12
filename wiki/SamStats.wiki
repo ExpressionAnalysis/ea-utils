@@ -18,7 +18,8 @@ Options (default in parens):
 -D             Keep track of multiple alignments (slower!)
 -M             Only overwrite if newer (requires -x, or multiple files)
 -A             Report all chr sigs, even if there are more than 1000
--B             Input is bam, dont bother looking at magic
+-R             RNA-Seq stats output (coverage, 3' bias, etc)
+-B             Input is bam, don't bother looking at magic
 -x FIL         File extension for multiple files (stats)
 -b INT         Number of reads to sample for per-base stats (1M)
 -S INT         Size of ascii-signature (30)
@@ -56,57 +57,6 @@ Meaning of the per-chromosome signature:
   A ascii-histogram of mapped reads by chromosome position.
   It is only output if the original SAM/BAM has a header. The values
   are the log2 of the # of mapped reads at each position + ascii '0'.
-}}}
-
-Example  (Single-end RNA w/bowtie, hence the odd distribution & no indels or mate info):
-
-{{{
-
-reads   110836000
-phred   33
-mapped reads    110836000
-mapped bases    8756752622
-foward  54636749
-reverse 56199251
-len max 80.0000
-len mean        79.0064
-len stdev       5.4687
-mapq mean       170.5078
-mapq stdev      119.6054
-mapq Q1 3.0000
-mapq median     255.0000
-mapq Q3 255.0000
-snp rate        0.003512
-pct mismatch    21.4714
-base qual mean  36.9820
-base qual stdev 4.6959
-%A      25.8659
-%C      22.7026
-%G      25.8926
-%T      25.4710
-%N      0.0679
-%chr1   6.42
-%chr10  2.41
-%chr11  3.58
-%chr12  7.57
-%chr13  1.93
-%chr14  2.12
-%chr15  2.48
-%chr16  1.81
-%chr17  2.68
-%chr18  1.92
-%chr19  2.78
-%chr2   3.75
-%chr3   3.99
-%chr4   26.81
-%chr5   8.29
-%chr6   3.70
-%chr7   3.85
-%chr8   2.67
-%chr9   3.77
-%chrM   6.25
-%chrX   1.21
-%chrY   0.01
 }}}
 
 DETAILED OVERVIEW OF STATISTICS:
