@@ -22,7 +22,7 @@ die "Usage: $0 [opts] varcall-files...
     -m       Minimum number of samples with a variant (1)
     -d       Output a distance matrix instead (1=het, 2=hom, 3=indel)
     -p       Use associated pileup info for reference depth, default is varcall.txt -> pileup.txt
-    -f REF   Use reference for sort order (necessary if the original fil was not lexically sorted)
+    -f REF   Use reference for sort order (necessary if the original file was not lexically sorted!)
     -P SUBST Use associated pileup info for reference depth, and define SUBST
 " if !@ARGV;
 
