@@ -4,22 +4,60 @@ use strict;
 
 use IO::File;
 use Data::Dumper;
-use Getopt::Long;
+use Getopt::Long qw(:config no_ignorecase);
 
 my $min_seen = 0;
 my $distance = 0;
 my $strip = -1;
+my $usepil;
+my $pilsub;
+my $faidx;
 
-GetOptions("minvar=i"=>\$min_seen, "distance"=>\$distance, "strip!"=>\$strip);
+GetOptions("minvar=i"=>\$min_seen, "distance"=>\$distance, "strip!"=>\$strip, "pileup"=>\$usepil, "PSUB=s"=>\$pilsub, "faidx=s"=>\$faidx) || die;
+
+die "use -p for default varcall.txt/pileup.txt conversion\n" if -e $pilsub;
+$pilsub = "varcall.txt/pileup.txt" if $usepil && !$pilsub;
 
 die "Usage: $0 [opts] varcall-files...
-    -m      Minimum number of samples with a variant (1)
-    -d      Output a distance matrix instead (1=het, 2=hom, 3=indel)
+    -m       Minimum number of samples with a variant (1)
+    -d       Output a distance matrix instead (1=het, 2=hom, 3=indel)
+    -p       Use associated pileup info for reference depth, default is varcall.txt -> pileup.txt
+    -f REF   Use reference for sort order (necessary if the original fil was not lexically sorted)
+    -P SUBST Use associated pileup info for reference depth, and define SUBST
 " if !@ARGV;
 
-my @in;  my $i = 0;
+my @in;  my @pil; my $i = 0;
+
+my %refsort;
+if ($faidx) {
+    $faidx = "$faidx.fai" if $faidx !~ /\.fai$/;
+    open(IN, $faidx) || die "can't read $faidx: $!";
+    my $i = 0;
+    while(<IN>) {
+        my ($id) = split /\t/;
+        $refsort{$id}=++$i;
+    }
+    die unless %refsort;
+}
+
 for (@ARGV) {
-    open($in[$i++], "$_")||die"$_:$!\n";
+    if (defined $pilsub) {
+        my $pil = $_;
+        my ($from, $to) = split /[\/=]/, $pilsub;
+        die "-PSUB must be from/to: $pilsub\n" unless $to;
+        if ($pil =~ s/$from$/$to/) {
+            if (-s $pil) {
+                open($pil[$i], $pil)||die"open $pil:$!\n";
+            } elsif (-s "$pil.gz") {
+                open($pil[$i], "gunzip -c $pil.gz|")||die"open $pil:$!\n";
+            } else {
+                die "file name $pil does not exist";
+            }
+        } else {
+            die "file name $pil does not match $pilsub";
+        }
+    }
+    open($in[$i++], $_)||die"open $_:$!\n";
 }
 
 # print header
@@ -43,6 +81,7 @@ print "\n";
 
 my $ok = 1;
 my @keep;
+my $cnt = 0;
 while ($ok) {
 $ok = 0;
 
@@ -93,6 +132,18 @@ if ($seen < $min_seen) {
     next;
 }
 
+my @p;
+if (@pil) {
+    # seek all the pileups
+    for ($i = 0; $i < @pil; ++$i ){
+        do {
+            # note: chr, pos, ref, depth, pil
+            $p[$i] = [split /\t/, $pil[$i]->getline];
+        } while (   ( chrlt($p[$i][0], $min_id) ) ||
+                    ( ($p[$i][0] eq $min_id) && ($p[$i][1] < $min_pos) )
+                );
+    }
+}
 
 # print the variant
 my $ref = $d[$min_i][2];
@@ -127,13 +178,30 @@ for ($i = 0; $i < @in; ++$i ){
         if ($distance) {
             print 0;
         } else {
-            print "";
+            if ($p[$i] && $p[$i][0] eq $min_id && $p[$i][1] eq $min_pos) {
+                if ($p[$i][2] =~ /^[atgc]$/oi) {
+                    my $depth = $p[$i][4] =~ tr/,.//;
+                    if ($depth < 4) {
+                        print "n/a";
+                    } else {
+                        my $sq = 0;
+                        for(my $j=0;$j<length($p[$i][5]);++$j) {
+                            $sq+=ord(substr($p[$i][5],$j,1))-33;
+                        }
+                        $sq = int($sq/length($p[$i][5]));
+                        print uc($p[$i][2]), ":$depth,$sq";
+                    }
+                } else {
+                    print "n/a";
+                }
+            } else {
+                print "";
+            }
         }
     }
 }
 
 print "\n";
-
 };
 
 
@@ -167,8 +235,13 @@ sub common_prefix {
 
 sub chrlt {
     my ($a, $b) = @_;
-    $a =~ tr/:/\0/;
-    $b =~ tr/:/\0/;
-    return $a lt $b;
+    if ($faidx) {
+        return 0 if $a eq $b;
+        return $refsort{$a} < $refsort{$b};
+    } else {
+        $a =~ tr/:/\0/;
+        $b =~ tr/:/\0/;
+        return $a lt $b;
+    }
 }
 
