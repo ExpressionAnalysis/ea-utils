@@ -18,6 +18,8 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+$Id$
 */
 
 #include <ctype.h>
@@ -124,6 +126,7 @@ int main( int argc, char**argv ) {
 	char c;
 	optind = 0;
 	char *filename = NULL;
+	if(argc < 2) {usage(stdout); return 0;}
 	while ( (c = getopt (argc, argv, "?DdL:x:b:c:w:s:h")) != -1) {
 		switch (c) {
 			case 'c': cyclemax = atoi(optarg); break;
