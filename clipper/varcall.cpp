@@ -41,7 +41,7 @@ THE SOFTWARE.
 
 #include "fastq-lib.h"
 
-const char * VERSION = "0.8.6";
+const char * VERSION = "0.8.7";
 
 #define MIN_READ_LEN 20
 
@@ -609,6 +609,14 @@ void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref) {
 	}
 }
 
+#define T_A 0
+#define T_C 1
+#define T_G 2
+#define T_T 3
+#define T_SDEL 4
+#define T_NDEL 5
+#define T_INS 6
+#define T_N 7
 #define b2i(c) ((c)=='A'?0:(c)=='a'?0:(c)=='C'?1:(c)=='c'?1:(c)=='G'?2:(c)=='g'?2:(c)=='T'?3:(c)=='t'?3:(c)=='*'?4:(c)=='-'?5:(c)=='+'?6:7)
 #define i2b(i) (i==0?'A':i==1?'C':i==2?'G':i==3?'T':i==4?'*':i==5?'-':i==6?'+':'?')
 
@@ -937,6 +945,8 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 		return;
 	}
 
+	int ins_depth = p.Calls.size() > 6 ? p.Calls[6].depth() : 0;
+
 	int i;
 	if (p.Calls.size() > 6) 
 		p.Calls.resize(7);	// toss N's before sort
@@ -948,7 +958,6 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 	int skipped_depth=0;
 	int skipped_repeat=0;
 	int allele_count=0;
-	int ins_depth = p.Calls.size() > 6 ? p.Calls[6].depth() : 0;
 
 	string pil;
 	for (i=0;i<p.Calls.size();++i) {		// all calls
@@ -1036,7 +1045,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                     if (p.Calls[i].is_ref && ins_depth > max(min_idepth,min_adepth))
                         adj_depth = adj_depth-ins_depth;
 
-                    if (adj_depth >= min_adepth) {
+                    if (adj_depth >= min_adepth && adj_depth > 0) {
                         ++allele_count;
                         pil += string_format("\t%c:%d,%d", p.Calls[i].base,adj_depth,p.Calls[i].qual/p.Calls[i].depth());
                         if (vcf_f && need_out >= 0) {
