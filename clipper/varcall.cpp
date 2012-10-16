@@ -948,6 +948,8 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 	int skipped_depth=0;
 	int skipped_repeat=0;
 	int allele_count=0;
+	int ins_depth = p.Calls.size() > 6 ? p.Calls[6].depth() : 0;
+
 	string pil;
 	for (i=0;i<p.Calls.size();++i) {		// all calls
 //		printf("d:%d b: %c, pd: %d\n", (int) p.Calls[i].depth(), p.Calls[i].base, p.Depth);
@@ -1028,20 +1030,28 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                         if (need_out == -1)
                             need_out = i;
                     }
-                    ++allele_count;
-					pil += string_format("\t%c:%d,%d", p.Calls[i].base,p.Calls[i].depth(),p.Calls[i].qual/p.Calls[i].depth());
-                    if (vcf_f && need_out >= 0) {
-                        int qual = max(40,p.Calls[i].mn_qual/p.Calls[i].depth() * min((1-pct_depth),(1-pct_qdepth)));
-                        char alt = p.Calls[i].base;
-                        if (p.Calls[i].is_ref) 
-                            alt = '.';
-                        double freq_allele = p.Calls[i].depth() / (double) p.Depth;
-                        fprintf(vcf_f,"%s\t%d\t.\t%c\t%c\t%d\tPASS\tMQ=%d;BQ=%d;DP=%d;AF=%2.2f\n",
-                            p.Chr.c_str(), p.Pos, p.Base, alt, qual,
-                            (int) sqrt(p.Calls[i].mq_ssq/p.Calls[i].depth()),
-                            (int) sqrt(p.Calls[i].qual_ssq/p.Calls[i].depth()),
-                            p.Depth,
-                            freq_allele);
+                    int adj_depth = p.Calls[i].depth();
+
+                    // subtract inserts from reference .. perhaps > 0 is correct here....
+                    if (p.Calls[i].is_ref && ins_depth > max(min_idepth,min_adepth))
+                        adj_depth = adj_depth-ins_depth;
+
+                    if (adj_depth >= min_adepth) {
+                        ++allele_count;
+                        pil += string_format("\t%c:%d,%d", p.Calls[i].base,adj_depth,p.Calls[i].qual/p.Calls[i].depth());
+                        if (vcf_f && need_out >= 0) {
+                            int qual = max(40,p.Calls[i].mn_qual/p.Calls[i].depth() * min((1-pct_depth),(1-pct_qdepth)));
+                            char alt = p.Calls[i].base;
+                            if (p.Calls[i].is_ref) 
+                                alt = '.';
+                            double freq_allele = adj_depth / (double) p.Depth;
+                            fprintf(vcf_f,"%s\t%d\t.\t%c\t%c\t%d\tPASS\tMQ=%d;BQ=%d;DP=%d;AF=%2.2f\n",
+                                p.Chr.c_str(), p.Pos, p.Base, alt, qual,
+                                (int) sqrt(p.Calls[i].mq_ssq/p.Calls[i].depth()),
+                                (int) sqrt(p.Calls[i].qual_ssq/p.Calls[i].depth()),
+                                p.Depth,
+                                freq_allele);
+                        }
                     }
 				}
 			} else {
