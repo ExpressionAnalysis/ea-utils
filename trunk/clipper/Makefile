@@ -1,3 +1,6 @@
+#
+# $Id$
+
 CC=g++
 PREFIX?=/opt
 CFLAGS?=-O3 -I. 
@@ -70,3 +73,6 @@ samtools/libbam.a: samtools/*.c samtools/*.h
 
 varcall: varcall.cpp fastq-lib.cpp tidx/tidx-lib.cpp
 	$(CC) $(CFLAGS) fastq-lib.cpp tidx/tidx-lib.cpp -o $@ $<
+
+fastq-stats: fastq-stats.cpp fastq-lib.cpp
+	$(CC) $(CFLAGS) fastq-lib.cpp -o $@ $<
