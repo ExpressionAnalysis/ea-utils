@@ -119,6 +119,8 @@ char *brkdown_outfile = NULL;
 bool len_hist = 0;
 vector<int> vlen; //all read lengths
 char *lenhist_outfile = NULL;
+bool gc = 0;
+char *gc_outfile = NULL;
 
 int main( int argc, char**argv ) {
 
@@ -127,7 +129,7 @@ int main( int argc, char**argv ) {
 	optind = 0;
 	char *filename = NULL;
 	if(argc < 2) {usage(stdout); return 0;}
-	while ( (c = getopt (argc, argv, "?DdL:x:b:c:w:s:h")) != -1) {
+	while ( (c = getopt (argc, argv, "?DdLg:x:b:c:w:s:h")) != -1) {
 		switch (c) {
 			case 'c': cyclemax = atoi(optarg); break;
 			case 'D': ++nodup; break;
@@ -137,11 +139,12 @@ int main( int argc, char**argv ) {
 			case 'x': fastx_outfile = optarg; ++fastx; break;
 			case 'b': brkdown_outfile = optarg; ++brkdown; break;
 			case 'L': ++len_hist; lenhist_outfile = optarg; break;
+			case 'g': gc_outfile = optarg; ++gc; break;
 			case 'h': usage(stdout); return 0;
 			case '?':
 					  if (!optopt) {
 						  usage(stdout); return 0;
-					  } else if(optopt && strchr("bxcws", optopt)) {
+					  } else if(optopt && strchr("gbxcws", optopt)) {
 					 // 		fprintf(stderr, "Option -%c requires an argument.\n", optopt);
 					  } else {
 					//	  fprintf (stderr, "Unknown option \n", optopt);
@@ -175,6 +178,7 @@ int main( int argc, char**argv ) {
 	int phred = 64;
 	double ACGTN_count[26];
 	double total_bases = 0;
+	int gcCount[101]; meminit(gcCount);
 
 	for(int i=0; i<26; i++) {
 		ACGTN_count[i] = 0;
@@ -184,8 +188,8 @@ int main( int argc, char**argv ) {
 	if(debug) {
 		cout << endl;
 		cout << "Parameters: " << endl;
-		printf("cyclemax: %d, window: %d, nodup: %d, debug: %d, showmax: %d, fastx: %d, outfile: %s, breakdown: %s\n",
-				cyclemax, window, nodup, debug, show_max, fastx, fastx_outfile, brkdown_outfile);
+		printf("cyclemax: %d, window: %d, nodup: %d, debug: %d, showmax: %d, fastx: %d, outfile: %s, breakdown: %s, gc: %s\n",
+		       cyclemax, window, nodup, debug, show_max, fastx, fastx_outfile, brkdown_outfile, gc_outfile);
 		cout << endl;
 	}
 
@@ -228,6 +232,7 @@ int main( int argc, char**argv ) {
 			qcStats_by_qual.resize(newFq.seq.n,count_perCycle_perQual());
 		}
 
+		float gctally = 0.0, gcbase = 0.0;
 		//compute quality stats for the first cyclemax bases
 		for(int i=0; i < newFq.seq.n; i++) {
 			int ascii_val = (int) newFq.qual.s[i];
@@ -260,9 +265,15 @@ int main( int argc, char**argv ) {
 				qualssq += ascii_val*ascii_val;
 
 				ACGTN_count[(toupper(newFq.seq.s[i])-65)]++;
+				if(toupper(newFq.seq.s[i]) == 'G' || toupper(newFq.seq.s[i]) == 'C') {
+				  gctally++;
+				}
+				gcbase++;
 			}
 		}
-	
+		int idx = (int)roundgt0((100.0 * gctally/gcbase));
+		gcCount[idx]++;
+
 		if(!nodup) {//if you want to look at duplicate counts
 			if(newFq.seq.n > cyclemax) {
 				newFq.seq.s[cyclemax] = '\0';
@@ -292,6 +303,17 @@ int main( int argc, char**argv ) {
 
 	nreads--;
 	gzclose(file, isgz);
+
+
+	if(gc) {
+	  FILE *myfile;
+	  myfile = fopen(gc_outfile, "w");
+	  fprintf(myfile, "%cGC\tCount\n", '%');
+	  for(int i=0 ; i <= 100; i++) {
+	    if(gcCount[i] == 0) {continue;}
+	    fprintf(myfile, "%d\t%d\n", i, gcCount[i]);
+	  }
+	}
 
 	std::vector<ent> dup_sort;
 	google::sparse_hash_map<string,int>::iterator it = dups.begin();
