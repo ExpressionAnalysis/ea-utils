@@ -21,9 +21,51 @@ THE SOFTWARE.
 
 $Id$
 */
+const char * VERSION = "1.0";
 
 #include <ctype.h>
 #include <stdio.h>
+
+void usage( FILE * f ) {
+  fprintf( f,
+	   "\nUsage: fastq-stats [options] <fastq-file>\n\n"
+	   "Version: %s\n" 
+	   "\n"
+	   "Produces lots of easily digested statistics for the files listed\n" 
+	   "\n"
+	   "Options\n"
+	   "\n"
+	   "-c     cyclemax: max cycles for which following quality stats are produced [35]\n"
+	   "-w INT window: max window size for generating duplicate read statistics [2000000]\n"
+	   "-d     debug: prints out debug statements\n"
+	   "-D     don't do duplicate read statistics\n"
+	   "-s INT number of top duplicate reads to display\n"
+	   "-x FIL output fastx statistics (requires an output filename)\n"
+	   "-b FIL output base breakdown by per phred quality at every cycle.\n"
+	   "       It sets cylemax to longest read length\n"
+	   "-L FIL Output length counts \n\n"
+	   
+	   "\n" 
+	   "The following data are printed to stdout:\n" "\n"
+	   "  reads			: #reads in the fastq file\n"
+	   "  len 	                : read length. mean and stdev are provided for variable read lengths\n"
+	   "  phred			: phred scale used\n"
+	   "  window-size		: Number of reads used to generate duplicate read statistics\n"
+	   "  cycle-max		: Number of bases to assess for duplicity\n"
+	   "  dups			: Number of reads that are duplicates\n"
+	   "  %%dup			: Pct reads that are duplcate\n"
+	   "  unique-dup seq	: Number sequences that are duplicated\n"
+	   "  min dup count		: Smallest duplicate tally for any duplicate sequence\n"
+	   "  dup seq <rank> <count> <sequence> \n"
+	   "  			: Lists top 10 most frequent duplicate reads along with count mean and stdev\n"
+	   "  qual			: Base Quality min, max and mean\n"
+	   "  %%A,%%T,%%C,%%G		: base percentages\n" 
+	   "  total bases		: total number of bases\n" 
+	   "\n"
+	   ,VERSION);
+  
+} //end usage function
+
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
@@ -36,8 +78,6 @@ $Id$
 #include <google/sparse_hash_map> // or sparse_hash_set, dense_hash_map, ...
 #include <iostream>
 #include "fastq-lib.h"
-
-const char * VERSION = "1.0";
 
 using namespace std;
 
@@ -129,7 +169,7 @@ int main( int argc, char**argv ) {
 	optind = 0;
 	char *filename = NULL;
 	if(argc < 2) {usage(stdout); return 0;}
-	while ( (c = getopt (argc, argv, "?DdLg:x:b:c:w:s:h")) != -1) {
+	while ( (c = getopt (argc, argv, "?DdL:g:x:b:c:w:s:h")) != -1) {
 		switch (c) {
 			case 'c': cyclemax = atoi(optarg); break;
 			case 'D': ++nodup; break;
@@ -308,7 +348,7 @@ int main( int argc, char**argv ) {
 	if(gc) {
 	  FILE *myfile;
 	  myfile = fopen(gc_outfile, "w");
-	  fprintf(myfile, "%cGC\tCount\n", '%');
+	  fprintf(myfile, "pct_GC\tCount\n", '%');
 	  for(int i=0 ; i <= 100; i++) {
 	    if(gcCount[i] == 0) {continue;}
 	    fprintf(myfile, "%d\t%d\n", i, gcCount[i]);
@@ -512,36 +552,6 @@ int main( int argc, char**argv ) {
 } //end main method
 
 
-			void usage( FILE * f ) {
-			fprintf( f,
-				"\nUsage: fastq-stats file\n\n"
-				"Options\n\n"
-				"c     - cyclemax: max cycles for which following quality stats are produced [35]\n"
-				"w INT - window: max window size for generating duplicate read statistics [2000000]\n"
-				"d     - debug: prints out debug statements\n"
-				"D     - don't do duplicate read statistics\n"
-				"s INT - number of top duplicate reads to display\n"
-				"x FIL - output fastx statistics (requires an output filename)\n"
-				"b FIL - output base breakdown by per phred quality at every cycle.\n"
-				"        It sets cylemax to longest read length\n"
-				"L     - output length counts (requires an output filename) \n\n"
-
-				"Version: %s\n" "\n"
-				"Produces lots of easily digested statistics for the files listed\n" 
-				"\n" "Complete Stats:\n" "\n"
-				"  <STATS>		: mean, stdev\n"
-				"  len <STATS>		: STATS for read length. If read length is fixed, no stats are printed\n"
-				"  reads			: #reads in the fastq file\n"
-				"  phred			: phred scale used\n"
-				"  window-size		: Number of reads used to generate duplicate read statistics\n"
-				"  cycle-max		: Number of bases to assess for duplicity\n"
-				"  dups			: Number of duplicates found\n"
-				"  %%dup			: Pct reads that are duplcate\n"
-				"  dup <STATS>		: Lists top 10 duplicate reads along with min, mean, stdev\n"
-				"  qual <STATS>		: Base Quality Statistics\n"
-				"  %%A,%%T,%%C,%%G		: base percentages\n" "\n"
-				,VERSION);
-			} //end usage function
 
 double quantile( const std::vector <int> & vec, double p ) {
 	int l = vec . size();
