@@ -78,6 +78,7 @@ void usage( FILE * f ) {
 #include <google/sparse_hash_map> // or sparse_hash_set, dense_hash_map, ...
 #include <iostream>
 #include "fastq-lib.h"
+#include "gcModel.h"
 
 using namespace std;
 
@@ -149,7 +150,11 @@ google::sparse_hash_map <std::string, int> dups;
 vector <std::string> dup_reads; // do i need this
 
 int window = 2000000;
-int cyclemax = 35;
+int cyclemax = 35; 
+int gcCyclemax = 100; // to compare with fastqc, seq is rounded to nearest 100 to reduce # of gc models; for < 200 length, this is teh same as max=100
+float gcSum;
+int gcTotal;
+
 int show_max = 10;
 bool debug = 0;
 bool fastx = 0;
@@ -218,7 +223,7 @@ int main( int argc, char**argv ) {
 	int phred = 64;
 	double ACGTN_count[26];
 	double total_bases = 0;
-	int gcCount[101]; meminit(gcCount);
+
 
 	for(int i=0; i<26; i++) {
 		ACGTN_count[i] = 0;
@@ -231,6 +236,10 @@ int main( int argc, char**argv ) {
 		printf("cyclemax: %d, window: %d, nodup: %d, debug: %d, showmax: %d, fastx: %d, outfile: %s, breakdown: %s, gc: %s\n",
 		       cyclemax, window, nodup, debug, show_max, fastx, fastx_outfile, brkdown_outfile, gc_outfile);
 		cout << endl;
+	}
+
+	if(gc) {
+	  gcInit(gcCyclemax);
 	}
 
 	//read file
@@ -272,7 +281,7 @@ int main( int argc, char**argv ) {
 			qcStats_by_qual.resize(newFq.seq.n,count_perCycle_perQual());
 		}
 
-		float gctally = 0.0, gcbase = 0.0;
+		int gcTally = 0;
 		//compute quality stats for the first cyclemax bases
 		for(int i=0; i < newFq.seq.n; i++) {
 			int ascii_val = (int) newFq.qual.s[i];
@@ -305,14 +314,20 @@ int main( int argc, char**argv ) {
 				qualssq += ascii_val*ascii_val;
 
 				ACGTN_count[(toupper(newFq.seq.s[i])-65)]++;
-				if(toupper(newFq.seq.s[i]) == 'G' || toupper(newFq.seq.s[i]) == 'C') {
-				  gctally++;
-				}
-				gcbase++;
+			}
+			
+			if (gc && i < gcCyclemax) {
+			  if(toupper(newFq.seq.s[i]) == 'G' || toupper(newFq.seq.s[i]) == 'C') {
+			    gcTally++;
+			  }
 			}
 		}
-		int idx = (int)roundgt0((100.0 * gctally/gcbase));
-		gcCount[idx]++;
+		if(gc) {
+		  int gcReadLength = newFq.seq.n > gcCyclemax? gcCyclemax : newFq.seq.n;
+		  gcProcessSequence(gcReadLength, gcTally);
+		  gcSum += (float)( gcTally )/gcReadLength;
+		  gcTotal++;
+		}
 
 		if(!nodup) {//if you want to look at duplicate counts
 			if(newFq.seq.n > cyclemax) {
@@ -322,7 +337,7 @@ int main( int argc, char**argv ) {
 
 			if(nreads < window) {
 				dups[newFq.seq.s]++;
-	} else {
+			} else {
 				if(dups.find(newFq.seq.s) != dups.end()) {
 					dups[newFq.seq.s]++;
 				}//make sure the element already exists in the key
@@ -348,11 +363,10 @@ int main( int argc, char**argv ) {
 	if(gc) {
 	  FILE *myfile;
 	  myfile = fopen(gc_outfile, "w");
-	  fprintf(myfile, "pct_GC\tCount\n", '%');
-	  for(int i=0 ; i <= 100; i++) {
-	    if(gcCount[i] == 0) {continue;}
-	    fprintf(myfile, "%d\t%d\n", i, gcCount[i]);
-	  }
+	  fprintf(myfile, "pct-GC cycle-max\t%d\n", gcCyclemax);
+	  fprintf(myfile, "Mean-pct-gc\t%.2f\n", 100.0 * gcSum / gcTotal);
+	  gcPrintDistribution(myfile);
+	  gcClose();
 	}
 
 	std::vector<ent> dup_sort;
