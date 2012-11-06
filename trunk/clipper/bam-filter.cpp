@@ -20,10 +20,35 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ALSO, IT WOULD BE NICE IF YOU LET ME KNOW YOU USED IT.
+
+$Id: fastq-stats.cpp 502 2012-10-16 16:32:46Z krobasky $
 */
+const char * VERSION = "2.0";
 
 #include <ctype.h>
 #include <stdio.h>
+
+void usage(FILE *f) {
+        fputs(
+"Usage: bam-filter [-h] [-i IN] [-b BAD-READS] [-s STAT] -f FILTER1 [-f FITLER2...] -o OUT \n"
+"Version: %s\n" 
+"\n"
+"	-h	help\n"
+"	-i	input (stdin)\n"
+"	-s	stats (stderr)\n"
+"	-t	trim char (none)\n"
+"	-o	output bam prefix\n"
+"	-b      writes reads that were removed (bad reads) to this file, if specified\n"
+"	-e	save all equal alignments\n"
+"	-m	save equal only if edit distance is smaller\n"
+"	-f	bam file to filter input against\n"
+"\n"
+"For each read in the input bam, searches all the filters.  If an analogous read in a filter has\n"
+"a higher mapping quality, then the read from the input bam is discarded.\n"
+"\n"
+        ,f);
+}
+
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
@@ -53,13 +78,15 @@ void usage(FILE *f);
 
 int debug=0;
 int main(int argc, char **argv) {
-	char c, *in=NULL, *out=NULL, *err=NULL, trimchar = '\0';
+  char c, *in=NULL, *out=NULL, *err=NULL, *bad=NULL, trimchar = '\0';
 	char *filter[MAX_F];
 	int nfilter = 0, saveeq = 0, savenm = 0;
 
-        while ( (c = getopt (argc, argv, "demo:i:s:f:t:")) != -1) {
+
+        while ( (c = getopt (argc, argv, "demo:i:s:f:b:t:")) != -1) {
                 switch (c) {
                 case 'd': ++debug; break;
+                case 'b': bad=optarg; break;
                 case 'o': out=optarg; break;
                 case 'e': saveeq=1; break;
                 case 'm': savenm=1; break;
@@ -91,6 +118,11 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
+	if (!out) {
+		usage(stderr);
+		return 1;
+	}
+
 	FILE *ferr=stderr;
 	if (err) {
 		fprintf(stderr,"Opening %s\n",err);
@@ -106,6 +138,7 @@ int main(int argc, char **argv) {
         	fprintf(stderr, "Error reading '%s': %s\n", in, strerror(errno));	
 		return 1;
 	}
+
 
 	google::sparse_hash_map<std::string, mapq> pmap;
 	int i;
@@ -139,8 +172,15 @@ int main(int argc, char **argv) {
 	RefVector references = inbam.GetReferenceData();
 
 	BamWriter writer;
+	BamWriter badwriter;
+
 	if ( !writer.Open(out, header, references) ) {
                 fprintf(stderr, "Error writing '%s': %s", out, strerror(errno));
+		return 1;
+	}
+	
+	if ( !badwriter.Open(bad, header, references) ) {
+                fprintf(stderr, "Error writing '%s': %s", bad, strerror(errno));
 		return 1;
 	}
 
@@ -148,6 +188,7 @@ int main(int argc, char **argv) {
 	BamAlignment al;
 	if (debug) fprintf(stderr, "Filtering\n");
 	int na=0, gt=0, eq=0, lt=0, to=0, eq_r=0, eq_s=0;
+
 	while ( inbam.GetNextAlignment(al) ) {
 		++to;
 		try {
@@ -170,6 +211,7 @@ int main(int argc, char **argv) {
 						writer.SaveAlignment(al);
 						++eq_s;					
 					} else {
+					  badwriter.SaveAlignment(al);
 						++eq_r;					
 					}
 				} else if (nm == it->second.nm) {
@@ -177,13 +219,16 @@ int main(int argc, char **argv) {
 						writer.SaveAlignment(al);
 						++eq_s;
 					} else {
+					  badwriter.SaveAlignment(al);
 						++eq_r;					
 					}
 				} else {
+				  badwriter.SaveAlignment(al);
 					++eq_r;					
 				}
 			} else {
 				// lt
+			  badwriter.SaveAlignment(al);
 				++lt;
 			}
 		} catch (...) {
@@ -198,21 +243,3 @@ int main(int argc, char **argv) {
 	return 0;
 }
 
-void usage(FILE *f) {
-        fputs(
-"Usage: bam-filter [-h] [-i IN] [-o OUT] [-s STAT] -f FILTER1 [-f FITLER2...]\n"
-"\n"
-"	-h	help\n"
-"	-i	input (stdin)\n"
-"	-o	output (stout)\n"
-"	-s	stats (stderr)\n"
-"	-t	trim char (none)\n"
-"	-e	save all equal alignments\n"
-"	-m	save equal only if edit distance is smaller\n"
-"	-f	bam file to filter input against\n"
-"\n"
-"For each probe id in the input bam, searches all the filters.  If any have\n"
-"a higher mapping quality, then the alignment is discared.\n"
-"\n"
-        ,f);
-}
