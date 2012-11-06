@@ -83,3 +83,7 @@ varcall: varcall.cpp fastq-lib.cpp tidx/tidx-lib.cpp
 
 fastq-stats: fastq-stats.cpp fastq-lib.cpp gcModel.c
 	$(CC) $(CFLAGS) fastq-lib.cpp gcModel.c -o $@ $<
+
+bam-filter:  bam-filter.cpp 
+	$(CC) $(CFLAGS) fastq-lib.cpp -o $@  $< -lbamtools 
+
