@@ -18,12 +18,15 @@ my $o = shift @ARGV;
 
 die "Usage: $0 [options] <input-bam> <output-bam>
 
-Convert a bam file into a file suitable for passing to RSEM.
+Convert a bam file into a file similar to bowtie output
+
+This is suitable for passing to RSEM if (-n, -f) are used, 
+or to EXPRESS (without -n or -f).
 
     -s  sort by id, use if the source bam is not sorted by id
 
-    -f  gene index (samtools faidx results), used to discard XA
-        alignments that go beyone the edge of the file (bug in 
+    -f  gene index (samtools faidx'ed fasta), used to discard XA
+        alignments that go beyond the edge of the file (bug in 
         some versions of sampe can do this)
 
     -n  no indels ... removes indels and soft-clip information
