@@ -173,7 +173,10 @@ int main( int argc, char**argv ) {
 	char c;
 	optind = 0;
 	char *filename = NULL;
-	if(argc < 2) {usage(stdout); return 0;}
+
+// bad change to working syntax... breaks things!
+//	if(argc < 2) {usage(stdout); return 0;}
+
 	while ( (c = getopt (argc, argv, "?DdL:g:x:b:c:w:s:h")) != -1) {
 		switch (c) {
 			case 'c': cyclemax = atoi(optarg); break;
