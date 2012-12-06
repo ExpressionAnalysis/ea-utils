@@ -1,6 +1,6 @@
 #!/bin/bash
 
-g++ fastq-mcf.c fastq-lib.cpp -o fastq-mcf.ex
+g++ -I. fastq-mcf.c fastq-lib.cpp -o fastq-mcf.ex
 
 ok=/opt/bin/fastq-mcf
 new=./fastq-mcf.ex
@@ -30,11 +30,12 @@ for v in $list; do
 	${prog} -l 15 test.fa test1.fq -S -o test5.$v.out > test5.$v.err || echo err during 5 $v
 # check gzipping
 	${prog} -l 15 test.fa test1.fq -o test6.$v.out.gz > test6.$v.err || echo err during 6 $v
+    ${prog} -0 -D 20 n/a test-mcf-dup.fq > test7.$v.out || echo err during 7 $v
 	mv test5.$v.out.skip test5.$v.out
 done
 set +o xtrace	
 
-for n in test1 test2 test3 test4 test5; do
+for n in test1 test2 test3 test4 test5 test7; do
 	echo $n
 	diff $n.new.out $n.ok.out
 	[[ -e $n.ok.err ]] && diff $n.new.err $n.ok.err

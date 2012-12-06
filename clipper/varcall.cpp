@@ -585,10 +585,21 @@ void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref) {
 
 		is_popen = 1;
 	} else {
-		fin = fopen(in[0], "r");
-		if (!fin) {
-			warn("%s: %s", in[0], strerror(errno));
-		}
+        if (!strcmp(in[0], "-")) {
+            fin=stdin;
+        } else {
+            if (!strcmp(fext(in[0]), ".gz")) {
+                string gunz = string_format("gunzip -c '%s'", in[0]);
+                fin = popen(gunz.c_str(), "r");
+                is_popen = 1;
+            } else {
+                fin = fopen(in[0], "r");
+            }
+            if (!fin) {
+                warn("%s: %s", in[0], strerror(errno));
+                exit(1);
+            }
+        }
 	}
 
     line l; meminit(l);
