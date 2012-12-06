@@ -26,7 +26,11 @@ See "void usage" below for usage.
 
 */
 
+#include <google/sparse_hash_map> // or sparse_hash_set, dense_hash_map, ...
+#include <string>
+
 #include "fastq-lib.h"
+
 
 #define MAX_ADAPTER_NUM 1000
 #define SCANLEN 15
@@ -77,6 +81,8 @@ int qf2_mean=0, qf2_max_ns=0, qf2_xgt_num=0, qf2_xgt_min=0;
 // phred used
 char phred = 0;
 
+google::sparse_hash_map <std::string, int> dupset;
+
 int main (int argc, char **argv) {
 	char c;
 	bool eol;
@@ -95,7 +101,11 @@ int main (int argc, char **argv) {
 	int qthr = 7;				// remove end of-read with quality < qthr
 	int qwin = 1;				// remove end of read with mean quality < qthr
 	int ilv3 = -1;
+	int duplen = 0;
+	int dupskip = 0;
     bool noexec = 0;
+
+    dupset.set_deleted_key("<>");
 
 	int i;
 
@@ -123,7 +133,7 @@ int main (int argc, char **argv) {
     };
 
     int option_index = 0;
-    while (	(c = getopt_long(argc, argv, "-nf0uUVSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:",long_options,&option_index)) != -1) {
+    while (	(c = getopt_long(argc, argv, "-nf0uUVSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:D:",long_options,&option_index)) != -1) {
 		switch (c) {
 			case '\0':
                 { 
@@ -182,6 +192,7 @@ int main (int argc, char **argv) {
 			case 'V': printf("Revision: %d\n", SVNREV); return 0; break;
 			case 'p': pctdiff = atoi(optarg); break;
 			case 'P': phred = (char) atoi(optarg); break;
+			case 'D': duplen = atoi(optarg); break;
 			case 'h': usage(stdout); return 1; 
 			case 'o': if (!o_n < MAX_FILES) 
 						  ofil[o_n++] = optarg;
@@ -210,6 +221,10 @@ int main (int argc, char **argv) {
 					  return 1;
 		}
 	}
+
+    if (duplen > 75) {
+		fprintf(stderr, "WARNING: duplen of %d is probably too long, do you really need it?\n", duplen);
+    }
 
 	if (i_n == 1 && o_n == 0) {
 		ofil[o_n++]="-";
@@ -747,6 +762,8 @@ int main (int argc, char **argv) {
 		}
 	}
 
+    google::sparse_hash_map <std::string, int>::const_iterator lookup_it;
+
 	while (read_ok=read_fq(fin[0], nrec, &fq[0])) {
 		for (i=1;i<i_n;++i) {
 			int mok=read_fq(fin[i], nrec, &fq[i]);
@@ -974,11 +991,36 @@ int main (int argc, char **argv) {
 					}
 				}
                 if (avgns[f]>=11 && !evalqual(fq[f],f)) {
-                    skip = 1;
+                    skip = 2;
                 }
 			}
-            if (!skip) {
+
+            if (duplen > 0 && !skip) {
+                // lookup dupset
                 for (f=0;f<o_n;++f) {
+                    if (avgns[f]>=11) {
+                        char t;
+                        if (fq[f].seq.a > duplen) {
+                            // truncate if needed
+                            t = fq[f].seq.s[duplen];
+                            fq[f].seq.s[duplen] = '\0';
+                        }
+                        lookup_it = dupset.find(fq[f].seq.s);
+                        if (lookup_it != dupset.end()) {
+                            ++dupskip;
+                            skip=1;
+                        } else {
+                            dupset[fq[f].seq.s]=1;
+                        }
+                        if (fq[f].seq.a > duplen) {
+                            // restore full length
+                            fq[f].seq.s[duplen] = t;
+                        }
+                    }
+                }
+            }
+            if (!skip) {
+               for (f=0;f<o_n;++f) {
                     fputs(fq[f].id.s,fout[f]);
                     fputs(fq[f].seq.s,fout[f]);
                     fputc('\n',fout[f]);
@@ -988,7 +1030,7 @@ int main (int argc, char **argv) {
                 }
             } else {
                 if (skipb) saveskip(fskip, i_n, fq);
-                ++nfiltered;
+                if (skip==2) ++nfiltered;
             }
 		} else {
 			if (skipb) saveskip(fskip, i_n, fq);
@@ -1006,6 +1048,8 @@ int main (int argc, char **argv) {
 	fprintf(fstat, "Too short after clip: %d\n", ntooshort);
     if (nfiltered)
 	fprintf(fstat, "Filtered on quality: %d\n", nfiltered);
+    if (dupskip)
+	fprintf(fstat, "Filtered on duplicates: %d\n", dupskip);
 
 	int f;
 	if (i_n == 1) {
@@ -1094,6 +1138,7 @@ void usage(FILE *f, const char *msg) {
 "    -p N     Maximum adapter difference percentage (10)\n"
 "    -l N     Minimum remaining sequence length (19)\n"
 "    -L N     Maximum remaining sequence length (none)\n"
+"    -D N     Remove duplicate reads : Read_1 has an identical N bases (0)\n"
 "    -k N     sKew percentage-less-than causing cycle removal (2)\n"
 "    -x N     'N' (Bad read) percentage causing cycle removal (20)\n"
 "    -q N     quality threshold causing base removal (10)\n"
@@ -1156,7 +1201,12 @@ void usage(FILE *f, const char *msg) {
 "If any nucleotide is less than the skew percentage, then the\n"
 "whole cycle is removed.  Disable for methyl-seq, etc\n"
 "\n"
-"Set the skew (-k) or N-pct (-x) to 0 to turn it off\n"
+"Set the skew (-k) or N-pct (-x) to 0 to turn it off (should be done\n"
+"for miRNA, amplicon and other low-complexity situations!)\n"
+"\n"
+"Duplicate read filtering is appropriate for assembly tasks, and\n"
+"never when read length < expected coverage.  -D 50 will use\n"
+"4.5GB RAM on 100m DNA reads - be careful. Great for RNA assembly.\n"
 "\n"
 "*Quality filters are evaluated after clipping/trimming\n"
 	);
