@@ -82,6 +82,7 @@ int qf2_mean=0, qf2_max_ns=0, qf2_xgt_num=0, qf2_xgt_min=0;
 char phred = 0;
 
 google::sparse_hash_map <std::string, int> dupset;
+int dupmax = 40000000;              // this should be configurable, but right now it isn't
 
 int main (int argc, char **argv) {
 	char c;
@@ -997,7 +998,7 @@ int main (int argc, char **argv) {
 
             if (duplen > 0 && !skip) {
                 // lookup dupset
-                for (f=0;f<o_n;++f) {
+                for (f=0;!skip&&f<o_n;++f) {
                     if (avgns[f]>=11) {
                         char t;
                         if (fq[f].seq.a > duplen) {
@@ -1010,7 +1011,9 @@ int main (int argc, char **argv) {
                             ++dupskip;
                             skip=1;
                         } else {
-                            dupset[fq[f].seq.s]=1;
+                            if (dupset.size() < dupmax) {
+                                dupset[fq[f].seq.s]=1;
+                            }
                         }
                         if (fq[f].seq.a > duplen) {
                             // restore full length
