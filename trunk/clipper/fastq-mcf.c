@@ -1306,3 +1306,5 @@ bool evalqual(struct fq &fq, int file_num) {
     }
     return true;
 }
+
+/* vim: set noai ts=4 sw=4: */
