@@ -5,6 +5,9 @@ CC=g++
 PREFIX?=/opt
 CFLAGS?=-O3 -I. 
 CPPFLAGS?=-O3 -I.
+# for debugging:
+# CFLAGS?=-g -I. 
+# CPPFLAGS?=-g -I.
 
 PKG=ea-utils
 REL := $(shell svnversion 2>/dev/null | perl -ne 'print $$1 if /:(\d+)/' )
