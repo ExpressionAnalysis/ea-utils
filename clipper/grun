@@ -2425,7 +2425,7 @@ sub showjobs {
         my $r;
 #        $r .= sprintf "%s\t%s\t%s\t%s\t%s\n", 'JobID','User','Host','Cwd','Command';
 
-
+        my $now = time();
         opendir(D,"$conf{spool}/jobs");
         while(my $jid=readdir(D)) {
 		next if $jid =~ /\.ip$/;
@@ -2446,12 +2446,14 @@ sub showjobs {
 					$stat = $node[1]->{hostname}; chomp $stat;
                         		$job->{host} = $stat;
 				}
+			    $job->{start} = (stat($f))[9];
 			}
 			# trim for display
 			for (@cmd) {
 				s/^\s+//g;
 				s/\n\s*/;/g;
 			}
+			$job->{wait} = ($job->{start}?$job->{start}:$now)-$job->{time};
 			$job->{jid} = $jid;
 			$job->{stat} = $stat;
 			$job->{cpus} = 1 if ! $job->{cpus};
