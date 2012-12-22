@@ -229,7 +229,7 @@ double pct_depth=0;
 double pct_qdepth=0;
 double global_error_rate=0;
 double max_phred;
-int total_locii=0;
+int total_locii=-1;
 double pct_balance=0;
 char *debug_xchr=NULL;
 int debug_xpos=0;
@@ -334,10 +334,6 @@ int main(int argc, char **argv) {
         var_f = stdout;
         varsum_f = stderr;
     } 
-
-    if (eav_f) {
-        fprintf(eav_f,"chr\tpos\tref\tdepth\tnum_states\ttop_consensus\ttop_freq\tvar_base\tvar_depth\tvar_qual\tvar_strands\tforward_strands\treverse_strands\n");
-    }
 
 	if (umindepth > minsampdepth) {
 		minsampdepth=umindepth;
@@ -482,14 +478,20 @@ int main(int argc, char **argv) {
                 } else if (!strcasecmp(l.s, "noise mean")) {
                     if (global_error_rate<=0) global_error_rate=atof(val); 
                 } else if (!strcasecmp(l.s, "locii >= min depth")) {
-                    if (total_locii<=0) total_locii=atoi(val); 
+                    if (total_locii<0) total_locii=atoi(val); 
                 } else if (!strcasecmp(l.s, "alpha")) {
                     if (alpha<=0) alpha=atof(val); 
                 }
             }
         }
     }
-    if (total_locii<=0) total_locii=DEFAULT_LOCII;
+
+    if (total_locii<0) total_locii=DEFAULT_LOCII;
+    if (total_locii==0) total_locii=1;          // no adjustment
+
+    if (eav_f) {
+        fprintf(eav_f,"chr\tpos\tref\tdepth\tnum_states\ttop_consensus\ttop_freq\tvar_base\tvar_depth\tvar_qual\tvar_strands\tforward_strands\treverse_strands\t%cval\n",total_locii>1?'e':'p');
+    }
 
 	if (do_varcall) {
 		if (umindepth) min_depth=umindepth;
@@ -498,26 +500,26 @@ int main(int argc, char **argv) {
 		if (uminidepth) min_idepth=uminidepth;
 
 		if (!min_depth || (!pct_depth  && !pct_qdepth)) {
-			warn("warning\toutputting all variations, no minimum depths specified\n");
+			fprintf(varsum_f,"warning\toutputting all variations, no minimum depths specified\n");
 		}
 
-		warn("version\tvarcall-%s\n", VERSION);
-		warn("min depth\t%d\n", min_depth);
-		warn("min call depth\t%d\n", min_adepth);
-		warn("alpha\t%f\n", alpha);
-		warn("min pct qual\t%d\n", (int)(100*pct_qdepth));
+		fprintf(varsum_f,"version\tvarcall-%s\n", VERSION);
+		fprintf(varsum_f,"min depth\t%d\n", min_depth);
+		fprintf(varsum_f,"min call depth\t%d\n", min_adepth);
+		fprintf(varsum_f,"alpha\t%f\n", alpha);
+		fprintf(varsum_f,"min pct qual\t%d\n", (int)(100*pct_qdepth));
 
-		warn("min balance\t%d\n", (int)(100*pct_balance));
-		warn("artifact filter\t%f\n", artifact_filter);
-		warn("min qual\t%d\n", min_qual);
-		warn("min map qual\t%d\n", min_mapq);
-		warn("error rate\t%f\n", global_error_rate);
-		warn("locii used for adjustment\t%d\n", total_locii);
+		fprintf(varsum_f,"min balance\t%d\n", (int)(100*pct_balance));
+		fprintf(varsum_f,"artifact filter\t%f\n", artifact_filter);
+		fprintf(varsum_f,"min qual\t%d\n", min_qual);
+		fprintf(varsum_f,"min map qual\t%d\n", min_mapq);
+		fprintf(varsum_f,"error rate\t%f\n", global_error_rate);
+		fprintf(varsum_f,"locii used for adjustment\t%d\n", total_locii);
 
 		VarCallVisitor vcall;
 
         if (repeat_filter > 0) {
-		    warn("homopolymer filter\t%d\n", repeat_filter);
+		    fprintf(varsum_f,"homopolymer filter\t%d\n", repeat_filter);
             vcall.WinMax=repeat_filter+repeat_filter+1;
         }
 
@@ -529,12 +531,12 @@ int main(int argc, char **argv) {
 		parse_bams(vcall, in_n, in, ref);
 
         if (vcall.InputType == 'B') {
-        	warn("baq correct\t%s\n", (no_baq?"no":"yes"));
+        	fprintf(varsum_f,"baq correct\t%s\n", (no_baq?"no":"yes"));
         }
-        warn("locii\t%d\n", vcall.Locii);
-        warn("hom calls\t%d\n", vcall.Homs);
-        warn("het calls\t%d\n", vcall.Hets);
-        warn("locii below depth\t%d\n", vcall.SkippedDepth);
+        fprintf(varsum_f,"locii\t%d\n", vcall.Locii);
+        fprintf(varsum_f,"hom calls\t%d\n", vcall.Homs);
+        fprintf(varsum_f,"het calls\t%d\n", vcall.Hets);
+        fprintf(varsum_f,"locii below depth\t%d\n", vcall.SkippedDepth);
 	}
 }
 
