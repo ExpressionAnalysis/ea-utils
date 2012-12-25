@@ -366,8 +366,6 @@ int main( int argc, char**argv ) {
 	if(gc) {
 	  FILE *myfile;
 	  myfile = fopen(gc_outfile, "w");
-	  fprintf(myfile, "pct-GC cycle-max\t%d\n", gcCyclemax);
-	  fprintf(myfile, "Mean-pct-gc\t%.2f\n", 100.0 * gcSum / gcTotal);
 	  gcPrintDistribution(myfile);
 	  gcClose();
 	}
@@ -558,7 +556,14 @@ int main( int argc, char**argv ) {
 	printf("qual max\t%d\n", qualmax-phred);
 	printf("qual mean\t%.4f\n", ((double)qualsum/nbase)-phred);
 	printf("qual stdev\t%.4f\n", std_dev((double)nbase,qualsum,qualssq));
+
 	
+	if(gc) {
+        // put these where they belong
+        printf("pct-gc cycle-max\t%d\n", gcCyclemax);
+        printf("pct-gc mean\t%.2f\n", 100.0 * gcSum / gcTotal);
+    }
+
 	printf("%%A\t%.4f\n", ((double)ACGTN_count[T_A]/nbase*100));
 	printf("%%C\t%.4f\n", ((double)ACGTN_count[T_C]/nbase*100));
 	printf("%%G\t%.4f\n", ((double)ACGTN_count[T_G]/nbase*100));
