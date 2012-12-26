@@ -1049,6 +1049,6 @@ void usage(FILE *f) {
 "-v C        Verify that mated id's match up to character C (Use ' ' for illumina)\n"
 "-m N        Allow up to N mismatches, as long as they are unique (1)\n"
 "-d N        Require a minimum distance of N between the best and next best (2)\n"
-"-q N        Require a minimum phred-scaled quality of N to accept a barcode base (0)"
+"-q N        Require a minimum phred quality of N to accept a barcode base (0)\n"
 	,f);
 }
