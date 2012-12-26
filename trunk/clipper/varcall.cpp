@@ -1112,6 +1112,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 						if (maxc >= min_idepth && maxc >= min_adepth) {
                             // only calls 1 indel at a given position
                             if (p.RepeatCount < repeat_filter) {
+                                // maybe use rms here... see if it helps
                                 int mean_qual = p.Calls[i].qual/p.Calls[i].depth();
                                 double err_rate = mean_qual < max_phred ? pow(10,-mean_qual/10.0) : global_error_rate;
                                 // expected number of non-reference = error_rate*depth
