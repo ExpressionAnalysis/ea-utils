@@ -44,7 +44,7 @@ THE SOFTWARE.
 
 #include "fastq-lib.h"
 
-const char * VERSION = "0.9.0";
+const char * VERSION = "0.9.1";
 
 #define MIN_READ_LEN 20
 #define DEFAULT_LOCII 1000000
@@ -116,7 +116,7 @@ public:
 class vfinal {
 public:
     vfinal(vcall &c) :call(c) {max_idl_cnt=0; padj=1;};
-    vfinal & operator=(vfinal const&x) {call=x.call;max_idl_seq=x.max_idl_seq;max_idl_cnt=x.max_idl_cnt;padj=x.padj;}
+    vfinal & operator=(vfinal const&x) {max_idl_seq=x.max_idl_seq;max_idl_cnt=x.max_idl_cnt;padj=x.padj;}
     vcall &call;
     string max_idl_seq;
     int max_idl_cnt;
@@ -125,7 +125,7 @@ public:
 };
 
 bool hitolocall (const vcall &i,const vcall &j) {return ((i.depth())>(j.depth()));}
-bool sortreffirst (const vfinal &i,const vfinal &j) {return (i.call.is_ref&&!j.call.is_ref)||((!i.call.is_ref&&!j.call.is_ref) && ((i.call.depth())>(j.call.depth())));}
+bool sortreffirst (const vfinal &i,const vfinal &j) {return (i.call.is_ref&&!j.call.is_ref)||((i.call.is_ref==j.call.is_ref) && ((i.call.depth())>(j.call.depth())));}
 
 class Read {
 public:
@@ -1050,7 +1050,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 
     vector<vfinal> final_calls;
 	for (i=0;i<p.Calls.size();++i) {		// all calls
-//        printf("CALL TOP: depth:%d base: %c, pd: %d, calls: %d\n", (int) p.Calls[i].depth(), p.Calls[i].base, p.Depth, p.Calls.size());
+//        printf("CALL TOP: depth:%d base: %c, pd: %d, calls: %d\n", (int) p.Calls[i].depth(), p.Calls[i].base, p.Depth, (int) p.Calls.size());
 	
 		double pct = (double) p.Calls[i].depth()/p.Depth;
 		double qpct = (double) p.Calls[i].qual/p.TotQual;
@@ -1115,13 +1115,13 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                                 int mean_qual = p.Calls[i].qual/p.Calls[i].depth();
                                 double err_rate = mean_qual < max_phred ? pow(10,-mean_qual/10.0) : global_error_rate;
                                 // expected number of non-reference = error_rate*depth
-                                double pval=gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
+                                double pval=(p.Depth*err_rate==0)?0:gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
                                 double padj=total_locii ? pval*total_locii : pval;           // multiple-testing adjustment
 
                                 if (padj <= alpha) {
                                     vfinal final(p.Calls[i]);
                              
-                                    padj=max(pow(10,total_locii*-p.Calls[i].mq_sum/10.0),padj);      // never report as better than the mapping quality
+                                    padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report as better than the mapping quality
 
                                     if (need_out == -1) 
                                         need_out = i;
@@ -1157,17 +1157,16 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                         int mean_qual = p.Calls[i].qual/p.Calls[i].depth();
                         double err_rate = mean_qual < max_phred ? pow(10,-mean_qual/10.0) : global_error_rate;
                         // expected number of non-reference bases at this position is error_rate*depth
-                        double pval=gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
+                        double pval=(p.Depth*err_rate==0)?0:gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
                         double padj=total_locii ? pval*total_locii : pval;           // multiple-testing adjustment
 
                         if (padj <= alpha) {
-                            padj=max(pow(10,total_locii*-p.Calls[i].mq_sum/10.0),padj);      // never report as better than the mapping quality
+                            padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report as better than the mapping quality
 
                             if (!p.Calls[i].is_ref || debug_xpos) {
                                 if (need_out == -1)
                                     need_out = i;
                             }
-
                             vfinal final(p.Calls[i]);
                             final.padj=padj;
                             final_calls.push_back(final);
@@ -1189,7 +1188,13 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 
 	if (need_out>=0||debug_xpos) {
 
-	    sort(final_calls.begin(), final_calls.end(), sortreffirst);
+        if (final_calls.size() > 1){
+            if(final_calls[1].call.is_ref) {
+                vfinal tmp=final_calls[1];
+                final_calls[1]=final_calls[0];
+                final_calls[0]=tmp;
+            }
+        }
 
 //        printf("allele_count: %d\n", (int) final_calls.size());
 
