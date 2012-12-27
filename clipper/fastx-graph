@@ -1,0 +1,136 @@
+#!/usr/bin/env Rscript
+
+# Copyright (c) 2011 Expression Analysis / Gunjan Hariani, Erik Aronesty
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+# 
+# $Id: fastx-graph 525 2012-12-25 19:41:22Z earonesty $
+ 
+if (!require(getopt)) {
+    write(c("Installing package on:",system("hostname",intern=T)),file=stderr())
+    install.packages('getopt',repos='http://R-Forge.R-project.org')
+    # will die if it fails at this point
+    library(getopt)
+}
+
+if (!require("Hmisc")) {
+    write(c("Installing package on:",system("hostname",intern=T)),file=stderr())
+    install.packages('Hmisc',repos='http://R-Forge.R-project.org')
+    # will die if it fails at this point
+    library("Hmisc")
+}
+
+spec <- matrix(c(
+        'inf'     , 'i', 1, "character", "file from fastq-stats -x (required)",
+        'gcf'     , 'g', 1, "character", "input gc content file (optional)",
+        'outf'    , 'o', 1, "character", "output filename (optional)",
+        'help'   , 'h', 0, "logical",   "this help"
+),ncol=5,byrow=T)
+
+opt = getopt(spec);
+
+if (!is.null(opt$help) || is.null(opt$inf)) {
+    cat(paste(getopt(spec, usage=T),"\n"));
+    q();
+}
+
+in.file <- opt$inf
+gc.file <- opt$gcf
+out.file <- opt$outf
+
+fastx <- read.table(in.file,sep="\t",header=T,as.is=T)
+
+# output is in, minus txt, plus png
+if (is.null(out.file)) {
+    in.file <- gsub(".txt$","",in.file,perl=T)
+    out.file <- paste(in.file,".png",sep="")
+}
+
+# correct for bug in R if the file has a % sign in it
+out.file <- gsub("%","%%",out.file)
+
+png(out.file,width=1000, height=500)
+
+par(mar=c(4,3,5,5),xaxs="i",yaxs="i",xpd=T)
+plot(c(0,0),pch="",ylim=c(min(c(0,fastx$lW)),max(41,fastx$rW)),xlim=c(0,(nrow(fastx)+1)),
+	xlab="",ylab="",las=2,cex.axis=.85,cex.lab=.85,xaxt="n")
+
+lims <- par("xaxp")[1:2] 
+major.ticks <- pretty(lims,n=par("xaxp")[3]) 
+minor.tick(nx=(major.ticks[2]-major.ticks[1]),ny=10)
+
+minor.ticks <- 1:nrow(fastx)
+mtext("Cycle",side=3,line=3,cex=.85)
+axis(1,at=major.ticks,cex.axis=.85,labels=F)
+axis(3,at=major.ticks,cex.axis=.85,labels=F)
+axis(3,at=minor.ticks,tcl=par("tcl")*0.5,labels=minor.ticks,cex.axis=.80,las=3) 
+
+colnames(fastx) <- c("column","count","min","max","sum","mean","Q1","med",
+			"Q3","IQR","lW","rW","A_count","C_count","G_count",
+			"T_count","N_count","Max_count")
+
+for(i in 1:nrow(fastx)) {
+	par(new=T)
+	rect(fastx$column[i]-.35,fastx$Q1[i],fastx$column[i]+0.35,fastx$Q3[i],col="gray")
+	segments(fastx$column[i]-.35,fastx$med[i],fastx$column[i]+0.35,fastx$med[i],col="red",lwd=1.5)
+	segments(fastx$column[i],fastx$lW[i],fastx$column[i],fastx$Q1[i],lty="dashed")
+	segments(fastx$column[i],fastx$Q3[i],fastx$column[i],fastx$rW[i],lty="dashed")
+	segments(fastx$column[i]-.35,fastx$lW[i],fastx$column[i]+0.35,fastx$lW[i])
+	segments(fastx$column[i]-.35,fastx$rW[i],fastx$column[i]+0.35,fastx$rW[i])
+}
+
+par(new=T)
+tots<-fastx$N_count+fastx$T_count+fastx$G_count+fastx$C_count+fastx$A_count
+plot(tots,col="gray",xaxt="n",yaxt="n",xlab="",ylab="",pch="+",ylim=c(min(tots),max(tots)))
+lines(fastx$N_count+fastx$T_count+fastx$G_count+fastx$C_count+fastx$A_count,col="gray",xaxt="n",yaxt="n",xlab="",ylab="", lty=2)
+
+par(new=T)
+plot(fastx$column,fastx$A_count*100/fastx$count,col="red",type="l",xaxt="n",yaxt="n",xlab="",ylab="",
+			ylim=c(0,100),lwd=2)
+par(new=T)
+plot(fastx$column,fastx$C_count*100/fastx$count,col="blue",type="l",xaxt="n",yaxt="n",xlab="",ylab="",
+			ylim=c(0,100),lwd=2)
+par(new=T)
+plot(fastx$column,fastx$G_count*100/fastx$count,col="green",type="l",xaxt="n",yaxt="n",xlab="",ylab="",
+			ylim=c(0,100),lwd=2)
+par(new=T)
+plot(fastx$column,fastx$T_count*100/fastx$count,col="black",type="l",xaxt="n",yaxt="n",xlab="",ylab="",
+			ylim=c(0,100),lwd=2)
+par(new=T)
+barplot(fastx$N_count*100/fastx$count,col="orange",xaxt="n",yaxt="n",xlab="",ylab="",
+			ylim=c(0,100))
+
+axis(4,at=seq(0,100,25),cex.axis=.85)
+mtext("Pct Base Distribution",side=4,line=3,cex=.85)
+mtext("Base Quality",side=2,line=2,cex=.85)
+legend(0,-4,col=c("red","blue","green","black","orange"),lty=1,
+	legend=c("A","C","G","T","N"),cex=.70,horiz=T,lwd=2) 
+
+if(!is.null(gc.file)) {
+	GC <- read.table(gc.file,sep="\t",header=T,as.is=T,skip=2)
+	par(new=T)
+	par(fig=c(0.1,0.2,0.45,0.60))
+	par(mar=c(0,0,1,0))
+	plot(GC$pct_GC,GC$Count,type="l",xaxt="n",yaxt="n",
+			main="%GC per read",cex.main=.90)
+	axis(1,seq(0,100,20),labels=seq(0,100,20),las=2,tck=-0.1,cex.axis=.75)
+}
+
+
+graphics.off()
