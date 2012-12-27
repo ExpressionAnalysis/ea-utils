@@ -1,4 +1,4 @@
-#!/usr/bin/env Rscript
+#!/usr/bin/Rscript --vanilla
 
 # Copyright (c) 2011 Expression Analysis / Gunjan Hariani, Erik Aronesty
 # 
@@ -37,22 +37,22 @@ if (!require("Hmisc")) {
 }
 
 spec <- matrix(c(
-        'inf'     , 'i', 1, "character", "file from fastq-stats -x (required)",
-        'gcf'     , 'g', 1, "character", "input gc content file (optional)",
-        'outf'    , 'o', 1, "character", "output filename (optional)",
+        'input'  , 'i', 1, "character", "file from fastq-stats -x (required)",
+        'gc'     , 'G', 1, "character", "input gc content file (optional)",
+        'out'    , 'o', 1, "character", "output filename (optional)",
         'help'   , 'h', 0, "logical",   "this help"
 ),ncol=5,byrow=T)
 
 opt = getopt(spec);
 
-if (!is.null(opt$help) || is.null(opt$inf)) {
-    cat(paste(getopt(spec, usage=T),"\n"));
+if (!is.null(opt$help) || is.null(opt$input)) {
+    cat(paste(getopt(spec, usage=T, command="fastx-graph"),"\n"));
     q();
 }
 
-in.file <- opt$inf
-gc.file <- opt$gcf
-out.file <- opt$outf
+in.file <- opt$input
+gc.file <- opt$gc
+out.file <- opt$out
 
 fastx <- read.table(in.file,sep="\t",header=T,as.is=T)
 
@@ -123,11 +123,20 @@ legend(0,-4,col=c("red","blue","green","black","orange"),lty=1,
 	legend=c("A","C","G","T","N"),cex=.70,horiz=T,lwd=2) 
 
 if(!is.null(gc.file)) {
-	GC <- read.table(gc.file,sep="\t",header=T,as.is=T,skip=2)
+	tmp <- read.table(gc.file,sep="\t",header=F,as.is=T)
+    if (tmp[1,1] == 'pct-GC') {
+        # silly legacy format
+	    GC <- read.table(gc.file,sep="\t",header=T,as.is=T,skip=3)
+    } else if (tmp[1,1] == 'pct_GC') {
+	    GC <- read.table(gc.file,sep="\t",header=T,as.is=T,skip=1)
+    } else {
+	    GC <- read.table(gc.file,sep="\t",header=T,as.is=T)
+    }
+    colnames(GC)=c("pct_gc", "count")
 	par(new=T)
 	par(fig=c(0.1,0.2,0.45,0.60))
 	par(mar=c(0,0,1,0))
-	plot(GC$pct_GC,GC$Count,type="l",xaxt="n",yaxt="n",
+	plot(GC$pct_gc,GC$count,type="l",xaxt="n",yaxt="n",
 			main="%GC per read",cex.main=.90)
 	axis(1,seq(0,100,20),labels=seq(0,100,20),las=2,tck=-0.1,cex.axis=.75)
 }
