@@ -46,8 +46,8 @@ Options:
     -0       Set all default parameters to zero/do nothing
     -U|u     Force disable/enable Illumina PF filtering (auto)
     -P N     Phred-scale (auto)
-    -R       Don't remove N's from the fronts/ends of reads
-    -n       Don't clip, just output what would be done
+    -R       Dont remove Ns from the fronts/ends of reads
+    -n       Dont clip, just output what would be done
     -C N     Number of reads to use for subsampling (300k)
     -S       Save all discarded reads to '.skip' files
     -d       Output lots of random debugging stuff
