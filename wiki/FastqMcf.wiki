@@ -20,41 +20,71 @@ usage: fastq-mcf [options] <adapters.fa> <reads.fq> [mates1.fq ...]
 
 Detects levels of adapter presence, computes likelihoods and
 locations (start, end) of the adapters.   Removes the adapter
-sequences from the fastq file, and sends it to stdout.
+sequences from the fastq file(s).
 
 Stats go to stderr, unless -o is specified.
+
+Specify -0 to turn off all default settings
 
 If you specify multiple 'paired-end' inputs, then a -o option is
 required for each.  IE: -o read1.clip.q -o read2.clip.fq
 
 Options:
- -h This help
- -o FIL Output file (stats to stdout)
- -s N.N Log scale for clip pct to threshold (2.5)
- -t N % occurance threshold before clipping (0.25)
- -m N Minimum clip length, overrides scaled auto (1)
- -p N Maximum adapter difference percentage (20)
- -l N Minimum remaining sequence length (15)
- -L N   Maximum sequence length (none)
- -k N sKew percentage causing trimming (2)
- -q N quality threshold causing trimming (10)
- -f force output, even if not much will be done
- -0     Set all trimming parameters to zero
- -U|u   Force disable/enable illumina PF filtering
- -P N phred-scale (64)
- -x N 'N' (Bad read) percentage causing trimming (10)
- -R      Don't remove N's from the fronts/ends of reads
- -n Don't clip, just output what would be done
- -C N   Number of reads to use for subsampling (200000)
- -d     Output lots of random debugging stuff
+    -h       This help
+    -o FIL   Output file (stats to stdout)
+    -s N.N   Log scale for adapter minimum-length-match (2.2)
+    -t N     % occurance threshold before adapter clipping (0.25)
+    -m N     Minimum clip length, overrides scaled auto (1)
+    -p N     Maximum adapter difference percentage (10)
+    -l N     Minimum remaining sequence length (19)
+    -L N     Maximum remaining sequence length (none)
+    -D N     Remove duplicate reads : Read_1 has an identical N bases (0)
+    -k N     sKew percentage-less-than causing cycle removal (2)
+    -x N     'N' (Bad read) percentage causing cycle removal (20)
+    -q N     quality threshold causing base removal (10)
+    -w N     window-size for quality trimming (1)
+    -0       Set all default parameters to zero/do nothing
+    -U|u     Force disable/enable Illumina PF filtering (auto)
+    -P N     Phred-scale (auto)
+    -R       Don't remove N's from the fronts/ends of reads
+    -n       Don't clip, just output what would be done
+    -C N     Number of reads to use for subsampling (300k)
+    -S       Save all discarded reads to '.skip' files
+    -d       Output lots of random debugging stuff
+
+Quality filtering options*:
+    --[mate-]qual-mean  NUM       Minimum mean quality score
+    --[mate-]qual-gt    NUM,THR   At least NUM quals > THR
+    --[mate-]max-ns     NUM       Maxmium N-calls in a read
+    --[mate-]min-len    NUM       Minimum remaining length (same as -l)
+
+If mate- prefix is used, then applies to second non-barcode read only
+
+Adapter files are 'fasta' formatted:
+
+Specify n/a to turn off adapter clipping, and just use filters
 
 Increasing the scale makes recognition-lengths longer, a scale
-of 100 will force full-length recognition.
+of 100 will force full-length recognition of adapters.
 
-Set the skew (-k) or N-pct (-x) to 100 or 0 to turn it off
+Adapter sequences with _5p in their label will match 'end's,
+and sequences with _3p in their label will match 'start's,
+otherwise the 'end' is auto-determined.
 
-Files named ".gz" are assumed to be compressed, and can be 
-read/written as long as "gzip" is in the path.
+Skew is when one cycle is poor, skewed towrd a particular base.
+If any nucleotide is less than the skew percentage, then the
+whole cycle is removed.  Disable for methyl-seq, etc
+
+Set the skew (-k) or N-pct (-x) to 0 to turn it off (should be done
+for miRNA, amplicon and other low-complexity situations!)
+
+Duplicate read filtering is appropriate for assembly tasks, and
+never when read length < expected coverage.  -D 50 will use
+4.5GB RAM on 100m DNA reads - be careful. Great for RNA assembly.
+
+Output files named *.gz will be compressed on-the-fly.
+
+*Quality filters are evaluated after clipping/trimming
 }}}
 
 == Notes ==
@@ -69,6 +99,6 @@ Adapter file format is fasta.  You can set it to /dev/null, and pass "-f" to do 
 
 == Notes ==
 
- * Default settings are probably too conservative when it comes to skewing and trimming. 
+ * Default settings are probably too conservative when it comes to trimming poor quality/detecting base-skew.
 
- * By default, it won't trim the "insides" of a paired-end read.   It also will no longer attempt to quality filter a barcode read.   No override for these, but I can't think of a reason to.
+ * It won't trim the "insides" of a paired-end read.   It also will no longer attempt to quality filter a barcode read.   No override for these, but I can't think of a reason to.
