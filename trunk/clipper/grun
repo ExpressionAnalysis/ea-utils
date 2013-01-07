@@ -2677,6 +2677,30 @@ sub startdaemon {
 	}
 	xlog("note", "Starting daemon as " . getpwuid($<));
 
+    my $limit = `bash -c "ulimit -v -f -t -m"`;
+
+    if (@{[($limit =~ m/unlimited$/mg)]}!=4) {
+        warn "Note: ulimit is not unlimited for daemon (" . join(',', $limit =~ m/\w+$/mg) . ")\n";
+    }
+
+    if ($conf{ulimit}) {
+        if (eval {require BSD::Resource;}) {
+            local @ARGV = split / /, $conf{ulimit};
+	        Getopt::Long::Configure qw(no_require_order no_ignore_case);
+            GetOptions(\%opt,"f=i","v=i","m=i","t=i");
+            if (@ARGV) {
+                die "Options @ARGV not supported by grun, use a regular ulimit wrapper";
+            }
+            no strict "subs";
+            BSD::Resource::setrlimit(BSD::Resource::RLIMIT_FSIZE(),$opt{f},$opt{f}) if ($opt{f});
+            BSD::Resource::setrlimit(BSD::Resource::RLIMIT_VMEM(),$opt{v},$opt{v}) if ($opt{v});
+            BSD::Resource::setrlimit(BSD::Resource::RLIMIT_RSS(),$opt{m},$opt{m}) if ($opt{m});
+            BSD::Resource::setrlimit(BSD::Resource::RLIMIT_CPU(),$opt{t},$opt{t}) if ($opt{t});
+        } else {
+            die "Please install BSD::Resource to use the 'ulimit' option in $def{config}\n"; 
+        }
+    }
+
 	if (!($gpid=fork)) {
 		die "Can't fork child process\n" if (! defined $gpid);
 
