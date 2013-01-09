@@ -270,6 +270,9 @@ int main( int argc, char**argv ) {
 			if(newFq.seq.n > lenmax) {
 				lenmax = newFq.seq.n;
 			}
+			if(newFq.seq.n < lenmin) {
+				lenmin = newFq.seq.n;
+			}
 			lensum += newFq.seq.n;
 			lenssq += newFq.seq.n*newFq.seq.n;
 		}
@@ -406,6 +409,7 @@ int main( int argc, char**argv ) {
 		if(nreads > 1) {
 			printf("len stdev\t%.4f\n", std_dev((double)nreads,lensum,lenssq));
 		}
+		printf("len min\t%d\n", lenmin);
 	} else {
 		printf("len\t%d\n",lenmax);
 	}
