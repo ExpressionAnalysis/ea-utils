@@ -9,3 +9,4 @@ r408    - updated fast-join docs, changed default mismatch to 8%
 r425    - fastq-mcf filtering options, multx verif char fixed
 r474    - RNAmode & coverage stats output
 r475    - fix paired-end forward/reverse counts
+r534    - -S can be before -R, also ver num increment
