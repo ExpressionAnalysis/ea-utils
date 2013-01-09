@@ -41,7 +41,7 @@
 
 #include "fastq-lib.h"
 
-const char * VERSION = "1.33";
+const char * VERSION = "1.34";
 
 using namespace std;
 
@@ -207,7 +207,7 @@ int main(int argc, char **argv) {
                 case 'B': inbam=1; break;
                 case 'A': max_chr=1000000; break;                               // max chrom
                 case 'R': rnafile=optarg;                                       // pass through
-                case 'r': max_chr=1000000; rnamode=1; histnum=60; break;
+                case 'r': max_chr=1000000; rnamode=1; if (histnum < 60) histnum=60; break;
                 case 'S': histnum=atoi(optarg); break;
                 case 'x': ext=optarg; break;
                 case 'M': newonly=1; break;
