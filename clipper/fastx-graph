@@ -95,10 +95,14 @@ for(i in 1:nrow(fastx)) {
 	segments(fastx$column[i]-.35,fastx$rW[i],fastx$column[i]+0.35,fastx$rW[i])
 }
 
-par(new=T)
+# if theres a significant difference
 tots<-fastx$N_count+fastx$T_count+fastx$G_count+fastx$C_count+fastx$A_count
-plot(tots,col="gray",xaxt="n",yaxt="n",xlab="",ylab="",pch="+",ylim=c(min(tots),max(tots)))
-lines(fastx$N_count+fastx$T_count+fastx$G_count+fastx$C_count+fastx$A_count,col="gray",xaxt="n",yaxt="n",xlab="",ylab="", lty=2)
+
+if (min(tots) < (max(tots)*.98)) {
+    par(new=T)
+    plot(tots,col="gray",xaxt="n",yaxt="n",xlab="",ylab="",pch="+",ylim=c(min(tots),max(tots)))
+    lines(fastx$N_count+fastx$T_count+fastx$G_count+fastx$C_count+fastx$A_count,col="gray",xaxt="n",yaxt="n",xlab="",ylab="", lty=2)
+}
 
 par(new=T)
 plot(fastx$column,fastx$A_count*100/fastx$count,col="red",type="l",xaxt="n",yaxt="n",xlab="",ylab="",
