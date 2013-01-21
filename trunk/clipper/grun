@@ -461,6 +461,7 @@ if ($env eq '*' || ($conf{env} && ($conf{env}->[0] eq '*')) ) {
 }
 
 $opt{user} = getpwuid($>);
+$opt{group}=$);
 $opt{umask} = umask();
 $opt{env}->{USER} = $opt{user};
 
@@ -1003,7 +1004,9 @@ sub process_message {
 		if (!defined($uid)) {
 			$err="User $opts->{user} is unknown on this machine, not executing";
 		}
-
+        if ($opts{group}) {
+            $gid=$opts{group};
+        }
 # expecting someone to come pick up output?
 		$io_wait{$opts->{id}}->{type} = 'stat' if $opts->{wait};	# status wait
 			$io_wait{$opts->{id}}->{type} = 'io' if $opts->{io};		# io wait
