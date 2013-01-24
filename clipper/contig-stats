@@ -8,6 +8,22 @@
 #
 #THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+# if this was a c program, i'd set this number higher
+$max_mers = 40000000;
+
+if (@ARGV > 1) {
+    for (@ARGV) {
+        if ( (stat($_))[9] > (stat("$_.stats"))[9] ) {
+            if (!fork) {
+                system("grun '$0 $_ > $_.stats'");
+                exit(0);
+            }
+        }
+    }
+    while (wait != -1) {};
+    exit(0);
+}
+
 $in = $ARGV[0];
 
 open(IN, $in) ||  die "$in:$!\n";
@@ -77,6 +93,7 @@ my $mer21 = 0;
 for (values(%mer)) {$mer21+=1 if $_>1};
 $mer21 = 100*$mer21/scalar(keys(%mer));
 printf "dup-mer-21\t%2.2f\n", $mer21;
+printf "dup-mer-cnt\t%d\n", $mers;
 
 
 sub summ  {
@@ -86,7 +103,15 @@ sub summ  {
 		$mx = $ln if $ln>$mx;
 		$mn = $ln if $ln<$mn || !$mn;
         for ($i=0;$i<length($seq)-21;++$i) {
-            ++$mer{substr($seq,$i,21)};
+            $tmp = substr($seq,$i,21);
+            if ($mers < $max_mers) {
+                if (!exists $mer{$tmp}) {
+                    ++$mers;
+                    ++$mer{$tmp};
+                } else {
+                    ++$mer{$tmp};
+                }
+            }
         }
 	}
 	push @ln, $ln;
