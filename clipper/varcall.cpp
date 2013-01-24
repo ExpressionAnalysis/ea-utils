@@ -224,7 +224,7 @@ bool hasdata(const string &file) {
 }
 
 
-int minsampdepth=10;
+int minsampdepth=20;
 double pct_depth=0;
 double pct_qdepth=0;
 double global_error_rate=0;
@@ -236,7 +236,7 @@ int debug_xpos=0;
 int min_depth=1;
 int min_mapq=0;
 int min_qual=3;
-int repeat_filter=8;
+int repeat_filter=7;
 double artifact_filter=1;
 int min_adepth=2;
 int min_idepth=3;
@@ -393,6 +393,9 @@ int main(int argc, char **argv) {
 
             double ins_nsum=0, ins_nssq=0, del_nsum=0, del_nssq=0;
             for (i=0;i<ncnt;++i) {
+                if (vstat.stats[i].depth < depth_q1) {
+                    continue;
+                }
                 nsum+=vstat.stats[i].noise;
                 nssq+=vstat.stats[i].noise*vstat.stats[i].noise;
                 dsum+=vstat.stats[i].depth;
@@ -472,6 +475,9 @@ int main(int argc, char **argv) {
             if (val=strchr(l.s, '\t')) {
                 *val='\0'; ++val;
                 if (!strcasecmp(l.s, "min depth")) {
+                    if (umindepth && umindepth > atoi(val)) {
+			            fprintf(varsum_f,"warning\tsampling depth was less than variation depth\n");
+                    }
                     if (!umindepth) umindepth=atoi(val); 
                 } else if (!strcasecmp(l.s, "min pct qual")) {
                     if (upctqdepth<=0) upctqdepth=atof(val); 
@@ -981,11 +987,15 @@ void VarCallVisitor::Visit(PileupSummary &p) {
         }
     }
 
+    // repeat counts are 1-based, not 0-based
+    ++lrc;
+    ++rrc;
+
     // maximum repeat count and associated base
     if (lrb == rrb ) {
         Win[vx].RepeatCount = lrc+rrc;
         Win[vx].RepeatBase = lrb;
-    } else if (lrb > rrb) {
+    } else if (lrc > rrc) {
         Win[vx].RepeatCount = lrc;
         Win[vx].RepeatBase = lrb;
     } else {
@@ -1321,6 +1331,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 		    fprintf(stderr,"xpos-skip-alpha\t%d\n",skipped_alpha);
             if (repeat_filter > 0) {
                 fprintf(stderr,"repeat-count\t%d\n",p.RepeatCount);
+                fprintf(stderr,"repeat-filter\t%d\n",repeat_filter);
                 fprintf(stderr,"repeat-base\t%c\n",p.RepeatBase);
             }
 			exit(0);
