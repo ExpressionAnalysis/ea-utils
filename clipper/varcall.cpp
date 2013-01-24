@@ -527,6 +527,8 @@ int main(int argc, char **argv) {
         if (repeat_filter > 0) {
 		    fprintf(varsum_f,"homopolymer filter\t%d\n", repeat_filter);
             vcall.WinMax=repeat_filter+repeat_filter+3;
+        } else {
+            vcall.WinMax=5;
         }
 
         if (vcf_f) {
@@ -823,8 +825,8 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
             Calls[j].mn_qual+=min(mq,q);
             Calls[j].mq_ssq+=mq*mq;
             Calls[j].mq_sum+=mq;
+            Calls[j].qual_ssq+=q*q;
             if (vcf_f) {
-                Calls[j].qual_ssq+=q*q;
                 if (mq == 0) 
                     Calls[j].mq0++; 
             }
@@ -924,7 +926,8 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 PileupSummary JunkSummary;
 
 void VarCallVisitor::Visit(PileupSummary &p) {
-    if (WinMax < 5) {
+    if (WinMax < 3) {
+        // no real window ... just go straight
         VisitX(p);
         return;
     }
@@ -1010,6 +1013,35 @@ void VarCallVisitor::Visit(PileupSummary &p) {
                 fprintf(stderr,"%c", Win[i].Base);
             }
             fprintf(stderr,"\n");
+        }
+    }
+
+    double drms = 0; 
+    if (vx < Win.size()-1) {
+        int i;
+		int dminus = b2i('-');
+		int dstar = b2i('*');
+
+        if (Win[vx].Calls.size() > dminus && Win[vx].Calls[dminus].depth() > 0) {
+            if (Win[vx+1].Calls.size() > dstar && Win[vx+1].Calls[dstar].depth() > 0) {
+                // baq adjustment works at the 'star' not at the 'indel', so adjust qual using the next locus
+               double adj=Win[vx+1].Calls[dstar].qual_rms()/(double)Win[vx].Calls[dminus].qual_rms();
+               if (debug_xpos) {
+                    if (Win[vx].Pos == debug_xpos && !strcmp(debug_xchr,Win[vx].Chr.data())) {
+                        fprintf(stderr,"xpos-adj-qual\t%d to %d (%f)\n", Win[vx].Calls[dminus].qual_rms(),Win[vx+1].Calls[dstar].qual_rms(), adj);
+                    }
+               }
+               Win[vx].Calls[dminus].qual *= adj; 
+               Win[vx].Calls[dminus].qual_ssq *= adj;
+            } else {    
+                vcall none;
+                if (debug_xpos) {
+                    if (Win[vx].Pos == debug_xpos && !strcmp(debug_xchr,Win[vx].Chr.data())) {
+                        fprintf(stderr,"xpos-skip-del-qual\t%d\n", Win[vx].Calls[dminus].depth());
+                    }
+                }
+                Win[vx].Calls[dminus] = none;
+            }
         }
     }
 
@@ -1121,7 +1153,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 						}
 						if (maxc >= min_idepth && maxc >= min_adepth) {
                             // only calls 1 indel at a given position
-                            if (repeat_filter > 0 && p.RepeatCount < repeat_filter) {
+                            if ((repeat_filter == 0) || (p.RepeatCount < repeat_filter)) {
                                 // maybe use rms here... see if it helps
                                 int mean_qual = p.Calls[i].qual/p.Calls[i].depth();
                                 double err_rate = mean_qual < max_phred ? pow(10,-mean_qual/10.0) : global_error_rate;
@@ -1157,32 +1189,38 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 						skipped_indel+=p.Calls[i].depth();
 					}
 				} else {
+                    if (p.Calls[i].base == '*' && (
+                            ((repeat_filter > 0) && (p.RepeatCount >= repeat_filter)) || 
+                            (p.Calls[i].depth() < min_idepth)
+                       )) {
+					   skipped_indel+=p.Calls[i].depth();
+                    } else {
+                        // subtract inserts from reference .. perhaps > 0 is correct here....
+                        if (p.Calls[i].is_ref && (ins_rev+ins_fwd) > max(min_idepth,min_adepth)) {
+                            p.Calls[i].fwd-=ins_fwd;
+                            p.Calls[i].rev-=ins_rev;
+                        }
 
-                    // subtract inserts from reference .. perhaps > 0 is correct here....
-                    if (p.Calls[i].is_ref && (ins_rev+ins_fwd) > max(min_idepth,min_adepth)) {
-                        p.Calls[i].fwd-=ins_fwd;
-                        p.Calls[i].rev-=ins_rev;
-                    }
+                        if (p.Calls[i].depth() >= min_adepth && p.Calls[i].depth() > 0) {
+                            int mean_qual = p.Calls[i].qual/p.Calls[i].depth();
+                            double err_rate = mean_qual < max_phred ? pow(10,-mean_qual/10.0) : global_error_rate;
+                            // expected number of non-reference bases at this position is error_rate*depth
+                            double pval=(p.Depth*err_rate==0)?0:gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
+                            double padj=total_locii ? pval*total_locii : pval;           // multiple-testing adjustment
 
-                    if (p.Calls[i].depth() >= min_adepth && p.Calls[i].depth() > 0) {
-                        int mean_qual = p.Calls[i].qual/p.Calls[i].depth();
-                        double err_rate = mean_qual < max_phred ? pow(10,-mean_qual/10.0) : global_error_rate;
-                        // expected number of non-reference bases at this position is error_rate*depth
-                        double pval=(p.Depth*err_rate==0)?0:gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
-                        double padj=total_locii ? pval*total_locii : pval;           // multiple-testing adjustment
+                            if (padj <= alpha) {
+                                padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report as better than the mapping quality
 
-                        if (padj <= alpha) {
-                            padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report as better than the mapping quality
-
-                            if (!p.Calls[i].is_ref || debug_xpos) {
-                                if (need_out == -1)
-                                    need_out = i;
+                                if (!p.Calls[i].is_ref || debug_xpos) {
+                                    if (need_out == -1)
+                                        need_out = i;
+                                }
+                                vfinal final(p.Calls[i]);
+                                final.padj=padj;
+                                final_calls.push_back(final);
+                           } else {
+                                skipped_alpha+=p.Calls[i].depth();
                             }
-                            vfinal final(p.Calls[i]);
-                            final.padj=padj;
-                            final_calls.push_back(final);
-                       } else {
-                            skipped_alpha+=p.Calls[i].depth();
                         }
                     }
 				}
