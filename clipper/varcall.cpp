@@ -526,7 +526,7 @@ int main(int argc, char **argv) {
 
         if (repeat_filter > 0) {
 		    fprintf(varsum_f,"homopolymer filter\t%d\n", repeat_filter);
-            vcall.WinMax=repeat_filter+repeat_filter+1;
+            vcall.WinMax=repeat_filter+repeat_filter+3;
         }
 
         if (vcf_f) {
@@ -979,7 +979,7 @@ void VarCallVisitor::Visit(PileupSummary &p) {
     }
     if (vx < (Win.size()-2)) {
         rrb = Win[vx+1].Base;
-        for (i=vx+1; i < Win.size(); ++i) {
+        for (i=vx+2; i < Win.size(); ++i) {
             if (Win[i].Base == rrb)
                 ++rrc;
             else
@@ -987,7 +987,7 @@ void VarCallVisitor::Visit(PileupSummary &p) {
         }
     }
 
-    // repeat counts are 1-based, not 0-based
+    // repeat counts are now 1-based, not 0-based
     ++lrc;
     ++rrc;
 
@@ -1121,7 +1121,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 						}
 						if (maxc >= min_idepth && maxc >= min_adepth) {
                             // only calls 1 indel at a given position
-                            if (p.RepeatCount < repeat_filter) {
+                            if (repeat_filter > 0 && p.RepeatCount < repeat_filter) {
                                 // maybe use rms here... see if it helps
                                 int mean_qual = p.Calls[i].qual/p.Calls[i].depth();
                                 double err_rate = mean_qual < max_phred ? pow(10,-mean_qual/10.0) : global_error_rate;
@@ -1487,6 +1487,8 @@ void usage(FILE *f) {
 "Contains mean, median, quartile information for depth, base quality, read len,\n"
 "mapping quality, indel levels. Also estimates parameters suitable for\n"
 "variant calls, and can be passed directly to this program for variant calls\n"
+"\n"
+"Filtering Details:\n"
 "\n"
         ,VERSION);
 }
