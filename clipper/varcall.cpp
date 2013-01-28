@@ -552,16 +552,16 @@ int main(int argc, char **argv) {
         fprintf(varsum_f,"het calls\t%d\n", vcall.Hets);
         fprintf(varsum_f,"locii below depth\t%d\n", vcall.SkippedDepth);
 
-        
         if (out_prefix) {
-            var_f = fopen(string_format("%s.var.tmp", out_prefix).c_str(), "w");
-            vcf_f = fopen(string_format("%s.vcf.tmp", out_prefix).c_str(), "w");
-            eav_f = fopen(string_format("%s.eav.tmp", out_prefix).c_str(), "w");
-            noise_f = fopen(string_format("%s.noise.tmp", out_prefix).c_str(), "w");
-            varsum_f = fopen(string_format("%s.varsum.tmp", out_prefix).c_str(), "w");
+            fclose(var_f);
+            fclose(vcf_f);
+            fclose(eav_f);
+            fclose(noise_f);
+            fclose(varsum_f);
+            fclose(var_f);
             if (target_annot) {
-                tgt_f = fopen(string_format("%s.tgt.tmp", out_prefix).c_str(), "w");
-                tgtsum_f = fopen(string_format("%s.tgtsum.tmp", out_prefix).c_str(), "w");
+                fclose(tgt_f);
+                fclose(tgtsum_f);
             }
             rename_tmp(string_format("%s.var.tmp", out_prefix));
             rename_tmp(string_format("%s.vcf.tmp", out_prefix));
