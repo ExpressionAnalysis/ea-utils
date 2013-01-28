@@ -72,6 +72,7 @@ double qnorm(double x);
 std::vector<char *> split(char* str, const char* delim);
 std::string string_format(const std::string &fmt, ...);
 void to_upper(const std::string str);
+void rename_tmp(std::string f);
 
 int errs=0;
 extern int optind;
@@ -321,14 +322,19 @@ int main(int argc, char **argv) {
 	}
 
     if (out_prefix) {
-        var_f = fopen(string_format("%s.var", out_prefix).c_str(), "w");
-        vcf_f = fopen(string_format("%s.vcf", out_prefix).c_str(), "w");
-        eav_f = fopen(string_format("%s.eav", out_prefix).c_str(), "w");
-        noise_f = fopen(string_format("%s.noise", out_prefix).c_str(), "w");
-        varsum_f = fopen(string_format("%s.varsum", out_prefix).c_str(), "w");
+        if (do_varcall) {
+            warn("Specify -o with -v only\n\n");
+            usage(stderr);
+            return 1;
+        }
+        var_f = fopen(string_format("%s.var.tmp", out_prefix).c_str(), "w");
+        vcf_f = fopen(string_format("%s.vcf.tmp", out_prefix).c_str(), "w");
+        eav_f = fopen(string_format("%s.eav.tmp", out_prefix).c_str(), "w");
+        noise_f = fopen(string_format("%s.noise.tmp", out_prefix).c_str(), "w");
+        varsum_f = fopen(string_format("%s.varsum.tmp", out_prefix).c_str(), "w");
         if (target_annot) {
-            tgt_f = fopen(string_format("%s.tgt", out_prefix).c_str(), "w");
-            tgtsum_f = fopen(string_format("%s.tgt", out_prefix).c_str(), "w");
+            tgt_f = fopen(string_format("%s.tgt.tmp", out_prefix).c_str(), "w");
+            tgtsum_f = fopen(string_format("%s.tgtsum.tmp", out_prefix).c_str(), "w");
         }
     } else {
         var_f = stdout;
@@ -545,7 +551,38 @@ int main(int argc, char **argv) {
         fprintf(varsum_f,"hom calls\t%d\n", vcall.Homs);
         fprintf(varsum_f,"het calls\t%d\n", vcall.Hets);
         fprintf(varsum_f,"locii below depth\t%d\n", vcall.SkippedDepth);
+
+        
+        if (out_prefix) {
+            var_f = fopen(string_format("%s.var.tmp", out_prefix).c_str(), "w");
+            vcf_f = fopen(string_format("%s.vcf.tmp", out_prefix).c_str(), "w");
+            eav_f = fopen(string_format("%s.eav.tmp", out_prefix).c_str(), "w");
+            noise_f = fopen(string_format("%s.noise.tmp", out_prefix).c_str(), "w");
+            varsum_f = fopen(string_format("%s.varsum.tmp", out_prefix).c_str(), "w");
+            if (target_annot) {
+                tgt_f = fopen(string_format("%s.tgt.tmp", out_prefix).c_str(), "w");
+                tgtsum_f = fopen(string_format("%s.tgtsum.tmp", out_prefix).c_str(), "w");
+            }
+            rename_tmp(string_format("%s.var.tmp", out_prefix));
+            rename_tmp(string_format("%s.vcf.tmp", out_prefix));
+            rename_tmp(string_format("%s.eav.tmp", out_prefix));
+            rename_tmp(string_format("%s.noise.tmp", out_prefix));
+            rename_tmp(string_format("%s.varsum.tmp", out_prefix));
+            if (target_annot) {
+                rename_tmp(string_format("%s.tgt.tmp", out_prefix));
+                rename_tmp(string_format("%s.tgtsum.tmp", out_prefix));
+            }
+        }
 	}
+}
+
+void rename_tmp(std::string f) {
+    std::string notmp = f;
+    size_t pos = notmp.find(".tmp");
+    if (pos >= 0) {
+        notmp.replace(notmp.find(".tmp"),4,""); 
+        rename(f.c_str(),notmp.c_str());
+    }
 }
 
 // normal distribution
