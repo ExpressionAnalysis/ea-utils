@@ -84,6 +84,96 @@ char phred = 0;
 google::sparse_hash_map <std::string, int> dupset;
 int dupmax = 40000000;              // this should be configurable, but right now it isn't
 
+class inbuffer {
+    int max_buf;
+public:
+    inbuffer() {fin=0; gz=0; bp=0; max_buf=500000;};
+    ~inbuffer() {close();};
+
+    FILE *fin;      
+    bool gz;
+    int bp;
+    std::vector<std::string> buf;
+
+    ssize_t getline(char **lineptr, size_t *n) {
+        if (bp < buf.size()) {
+            // return bufffered
+            int l=buf[bp].length();         // length without null char
+            if (!*lineptr || *n < (l+1)) {
+                // alloc with room for null
+                *lineptr=(char*)realloc(*lineptr,*n=(l+1));
+            }
+            memcpy(*lineptr,buf[bp].data(),l);
+            (*lineptr)[l]='\0';
+            ++bp;
+            return l;
+        } else {
+            int l=::getline(lineptr, n, fin);
+            if (max_buf > 0) {
+                if (buf.size() > max_buf) {
+					if (debug) fprintf(stderr, "Clearing buffer\n");
+                    buf.resize(0);
+                    bp=0;
+                    max_buf = 0;
+                } else {
+                    if (l > 0) {
+                        buf.push_back(std::string(*lineptr));
+                        ++bp;
+                    }
+                }
+            }
+            return l;
+        }
+    }
+
+    int read_fq(int rno, struct fq *fq, const char *name=NULL) {
+        if (bp < buf.size()) {
+            fq->id.n=getline(&fq->id.s, &fq->id.a);
+            fq->seq.n=getline(&fq->seq.s, &fq->seq.a);
+            fq->com.n=getline(&fq->com.s, &fq->com.a);
+            fq->qual.n=getline(&fq->qual.s, &fq->qual.a);
+            if (fq->qual.n <= 0)
+                    return 0;
+
+            if (fq->id.s[0] != '@' || fq->com.s[0] != '+' || fq->seq.n != fq->qual.n) {
+                    const char *errtyp = (fq->seq.n != fq->qual.n) ?  "length mismatch" : fq->id.s[0] != '@' ? "no '@' for id" : "no '+' for comment";
+                    if (name) {
+                        fprintf(stderr, "Malformed fastq record (%s) in file '%s', line %d\n", errtyp, name, rno*2+1);
+                    } else {
+                        fprintf(stderr, "Malformed fastq record (%s) at line %d\n", errtyp, rno*2+1);
+                    }
+                    return -1;
+            }
+
+            fq->seq.s[--fq->seq.n] = '\0';
+            if (fq->seq.s[fq->seq.n-1] == '\r') {
+                fq->seq.s[--fq->seq.n] = '\0';
+            }
+            fq->qual.s[--fq->qual.n] = '\0';
+            if (fq->qual.s[fq->qual.n-1] == '\r') {
+                fq->qual.s[--fq->qual.n] = '\0';
+            }
+ 
+            return fq->qual.n > 0;
+        } else {
+            return ::read_fq(fin, rno, fq, name);
+        }
+    }
+
+    void reset() {
+        assert(max_buf > 0);
+        bp=0;
+    }
+
+    int close() {
+       int ret=true;
+       if (fin) {
+            ret = gz ? pclose(fin) : fclose(fin);
+            fin=NULL;
+       }
+    }
+};
+
 int main (int argc, char **argv) {
 	char c;
 	bool eol;
@@ -258,15 +348,13 @@ int main (int argc, char **argv) {
 		fstat = stdout;
 	}
 
-	FILE *fin[MAX_FILES];  meminit(fin);
-	bool gzin[MAX_FILES]; meminit(gzin);
 	FILE *fout[MAX_FILES]; meminit(fout);
 	bool gzout[MAX_FILES]; meminit(gzout);
+    inbuffer fin[MAX_FILES];
 
 	for (i=0;i<i_n;++i) {
-		fin[i]=gzopen(ifil[i], "r", &gzin[i]);
+        fin[i].fin=gzopen(ifil[i], "r", &fin[i].gz);
 	}
-
 
 	struct ad ad[MAX_ADAPTER_NUM+1];
 	memset(ad, 0, sizeof(ad));
@@ -301,12 +389,7 @@ int main (int argc, char **argv) {
 		int j;
 		int ilv3det=2;
 
-
-		// jump a third of the way in
-		struct stat st;
-		stat(ifil[i], &st);
-
-		while (getline(&s, &na, fin[i]) > 0) {
+		while (fin[i].getline(&s, &na) > 0) {
 			if (*s == '@')  {
 				// look for illumina purity filtering flags
 				if (ilv3det==2) {
@@ -336,16 +419,18 @@ int main (int argc, char **argv) {
 					}
 				}
 
-				if ((ns=getline(&s, &na, fin[i])) <=0) {
+				if ((ns=fin[i].getline(&s, &na)) <=0) {
 					// reached EOF
 					if (debug) fprintf(stderr, "Dropping out of sampling loop\n");
 					break;
 				}
 
-				nq=getline(&q, &naq, fin[i]);
-				nq=getline(&q, &naq, fin[i]);		// qual is 2 lines down
+				nq=fin[i].getline(&q, &naq);
+				nq=fin[i].getline(&q, &naq);		// qual is 2 lines down
 
 				// skip poor quals/lots of N's when doing sampling
+                struct stat st;
+                stat(ifil[i], &st);
 				if (st.st_size > (sampcnt * 500) && poorqual(i, ns, s, q))
 					continue;
 
@@ -405,11 +490,7 @@ int main (int argc, char **argv) {
 	}
 
 	for (i=0;i<i_n;++i) {
-		if (gzin[i]) {
-			fin[i]=gzopen(ifil[i], "r", &gzin[i]);
-		} else {
-			fseek(fin[i],0,0);
-		}
+        fin[i].reset();
 	}
 
 	if (debug) printf("Max ns: %d, Avg[0]: %d\n", maxns, avgns[0]);
@@ -436,12 +517,12 @@ int main (int argc, char **argv) {
 		char *q = NULL; size_t naq = 0; int nq =0;
 		char *d = NULL; size_t nad = 0; int nd =0;
 
-		while ((nd=getline(&d, &nad, fin[i])) > 0) {
+		while ((nd=fin[i].getline(&d, &nad)) > 0) {
 			if (*d == '@')  {
-				if ((ns=getline(&s, &na, fin[i])) <=0) 
+				if ((ns=fin[i].getline(&s, &na)) <=0) 
 					break;
-				nq=getline(&q, &naq, fin[i]);
-				nq=getline(&q, &naq, fin[i]);		// qual is 2 lines down
+				nq=fin[i].getline(&q, &naq);
+				nq=fin[i].getline(&q, &naq);		// qual is 2 lines down
 
 				--nq; --ns;				// don't count newline for read len
 
@@ -451,7 +532,7 @@ int main (int argc, char **argv) {
 
 				if (nq != ns) {
 					if (warncount < MAXWARN) {
-						fprintf(stderr, "Warning, corrupt quality for sequence: %s", s);
+						fprintf(stderr, "Warning, corrupt quality for sequence: %s", s, q);
 						++warncount;
 					}
 					continue;
@@ -756,18 +837,14 @@ int main (int argc, char **argv) {
 		fprintf(fstat, "Files: %d\n", i_n);
 
 	for (i=0;i<i_n;++i) {
-		if (gzin[i]) {
-			fin[i]=gzopen(ifil[i], "r", &gzin[i]);
-		} else {
-			fseek(fin[i],0,0);
-		}
+        fin[i].reset();
 	}
 
     google::sparse_hash_map <std::string, int>::const_iterator lookup_it;
 
-	while (read_ok=read_fq(fin[0], nrec, &fq[0])) {
+	while (read_ok=fin[0].read_fq(nrec, &fq[0])) {
 		for (i=1;i<i_n;++i) {
-			int mok=read_fq(fin[i], nrec, &fq[i]);
+			int mok=fin[1].read_fq(nrec, &fq[i]);
 			if (mok != read_ok) {
 				fprintf(stderr, "# of rows in mate file '%s' doesn't match, quitting!\n", ifil[i]);
 				return 1;
@@ -1043,7 +1120,7 @@ int main (int argc, char **argv) {
 
 	for (i=0;i<i_n;++i) {
 		if (fout[i])  { if (gzout[i])  pclose(fout[i]);  else fclose(fout[i]); }
-		if (fin[i])   { if (gzin[i])   pclose(fin[i]);   else fclose(fin[i]); }
+        fin[i].close();
 		if (fskip[i]) { if (gzskip[i]) pclose(fskip[i]); else fclose(fskip[i]); }
 	}
 
