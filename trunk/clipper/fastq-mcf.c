@@ -83,11 +83,12 @@ char phred = 0;
 
 google::sparse_hash_map <std::string, int> dupset;
 int dupmax = 40000000;              // this should be configurable, but right now it isn't
+int max_in_buffer = 2400000;
 
 class inbuffer {
     int max_buf;
 public:
-    inbuffer() {fin=0; gz=0; bp=0; max_buf=500000;};
+    inbuffer() {fin=0; gz=0; bp=0; max_buf=max_in_buffer;};
     ~inbuffer() {close();};
 
     FILE *fin;      
@@ -111,7 +112,7 @@ public:
             int l=::getline(lineptr, n, fin);
             if (max_buf > 0) {
                 if (buf.size() > max_buf) {
-					if (debug) fprintf(stderr, "Clearing buffer\n");
+					if (debug) fprintf(stderr, "Clearing buffer at %d lines\n", (int) buf.size());
                     buf.resize(0);
                     bp=0;
                     max_buf = 0;
@@ -276,7 +277,7 @@ int main (int argc, char **argv) {
 			case 'q': qthr = atoi(optarg); break;
 			case 'Q': qspec = optarg; break;
 			case 'w': qwin = atoi(optarg); break;
-			case 'C': sampcnt = atoi(optarg); break;
+			case 'C': sampcnt = atoi(optarg); if (sampcnt*8 > max_in_buffer) max_in_buffer = sampcnt * 8; break;
 			case 'F': fref[fref_n++] = optarg; break;
 			case 'x': pctns = atof(optarg); break;
 			case 'R': rmns = false; break;
@@ -431,7 +432,7 @@ int main (int argc, char **argv) {
 				// skip poor quals/lots of N's when doing sampling
                 struct stat st;
                 stat(ifil[i], &st);
-				if (st.st_size > (sampcnt * 500) && poorqual(i, ns, s, q))
+				if (st.st_size > (sampcnt * 500) && nr < max_in_buffer/8 && poorqual(i, ns, s, q))
 					continue;
 
 				if (phred == 0) {
