@@ -31,17 +31,21 @@ QUICK FAQ:
 
 This is based on feedback/emails, etc.
 
-fastq-mcf does a 100k sub-sampling to determine what to do.   There are lots of paramters to play with, but the "automatic" mode should do the right thing most of the time.  If it doesn't, I really would like to hear why/what it did.  The point in this tool is that the basic quality and adapter filtering should be something that's done automagically 90% of the time - not by manually picking paramters for each run.   The fact that it's making decisions "for the user" means it will probably change more over time than the other tools.  
+fastq-mcf does a 300k sub-sampling to determine what to do.   There are lots of paramters to play with, but the "automatic" mode should do the right thing most of the time.  If it doesn't, I really would like to hear why/what it did.  The point in this tool is that the basic quality and adapter filtering should be something that's done automagically 90% of the time - not by manually picking paramters for each run.   The fact that it's making decisions "for the user" means it will probably change more over time than the other tools.  
 
-If you want fastq-mcf to be similar to other tools, you need to pass -f (force run, regardless of heuristic), also pass -m XX, and -s 100, so it's a fixed-length.  If you try running with unrealistic, or "test" data, the heuristic won't work.  Instead, try with a subsample of 500 or so "real" reads.
+If you want fastq-mcf to be similar to other tools, you need to pass -m XX, and -s 100, so it's a fixed-length.  If you try running with unrealistic, or "test" data, the heuristic won't work.  Instead, try with a subsample of 50000 or so "real" reads.
 
 fastq-join produces a "report".  This is just a list of lengths of joined reads.   Also it chooses the "better quality base" when overlapping.  Very stable code at this point.
 
-fastq-multx is intended to keep mates in sync, so you can demultiplex in one-pass.  For single-reads, it's not better than other tools out there.  Also, notice the output file's "%-sign" substitution... this is instead of lots of prefix and suffix arguments.  Mismatch algorithm is "maximal unique"... ie... if it's possible that 2 barcodes can match, it won't use *either*.   Qualities are ignored.  Very stable code at this point.
+fastq-multx is intended to keep mates in sync, so you can demultiplex in one-pass.  For single-reads, it's not better than other tools out there, except that you don't need to predefine your sets... which can help logistics in high-volume situations.  Also, notice the output file's "%-sign" substitution... this is instead of lots of prefix and suffix arguments.  Mismatch algorithm is "maximal unique"... ie... if it's possible that 2 barcodes can match, it won't use *either*.   Qualities are ignored.  Very stable code at this point, and supports dual-indexed codes.   
+
+Dual-indexed codes are listed as SEQUENCE-SEQUENCE in the barcode file.  In my experience, it's good not to mix them.   
+
+The latest version ignores bases that have extremely low qualities (<5), and refuses to match a barcode that isn't a minimum distance from another best match.   It's a lot safer (safer than CASAVA's defaults), but for some poor-quality runs these features will need to be disabled.
 
 INSTALL:
 
-Should be able to run "make install" on most machines that have g++ installed.  On windows, install a copy of the MinGW environment.
+Should be able to run "make install" on most machines that have g++ installed.  On windows, install a copy of the MinGW environment.   You'll need zlib installed for some tools.   fastq-mcf, fastq-stats, etc.  are pretty basic, and work without any external libs.
 
 Example:
 
