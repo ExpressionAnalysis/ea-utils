@@ -336,7 +336,7 @@ int main (int argc, char **argv) {
 	if (strcasecmp(afil, "n/a") && strcasecmp(afil, "/dev/null") && strcasecmp(afil, "NUL")) {
 		ain = fopen(afil, "r");
 		if (!ain) {
-			fprintf(stderr, "Error opening file '%s': %s\n",afil, strerror(errno));
+			fprintf(stderr, "Error opening adapter file '%s': %s\n",afil, strerror(errno));
 			return 1;
 		}
 	}
@@ -494,7 +494,7 @@ int main (int argc, char **argv) {
         fin[i].reset();
 	}
 
-	if (debug) printf("Max ns: %d, Avg[0]: %d\n", maxns, avgns[0]);
+	if (debug) fprintf(stderr,"Max ns: %d, Avg[0]: %d\n", maxns, avgns[0]);
 
 	// total base count per read position in sample
 	int balloc = maxns;
@@ -1012,7 +1012,7 @@ int main (int argc, char **argv) {
 
 			int totclip = min(fq[f].seq.n,dotrim[f][0] + dotrim[f][1]);
 
-			if (debug) printf("totclip %d\n", totclip);
+			if (debug) fprintf(stderr,"totclip %d\n", totclip);
 
 			if (totclip > 0) {
                 // keep length > X, X based on mate
@@ -1052,14 +1052,24 @@ int main (int argc, char **argv) {
 			int f;
 			for (f=0;f<o_n;++f) {
 				if (dotrim[f][1] > 0) {
-					if (debug) printf("trimming %d from end\n", dotrim[f][1]);
+					if (debug) fprintf(stderr,"trimming %d from end\n", dotrim[f][1]);
 					fq[f].seq.s[fq[f].seq.n -=dotrim[f][1]]='\0';
 					fq[f].qual.s[fq[f].qual.n-=dotrim[f][1]]='\0';
 				}
+                if (dotrim[f][1] >= strlen(fq[f].seq.s)) {
+					if (debug) fprintf(stderr,"Trimmed full sequence.\n", dotrim[f][1]);
+                    continue;
+                }
 				if (dotrim[f][0] > 0) {
-					if (debug) printf("trimming %d from begin\n", dotrim[f][0]);
-					memmove(fq[f].seq.s ,fq[f].seq.s +dotrim[f][0],fq[f].seq.n -=dotrim[f][0]);
-					memmove(fq[f].qual.s,fq[f].qual.s+dotrim[f][0],fq[f].qual.n-=dotrim[f][0]);
+					if (debug) fprintf(stderr,"trimming %d from begin\n", dotrim[f][0]);
+					fq[f].seq.n -= dotrim[f][0];
+					fq[f].qual.n -= dotrim[f][0];
+                    if (fq[f].seq.n < 0) {
+                        fq[f].seq.n = 0;
+                        fq[f].qual.n = 0;
+                    }
+					memmove(fq[f].seq.s ,fq[f].seq.s +dotrim[f][0],fq[f].seq.n );
+					memmove(fq[f].qual.s,fq[f].qual.s+dotrim[f][0],fq[f].qual.n);
 					fq[f].seq.s[fq[f].seq.n]='\0';
 					fq[f].qual.s[fq[f].qual.n]='\0';
 				}
