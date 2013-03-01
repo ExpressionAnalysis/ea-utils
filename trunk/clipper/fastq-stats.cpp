@@ -19,9 +19,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
-$Id$
+$Id: fastq-stats.cpp 537 2013-01-09 21:27:16Z earonesty $
 */
-const char * VERSION = "1.01 $Id$";
+const char * VERSION = "1.01 $Id: fastq-stats.cpp 537 2013-01-09 21:27:16Z earonesty $";
 
 #include <ctype.h>
 #include <stdio.h>
@@ -214,7 +214,7 @@ int main( int argc, char**argv ) {
 	double qualsum = 0;
 	double qualssq = 0;
 	int errs = 0;
-	int nreads = 0;
+	long long nreads = 0;
 	int ndups = 0;
 	double dupss = 0;
 	bool fixlen = 0; //is fixed length
@@ -401,7 +401,7 @@ int main( int argc, char**argv ) {
 	if(qualmin < 64) {
 		phred = 33;
 	}
-	printf("reads\t%d\n",nreads);
+	printf("reads\t%lld\n",nreads);
 
 	if(!fixlen) {
 		printf("len\t%d\n", lenmax);
@@ -498,7 +498,7 @@ int main( int argc, char**argv ) {
 			                        (qcStats[i].qmax-phred), (qcStats[i].qsum-qcStats[i].qc*phred), 
 									(qcStats[i].qsum/qcStats[i].qc-phred),
 									 q1, med, q3,iqr, lW, rW);
-			fprintf(myfile,"%d\t%d\t%d\t%d\t%d\t%d\n", A_tot, C_tot, G_tot, T_tot, N_tot,nreads);
+			fprintf(myfile,"%d\t%d\t%d\t%d\t%d\t%lld\n", A_tot, C_tot, G_tot, T_tot, N_tot,nreads);
 		
 		}
 		fclose(myfile);
