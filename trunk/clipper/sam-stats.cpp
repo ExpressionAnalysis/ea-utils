@@ -43,6 +43,8 @@
 
 const char * VERSION = "1.34";
 
+#define SVNREV atoi(strchr("$LastChangedRevision: 488 $", ':')+1)
+
 using namespace std;
 
 void usage(FILE *f);
@@ -143,12 +145,20 @@ public:
 	}
 };
 
+class fqent {
+    public:
+    int bits; 
+    std::string r;
+    std::string q;
+};
+
 class sstats {
 public:
 	ibucket vmapq;			// all map qualities
 	sstats() : vmapq(MAX_MAPQ) {
 		memset((void*)&dat,0,sizeof(dat));
 		covr.set_empty_key("-");
+		petab.set_deleted_key("-");
 	}
 	~sstats() {
 		covr.clear();
@@ -173,6 +183,7 @@ public:
 	vector<int> visize;		// all insert sizes
 	google::dense_hash_map<std::string, scoverage> covr;	// # mapped per ref seq
 	google::sparse_hash_map<std::string, int> dups;		// alignments by read-id (not necessary for some pipes)
+	google::sparse_hash_map<std::string, fqent> petab;		// peread table
 
 	// file-format neutral ... called per read... warning seq/qual are not necessarily null-terminated
 	void dostats(string name, int rlen, int bits, const string &ref, int pos, int mapq, const string &materef, int nmate, const string &seq, const char *qual, int nm, int del, int ins);
@@ -193,14 +204,23 @@ void build_basemap();
 int dupreads = 1000000;
 int max_chr = 1000;
 bool trackdup=0;
+FILE *sefq = NULL;
+FILE *pefq1 = NULL;
+FILE *pefq2 = NULL;
 int basemap[256];
 int main(int argc, char **argv) {
 	const char *ext = NULL;
 	bool multi=0, newonly=0, inbam=0;
+    int fq_out=0;
     const char *rnafile = NULL;
 	char c;
 	optind = 0;
-    while ( (c = getopt (argc, argv, "?BArR:Ddx:MhS:")) != -1) {
+    struct option long_options[] = {
+               {"fastq", no_argument, NULL, 'o'},
+               {0,0,0,0},
+    };
+    int long_index=0;
+    while ( (c = getopt_long(argc, argv, "?BArR:Ddx:MhS:", long_options, &long_index)) != -1) {
                 switch (c) {
                 case 'd': ++debug; break;                                       // increment debug level
                 case 'D': ++trackdup; break;
@@ -211,6 +231,7 @@ int main(int argc, char **argv) {
                 case 'S': histnum=atoi(optarg); break;
                 case 'x': ext=optarg; break;
                 case 'M': newonly=1; break;
+                case 'o': fq_out=1; trackdup=1; break;                     // output suff
                 case 'h': usage(stdout); return 0;
                 case '?':
                      if (!optopt) {
@@ -253,16 +274,17 @@ int main(int argc, char **argv) {
 		bool needpclose = 0;
 
 		// decide input format
+		string out;
+
 		if (!strcmp(in,"-")) {
 			// read sam/bam from stdin
-			if (ext) {
+			if (ext||fq_out) {
 				warn("Can't use file extension with stdin\n");
 				continue;
 			}
 			f = stdin;
 			o = stdout;
 		} else {
-			string out;
 			if ((p = strrchr(in,'.')) && !strcmp(p, ".gz")) {
 				// maybe this is a gzipped sam file...
 				string cmd = string_format("gunzip -c '%s'", in);
@@ -300,7 +322,7 @@ int main(int argc, char **argv) {
 					continue;
 				}
 				// extension mode... output to file minus .gz
-				if (ext) 
+				if (ext||fq_out) 
 					out=string(in, p-in);
 			} else {
 	 			f = fopen(in, "r");
@@ -309,9 +331,14 @@ int main(int argc, char **argv) {
 					continue;
 				}
 				// extension mode... output to file
-				if (ext) 
+				if (ext||fq_out) 
 					out=in;
 			}
+            if (fq_out) {
+                sefq=fopen((out+".fq").c_str(),"w");
+                pefq1=fopen((out+".fq1").c_str(),"w");
+                pefq2=fopen((out+".fq2").c_str(),"w");
+            }
 			if (ext) {
 				( out += '.') += ext;
 				o=fopen(out.c_str(), "w");
@@ -354,6 +381,19 @@ int main(int argc, char **argv) {
 			}
 		}
 		if (needpclose) pclose(f); else fclose(f);
+
+        if (fq_out) {
+            if(sefq && s.dat.pe) {
+                fclose(sefq);
+                unlink((out+".fq").c_str());
+            }
+            if (pefq1 && !s.dat.pe) {
+                fclose(pefq1);
+                fclose(pefq2);
+                unlink((out+".fq1").c_str());
+                unlink((out+".fq2").c_str());
+            }
+        }
 
 		// sort sstats
 		sort(s.visize.begin(), s.visize.end());
@@ -695,9 +735,32 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
         // illumina changed things
 		if ((p = name.find_first_of(' '))!=string::npos) 
 				name.resize(p);
+
 		int x=++dups[name];
+
 		if (x>dat.dupmax) 
 			dat.dupmax=x;
+
+        if (sefq) {
+            if (!dat.pe || dat.mapn < 1000) {
+                fprintf(sefq,"@%s\n%s\n+\n%s\n",name.c_str(), seq.c_str(), qual);
+            }
+        }
+        if (pefq1 && x < 4 && (dat.pe || dat.mapn < 1000)) {
+            fqent fq;
+            google::sparse_hash_map<string,fqent>::iterator it=petab.find(name);
+            if (it ==  petab.end()) {
+                fq.r=seq;
+                fq.q=qual;
+                fq.bits=bits;
+                petab[name]=fq;
+            } else if (it->second.bits != bits) {
+                fq=it->second;
+                fprintf(pefq1,"@%s 1\n%s\n+\n%s\n",name.c_str(), fq.r.c_str(), fq.q.c_str());
+                fprintf(pefq2,"@%s 2\n%s\n+\n%s\n",name.c_str(), seq.c_str(), qual);
+                petab.erase(it); 
+            }
+        }
 	}
 }
 
