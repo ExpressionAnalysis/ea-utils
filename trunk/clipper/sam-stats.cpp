@@ -824,7 +824,7 @@ bool sstats::parse_sam(FILE *f) {
 				ins+=n;
 			else if (*sp == 'D') 
 				del+=n;
-			p=sp;
+			p=sp+1;
 		}
 		if (d[S_CIG][0] == '*') d[S_POS] = (char *) (char *) (char *) (char *) (char *) (char *) (char *) (char *) (char *) "-1";
 		dostats(d[S_ID],strlen(d[S_READ]),atoi(d[S_BITS]),d[S_NMO],atoi(d[S_POS]),atoi(d[S_MAPQ]),d[S_MATEREF],atoi(d[S_MATE]),d[S_READ],d[S_QUAL],nm, ins, del);
