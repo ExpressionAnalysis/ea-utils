@@ -21,7 +21,7 @@ THE SOFTWARE.
 
 ALSO, IT WOULD BE NICE IF YOU LET ME KNOW YOU USED IT.
 
-$Id: fastq-stats.cpp 502 2012-10-16 16:32:46Z krobasky $
+$Id$
 */
 const char * VERSION = "2.0";
 
