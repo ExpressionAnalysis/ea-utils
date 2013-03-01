@@ -47,8 +47,9 @@ int main (int argc, char **argv) {
 	int pctdiff = 8;				// this number tested well on exome data... tweak for best results
 	bool omode = false;	
 	char *bfil = NULL;
+    bool norevcomp = false;
 
-	while (	(c = getopt (argc, argv, "-dnbeo:t:v:m:p:r:")) != -1) {
+	while (	(c = getopt (argc, argv, "-dRnbeo:t:v:m:p:r:")) != -1) {
 		switch (c) {
 		case '\1':
 			if (!in[0]) 
@@ -71,6 +72,7 @@ int main (int argc, char **argv) {
 		case 't': threads = atoi(optarg); break;
 		case 'm': mino = atoi(optarg); break;
 		case 'p': pctdiff = atoi(optarg); break;
+		case 'R': norevcomp = true; break;
 		case 'd': debug = 1; break;
                 case 'v':
                         if (strlen(optarg)>1) {
@@ -201,7 +203,11 @@ int main (int argc, char **argv) {
 
 		if (debug) fprintf(stderr, "seq: %s %d\n", fq[0].seq.s, fq[0].seq.n);
 
-		revcomp(&rc, &fq[1]);
+        if (!norevcomp) {
+    		revcomp(&rc, &fq[1]);
+        } else {
+            rc=fq[1];
+        }
 
 		if (debug) fprintf(stderr, "comp: %s %d\n", rc.seq.s, rc.seq.n);
 
@@ -318,6 +324,7 @@ void usage(FILE *f) {
 "-p N       N-percent maximum difference (8)\n"
 "-m N       N-minimum overlap (6)\n"
 "-r FIL     Verbose stitch length report\n"
+"-R         No reverse complement\n"
 "\n"
 "Output: \n"
 "\n"

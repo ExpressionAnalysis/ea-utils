@@ -116,9 +116,9 @@ public:
 
 class vfinal {
 public:
-    vfinal(vcall &c) :call(c) {max_idl_cnt=0; padj=1;};
-    vfinal & operator=(vfinal const&x) {max_idl_seq=x.max_idl_seq;max_idl_cnt=x.max_idl_cnt;padj=x.padj;}
-    vcall &call;
+    vfinal(vcall &c) {max_idl_cnt=0; padj=1; pcall = &c;};
+    vfinal & operator=(vfinal const&x) {max_idl_seq=x.max_idl_seq; max_idl_cnt=x.max_idl_cnt; padj=x.padj; pcall=x.pcall;}
+    vcall *pcall;
     string max_idl_seq;
     int max_idl_cnt;
     double padj;
@@ -126,7 +126,7 @@ public:
 };
 
 bool hitolocall (const vcall &i,const vcall &j) {return ((i.depth())>(j.depth()));}
-bool sortreffirst (const vfinal &i,const vfinal &j) {return (i.call.is_ref&&!j.call.is_ref)||((i.call.is_ref==j.call.is_ref) && ((i.call.depth())>(j.call.depth())));}
+bool sortreffirst (const vfinal &i,const vfinal &j) {return (i.pcall->is_ref&&!j.pcall->is_ref)||((i.pcall->is_ref==j.pcall->is_ref) && ((i.pcall->depth())>(j.pcall->depth())));}
 
 class Read {
 public:
@@ -252,6 +252,15 @@ double alpha=.05;
 int phred=33;
 double phi(double x);
 
+FILE *openordie(const char *path, const char *mode) {
+    FILE *f=fopen(path, mode);
+    if (!f) {
+        warn("Can't open-%s %s: %s\n", mode, path, strerror(errno));
+        exit(1);
+    }
+    return f;
+}
+
 int main(int argc, char **argv) {
 	char c;
 	const char *noiseout=NULL;
@@ -322,19 +331,20 @@ int main(int argc, char **argv) {
 	}
 
     if (out_prefix) {
-        if (do_varcall) {
+        if (!do_varcall) {
             warn("Specify -o with -v only\n\n");
             usage(stderr);
             return 1;
         }
-        var_f = fopen(string_format("%s.var.tmp", out_prefix).c_str(), "w");
-        vcf_f = fopen(string_format("%s.vcf.tmp", out_prefix).c_str(), "w");
-        eav_f = fopen(string_format("%s.eav.tmp", out_prefix).c_str(), "w");
-        noise_f = fopen(string_format("%s.noise.tmp", out_prefix).c_str(), "w");
-        varsum_f = fopen(string_format("%s.varsum.tmp", out_prefix).c_str(), "w");
+
+        var_f = openordie(string_format("%s.var.tmp", out_prefix).c_str(), "w");
+        vcf_f = openordie(string_format("%s.vcf.tmp", out_prefix).c_str(), "w");
+        eav_f = openordie(string_format("%s.eav.tmp", out_prefix).c_str(), "w");
+        noise_f = openordie(string_format("%s.noise.tmp", out_prefix).c_str(), "w");
+        varsum_f = openordie(string_format("%s.varsum.tmp", out_prefix).c_str(), "w");
         if (target_annot) {
-            tgt_f = fopen(string_format("%s.tgt.tmp", out_prefix).c_str(), "w");
-            tgtsum_f = fopen(string_format("%s.tgtsum.tmp", out_prefix).c_str(), "w");
+            tgt_f = openordie(string_format("%s.tgt.tmp", out_prefix).c_str(), "w");
+            tgtsum_f = openordie(string_format("%s.tgtsum.tmp", out_prefix).c_str(), "w");
         }
     } else {
         var_f = stdout;
@@ -558,7 +568,6 @@ int main(int argc, char **argv) {
             fclose(eav_f);
             fclose(noise_f);
             fclose(varsum_f);
-            fclose(var_f);
             if (target_annot) {
                 fclose(tgt_f);
                 fclose(tgtsum_f);
@@ -1275,10 +1284,12 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 	if (need_out>=0||debug_xpos) {
 
         if (final_calls.size() > 1){
-            if(final_calls[1].call.is_ref) {
+//            printf("HERE1 %c/%c\n", final_calls[0].pcall->base, final_calls[1].pcall->base);
+            if(final_calls[1].pcall->is_ref) {
                 vfinal tmp=final_calls[1];
                 final_calls[1]=final_calls[0];
                 final_calls[0]=tmp;
+//                printf("HERE2 %c/%c\n", final_calls[0].pcall->base, final_calls[1].pcall->base);
             }
         }
 
@@ -1288,21 +1299,21 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
         int total_call_depth=0;
         int i;
         for (i=0;i<final_calls.size();++i) {
-            total_call_depth+=final_calls[i].call.depth();
+            total_call_depth+=final_calls[i].pcall->depth();
         }
         double pct_allele = 0;
         if (need_out >=0) {
             // more than 1 call at this position = Het
             if (final_calls.size() > 1) {
-                if (final_calls[0].call.is_ref) {
-                    pct_allele = 100.0 * final_calls[1].call.depth() / (double) total_call_depth;
+                if (final_calls[0].pcall->is_ref) {
+                    pct_allele = 100.0 * final_calls[1].pcall->depth() / (double) total_call_depth;
                 } else {
                     // no reference seen... but still het?
-                    pct_allele = 100.0 * final_calls[0].call.depth() / (double) total_call_depth;
+                    pct_allele = 100.0 * final_calls[0].pcall->depth() / (double) total_call_depth;
                 }
                 ++Hets;
             } else {
-                pct_allele = 100.0 * final_calls[0].call.depth() / (double) total_call_depth;
+                pct_allele = 100.0 * final_calls[0].pcall->depth() / (double) total_call_depth;
                 ++Homs;
             }
         }
@@ -1313,9 +1324,9 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
             for (i=0;i<final_calls.size();++i) {
                vfinal &f=final_calls[i];
                if (f.is_indel()) {
-                    pil += string_format("\t%c%s:%d,%d,%.1e",f.call.base,f.max_idl_seq.c_str(),f.max_idl_cnt,f.call.qual/f.call.depth(),f.padj);
+                    pil += string_format("\t%c%s:%d,%d,%.1e",f.pcall->base,f.max_idl_seq.c_str(),f.max_idl_cnt,f.pcall->qual/f.pcall->depth(),f.padj);
                } else {
-                    pil += string_format("\t%c:%d,%d,%.1e",f.call.base,f.call.depth(),f.call.qual/f.call.depth(),f.padj);
+                    pil += string_format("\t%c:%d,%d,%.1e",f.pcall->base,f.pcall->depth(),f.pcall->qual/f.pcall->depth(),f.padj);
                }
             }
             fprintf(var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_alpha+skipped_depth+skipped_balance+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, pil.c_str());
@@ -1330,7 +1341,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                if (f.is_indel()) {
                     string base;
                     string alt;
-                    if (f.call.base =='-') {
+                    if (f.pcall->base =='-') {
                         base = p.Base + f.max_idl_seq;
                         alt = p.Base;
                     } else {
@@ -1340,19 +1351,19 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                     double freq_allele = f.max_idl_cnt / (double) p.Depth;
                     fprintf(vcf_f,"%s\t%d\t.\t%s\t%s\t%2d\tPASS\tMQ=%d;BQ=%d;DP=%d;AF=%2.2f\n", 
                         p.Chr.c_str(), p.Pos, base.c_str(), alt.c_str(), qual, 
-                        (int) f.call.mq_rms(),
-                        (int) f.call.qual_rms(),
+                        (int) f.pcall->mq_rms(),
+                        (int) f.pcall->qual_rms(),
                         total_call_depth,
                         freq_allele);
                 } else {
-                    char alt = f.call.base;
-                    if (f.call.is_ref) 
+                    char alt = f.pcall->base;
+                    if (f.pcall->is_ref) 
                         alt = '.';
-                    double freq_allele = f.call.depth() / (double) p.Depth;
+                    double freq_allele = f.pcall->depth() / (double) p.Depth;
                     fprintf(vcf_f,"%s\t%d\t.\t%c\t%c\t%d\tPASS\tMQ=%d;BQ=%d;DP=%d;AF=%2.2f\n",
                         p.Chr.c_str(), p.Pos, p.Base, alt, qual,
-                        (int) f.call.mq_rms(),
-                        (int) f.call.qual_rms(),
+                        (int) f.pcall->mq_rms(),
+                        (int) f.pcall->qual_rms(),
                         total_call_depth,
                         freq_allele);
                 }
@@ -1364,17 +1375,17 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
             string top_cons, var_base, var_depth, var_qual, var_strands, forward, reverse;
            
             float padj=final_calls[0].padj;
-            if (final_calls[0].call.is_ref && final_calls.size() > 1) {
+            if (final_calls[0].pcall->is_ref && final_calls.size() > 1) {
                 padj=final_calls[1].padj;
             }
             for (i=0;i<final_calls.size();++i) {
                 vfinal &f=final_calls[i];
                 if (i < 2) {
                     if (i > 0) top_cons += "/";
-                    top_cons += f.call.base;
+                    top_cons += f.pcall->base;
                 }
                 if (i > 0) var_base += "/";
-                var_base += f.call.base;
+                var_base += f.pcall->base;
                 if (f.is_indel()) {
                     if (i < 2) {
                         top_cons += f.max_idl_seq;
@@ -1382,15 +1393,15 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                     var_base += f.max_idl_seq;
                 }
                 if (i > 0) var_depth+= ";";
-                var_depth+= string_format("%d",f.call.depth());
+                var_depth+= string_format("%d",f.pcall->depth());
                 if (i > 0) var_qual+= ";";
-                var_qual+= string_format("%d",f.call.qual_rms());
+                var_qual+= string_format("%d",f.pcall->qual_rms());
                 if (i > 0) var_strands+= ";";
-                var_strands+= string_format("%d",(f.call.fwd>0)+(f.call.rev>0));
+                var_strands+= string_format("%d",(f.pcall->fwd>0)+(f.pcall->rev>0));
                 if (i > 0) forward += ";";
-                forward+= string_format("%d",f.call.fwd);
+                forward+= string_format("%d",f.pcall->fwd);
                 if (i > 0) reverse += ";";
-                reverse+= string_format("%d",f.call.rev);
+                reverse+= string_format("%d",f.pcall->rev);
             }
             fprintf(eav_f,"%s\t%d\t%c\t%d\t%d\t%s\t%2.2f\t%s\t%s\t%s\t%s\t%s\t%s\t%.1e\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, (int) final_calls.size(),top_cons.c_str(), pct_allele, var_base.c_str(), var_depth.c_str(), var_qual.c_str(), var_strands.c_str(), forward.c_str(), reverse.c_str(), padj);
         }

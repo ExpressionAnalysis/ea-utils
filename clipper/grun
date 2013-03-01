@@ -1004,8 +1004,8 @@ sub process_message {
 		if (!defined($uid)) {
 			$err="User $opts->{user} is unknown on this machine, not executing";
 		}
-        if ($opts{group}) {
-            $gid=$opts{group};
+        if ($opts->{group}) {
+            $gid=$opts->{group};
         }
 # expecting someone to come pick up output?
 		$io_wait{$opts->{id}}->{type} = 'stat' if $opts->{wait};	# status wait
