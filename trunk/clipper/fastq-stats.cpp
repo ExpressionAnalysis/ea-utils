@@ -19,9 +19,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
-$Id: fastq-stats.cpp 537 2013-01-09 21:27:16Z earonesty $
+$Id$
 */
-const char * VERSION = "1.01 $Id: fastq-stats.cpp 537 2013-01-09 21:27:16Z earonesty $";
+const char * VERSION = "1.01 $Id$";
 
 #include <ctype.h>
 #include <stdio.h>
