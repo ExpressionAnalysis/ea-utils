@@ -41,7 +41,7 @@
 
 #include "fastq-lib.h"
 
-const char * VERSION = "1.34";
+const char * VERSION = "1.35";
 
 #define SVNREV atoi(strchr("$LastChangedRevision$", ':')+1)
 
@@ -618,6 +618,10 @@ int main(int argc, char **argv) {
 			if (s.covr.size() > 1) {
 				fprintf(o,"num ref seqs\t%d\n", (int) s.covr.size());
 				fprintf(o,"num ref aligned\t%d\n", (int) mseq);
+			}
+		} else {
+			if (s.covr.size() > 1) {
+				fprintf(o,"num ref seqs\t%d\n", (int) s.covr.size());
 			}
 		}
 	}
