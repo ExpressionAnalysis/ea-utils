@@ -844,6 +844,7 @@ int main (int argc, char **argv) {
                 }
 
                 if (dual) {
+                    // distance is added in for duals
                     if (fq[1].seq.n >= bc[i].dual_n) {
                         d+=hd(fq[1].seq.s+fq[1].seq.n-bc[i].dual_n, bc[i].dual, bc[i].dual_n);
                     } else {
@@ -856,6 +857,7 @@ int main (int argc, char **argv) {
                 else
                     d=hd(fq[0].seq.s,bc[i].seq.s, bc[i].seq.n);
 
+                // distance is added in for duals
                 if (dual) 
                     d+=hd(fq[1].seq.s,bc[i].dual, bc[i].dual_n);
 
