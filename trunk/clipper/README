@@ -8,7 +8,6 @@ fastq-multx
 
 Demultiplexes a fastq. Capable of auto-determining barcode id's based on a master set fields. Keeps multiple reads in-sync during demultiplexing. Can verify that the reads are in-sync as well, and fail if they're not.
 
-
 fastq-join
 Similar to audy's stitch program, but in C, more efficient and supports some automatic benchmarking and tuning. It uses the same "squared distance for anchored alignment" as other tools.
 
@@ -35,13 +34,17 @@ fastq-mcf does a 300k sub-sampling to determine what to do.   There are lots of 
 
 If you want fastq-mcf to be similar to other tools, you need to pass -m XX, and -s 100, so it's a fixed-length.  If you try running with unrealistic, or "test" data, the heuristic won't work.  Instead, try with a subsample of 50000 or so "real" reads.
 
+fastq-mcf doubles as a read-filtering program, it supports a broad range of filtering arguments.
+
 fastq-join produces a "report".  This is just a list of lengths of joined reads.   Also it chooses the "better quality base" when overlapping.  Very stable code at this point.
 
-fastq-multx is intended to keep mates in sync, so you can demultiplex in one-pass.  For single-reads, it's not better than other tools out there, except that you don't need to predefine your sets... which can help logistics in high-volume situations.  Also, notice the output file's "%-sign" substitution... this is instead of lots of prefix and suffix arguments.  Mismatch algorithm is "maximal unique"... ie... if it's possible that 2 barcodes can match, it won't use *either*.   Qualities are ignored.  Very stable code at this point, and supports dual-indexed codes.   
+fastq-multx is intended to keep mates in sync, so you can demultiplex in one-pass.  For single-reads, it's not better than other tools out there, except that you don't need to predefine your sets... which can help logistics in high-volume situations.  Also, notice the output file's "%-sign" substitution... this is instead of lots of prefix and suffix arguments.  Mismatch algorithm is "maximal unique"... ie... if it's possible that 2 barcodes can match, it won't use *either*.   Qualities are *no longer* ignored, you can explicity set low quality reads as mismatches.  Minimum edit distances can be specified, useful for recovering when CASAVA demultiplexing was poor, especially for dual indexed.  Very stable code at this point.
 
-Dual-indexed codes are listed as SEQUENCE-SEQUENCE in the barcode file.  In my experience, it's good not to mix them.   
+Dual-indexed codes are listed as SEQUENCE-SEQUENCE in the barcode file.  I haven't tried mixing them with others on the autodetect code, I can't imaginge there's a reason to do that.
 
-The latest version ignores bases that have extremely low qualities (<5), and refuses to match a barcode that isn't a minimum distance from another best match.   It's a lot safer (safer than CASAVA's defaults), but for some poor-quality runs these features will need to be disabled.
+The latest version can ignores bases that have extremely low qualities (<5), and refuses to match a barcode that isn't a minimum distance from another best match.   It's a lot safer, but for some poor-quality runs these features will need to be disabled.
+
+sam-stats take a lot of options for a variety of reports.   The most important ones to note are -D, which builds a huge hash of probe ids, and -R which produces a coverage matrix.   It could autodetect if reads are sorted by probe ID and save RAM.   It could also reduce RAM by removing common prefixes from the hash after some X reads.   It doesn't do those things now.
 
 INSTALL:
 
