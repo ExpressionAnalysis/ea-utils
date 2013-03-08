@@ -41,7 +41,7 @@
 
 #include "fastq-lib.h"
 
-const char * VERSION = "1.35";
+const char * VERSION = "1.36";
 
 #define SVNREV atoi(strchr("$LastChangedRevision$", ':')+1)
 
