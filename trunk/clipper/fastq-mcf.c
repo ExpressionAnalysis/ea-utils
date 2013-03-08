@@ -32,7 +32,7 @@ See "void usage" below for usage.
 #include "fastq-lib.h"
 
 #undef SVNREV
-#define SVNREV atoi(strchr("$LastChangedRevision: 488 $", ':')+1)
+#define SVNREV atoi(strchr("$LastChangedRevision$", ':')+1)
 
 #define MAX_ADAPTER_NUM 1000
 #define SCANLEN 15
@@ -166,6 +166,10 @@ public:
     void reset() {
         assert(max_buf > 0);
         bp=0;
+    }
+
+    bool full() {
+        return buf.size()>=max_buf;
     }
 
     int close() {
@@ -392,6 +396,9 @@ int main (int argc, char **argv) {
 		int j;
 		int ilv3det=2;
 
+        struct stat st;
+        stat(ifil[i], &st);
+
 		while (fin[i].getline(&s, &na) > 0) {
 			if (*s == '@')  {
 				// look for illumina purity filtering flags
@@ -432,10 +439,10 @@ int main (int argc, char **argv) {
 				nq=fin[i].getline(&q, &naq);		// qual is 2 lines down
 
 				// skip poor quals/lots of N's when doing sampling
-                struct stat st;
-                stat(ifil[i], &st);
-				if (st.st_size > (sampcnt * 500) && nr < max_in_buffer/8 && poorqual(i, ns, s, q))
+				if (st.st_size > (sampcnt * 500) && nr < max_in_buffer/8 && poorqual(i, ns, s, q)) {
+					if (debug) fprintf(stderr, "Skip \n");
 					continue;
+                }
 
 				if (phred == 0) {
 					--nq;
@@ -530,7 +537,7 @@ int main (int argc, char **argv) {
 				--nq; --ns;				// don't count newline for read len
 
 				// skip poor quals/lots of N's when doing sampling (otherwise you'll miss some)
-				if ((st.st_size > (sampcnt * 500)) && poorqual(i, ns, s, q))
+				if ((st.st_size > (sampcnt * 500)) && nr < max_in_buffer/8 && poorqual(i, ns, s, q))
 					continue;
 
 				if (nq != ns) {
@@ -605,7 +612,7 @@ int main (int argc, char **argv) {
 					}
 				}
 			}
-			if (nr >= sampcnt)		// enough samples 
+			if (fin[i].full() || nr >= sampcnt)		// enough samples 
 				break;
 		}
 		if (s) free(s);
@@ -1014,7 +1021,7 @@ int main (int argc, char **argv) {
 
 			int totclip = min(fq[f].seq.n,dotrim[f][0] + dotrim[f][1]);
 
-			if (debug) fprintf(stderr,"totclip %d\n", totclip);
+//			if (debug > 1) fprintf(stderr,"totclip %d\n", totclip);
 
 			if (totclip > 0) {
                 // keep length > X, X based on mate
