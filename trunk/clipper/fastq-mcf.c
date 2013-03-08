@@ -31,7 +31,7 @@ See "void usage" below for usage.
 
 #include "fastq-lib.h"
 
-#undef SVNREV
+#define VERSION "1.01"
 #define SVNREV atoi(strchr("$LastChangedRevision$", ':')+1)
 
 #define MAX_ADAPTER_NUM 1000
@@ -287,7 +287,7 @@ int main (int argc, char **argv) {
 			case 'F': fref[fref_n++] = optarg; break;
 			case 'x': pctns = atof(optarg); break;
 			case 'R': rmns = false; break;
-			case 'V': printf("Revision: %d\n", SVNREV); return 0; break;
+			case 'V': printf("Version: %s.%d\n", VERSION, SVNREV); return 0; break;
 			case 'p': pctdiff = atoi(optarg); break;
 			case 'P': phred = (char) atoi(optarg); break;
 			case 'D': duplen = atoi(optarg); break;
@@ -1216,7 +1216,8 @@ void usage(FILE *f, const char *msg) {
 		fprintf(f, "%s\n", msg);
 
 	fprintf(f, 
-"usage: fastq-mcf [options] <adapters.fa> <reads.fq> [mates1.fq ...] \n"
+"Usage: fastq-mcf [options] <adapters.fa> <reads.fq> [mates1.fq ...] \n"
+"Version: %s.%d\n"
 "\n"
 "Detects levels of adapter presence, computes likelihoods and\n"
 "locations (start, end) of the adapters.   Removes the adapter\n"
@@ -1309,7 +1310,7 @@ void usage(FILE *f, const char *msg) {
 "4.5GB RAM on 100m DNA reads - be careful. Great for RNA assembly.\n"
 "\n"
 "*Quality filters are evaluated after clipping/trimming\n"
-	);
+	,VERSION, SVNREV);
 }
 
 inline int char2bp(char c) {
