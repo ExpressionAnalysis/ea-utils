@@ -32,6 +32,9 @@ See "void usage" below for usage.
 #define MAX_GROUP_NUM 500
 #define endstr(e) (e=='e'?"end":e=='b'?"start":"n/a")
 
+const char * VERSION = "1.01";
+#define SVNREV atoi(strchr("$LastChangedRevision$", ':')+1)
+
 // barcode
 struct bc {
 	line id;
@@ -733,7 +736,7 @@ int main (int argc, char **argv) {
 
 	// TODO: output barcode read ...but only for unmatched?
 	int b;
-        for (b=0;b<=bcnt;++b) {
+    for (b=0;b<=bcnt;++b) {
 		for (i=0;i<f_n;++i) {
 			if (!strcasecmp(out[i],"n/a") || !strcasecmp(out[i],"/dev/null")) {
 				bc[b].out[i] = NULL;
@@ -763,6 +766,8 @@ int main (int argc, char **argv) {
 			fin[i]=gzopen(in[i],"r",&gzin[i]);
 		}
 	}
+
+    // don't trim if you're not outputting the read
 
 	struct fq fq[6];	
         meminit(fq);
@@ -896,7 +901,11 @@ int main (int argc, char **argv) {
             best=-1;
         }
 
-		if (trim && best >= 0) {
+        bool trimmed = false;
+        // only trim if you're outputting the sequence
+		if (trim && best >= 0 && bc[best].fout[0]) {
+			// todo: save trimmed
+            trimmed = true;
 			int len=bc[best].seq.n;
 			if (end =='b') {
 				memmove(fq[0].seq.s, fq[0].seq.s+len, fq[0].seq.n-len);
@@ -918,20 +927,20 @@ int main (int argc, char **argv) {
 		for (i=0;i<f_n;++i) {
 			FILE *f=bc[best].fout[i];
 			if (!f) continue;
-			// todo: capture whole original sequence for all barcoded stuff, not just unmatched, and always output in id/comment
-			if (best==bcnt && !bc[best].fout[0]) {
-				*strrchr(fq[i].id.s, '\n') = '\0';
+            if (!trimmed) {
+			    // todo: capture always, not just when trim is off
+                *strrchr(fq[i].id.s, '\n') = '\0';
                 fputs(fq[i].id.s,f);
-				fputc(' ', f);
+                fputc(' ', f);
                 fputs(fq[0].seq.s,f);
-				if (dual) {
-					fputc('-', f);
+                if (dual) {
+                    fputc('-', f);
                     fputs(fq[1].seq.s,f);
-				}
-				fputc('\n', f);
-			} else {
+                }
+            } else {
                 fputs(fq[i].id.s,f);
-			}
+            }
+            fputc('\n', f);
             fputs(fq[i].seq.s,f);
             fputc('\n',f);
             fputs(fq[i].com.s,f);
@@ -1011,10 +1020,11 @@ void pickbest(const void *nodep, const VISIT which, const int depth)
 }
 
 void usage(FILE *f) {
-	fputs( 
-"Usage: fastq-multx [-g|-l|-B] <barcodes.fil> <read1.fq> -o r1.%.fq [mate.fq -o r2.%.fq] ...\n"
+	fprintf(f,
+"Usage: fastq-multx [-g|-l|-B] <barcodes.fil> <read1.fq> -o r1.%%.fq [mate.fq -o r2.%%.fq] ...\n"
+"Version: %s.%d\n"
 "\n"
-"Output files must contain a '%' sign which is replaced with the barcode id in the barcodes file.\n"
+"Output files must contain a '%%' sign which is replaced with the barcode id in the barcodes file.\n"
 "Output file can be n/a to discard the corresponding data (use this for the barcode read)\n"
 "\n"
 "Barcodes file (-B) looks like this:\n"
@@ -1052,5 +1062,5 @@ void usage(FILE *f) {
 "-m N        Allow up to N mismatches, as long as they are unique (1)\n"
 "-d N        Require a minimum distance of N between the best and next best (2)\n"
 "-q N        Require a minimum phred quality of N to accept a barcode base (0)\n"
-	,f);
+	,VERSION,SVNREV);
 }
