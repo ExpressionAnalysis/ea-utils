@@ -669,8 +669,9 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
     vmapq.push(mapq);
 
 	if (nm > 0) {
+        // nm is snp+ins+del... which is silly
 		dat.nmnz += 1;
-		dat.nmsum += nm;
+		dat.nmsum += nm-del-ins;
 	}
 	dat.del+=del;
 	dat.ins+=ins;
