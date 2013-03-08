@@ -157,15 +157,17 @@ bool poorqual(int n, int l, const char *s, const char *q) {
         quals[n].ns += ns;
         int xmean = sum/l;
         if (quals[n].cnt < 20000) {
+                // not enough data? use heuristic
                 return ((xmean-33) < 20) || (ns != 0);
         }
+        // enough data? use stdev
         int pmean = quals[n].sum / quals[n].cnt;                                // mean q
         double pdev = stdev(quals[n].cnt, quals[n].sum, quals[n].ssq);          // dev q
-        int serr = max(2,pdev/sqrt(l));                                                // stderr for length l
+        int serr = max(2,pdev/sqrt(l));                                         // stderr for length l
         if (xmean < (pmean - serr)) {                                           // off by 1 stdev?
                 return 1;                                                       // ditch it
         }
-        if (ns > (l*quals[n].ns / quals[n].cnt)) {                                // more n's than average?
+        if (ns > (1+(l*quals[n].ns / quals[n].cnt))) {                          // 1 more n than average?
                 return 1;                                                       // ditch it
         }
         return 0;
