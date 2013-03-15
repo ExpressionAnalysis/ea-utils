@@ -210,7 +210,7 @@ if ($killjob) {
 		} else {
 			my $ok = ($err =~ /^Job.*(aborted|kill requested)/);
 			warn "$err\n" if $ok; 
-			$err = 'No response to jkill' if !$ok && !$err;
+			$err = 'No remote response to jkill' if !$ok && !$err;
 			warn "Error: $err\n" if !$ok;
 			$exit=-1 if !$ok;
 		}
@@ -251,7 +251,7 @@ if ($editjob) {
 		my $ok = ($err =~ /^Job.*edited/);
 		$err=~ s/\n$//;
 		warn "$err\n" if $ok;
-		$err = 'No response to jedit' if !$ok && !$err;
+		$err = 'No remote response to jedit' if !$ok && !$err;
 		warn "Error: $err\n" if !$ok;
 		$ex = 1 if !$ok;
 	}
@@ -2680,9 +2680,9 @@ sub startdaemon {
 	}
 	xlog("note", "Starting daemon as " . getpwuid($<));
 
-    my $limit = `bash -c "ulimit -v -f -t -m"`;
+    my $limit = `bash -c "ulimit -v -f -t -m -s"`;
 
-    if (@{[($limit =~ m/unlimited$/mg)]}!=4) {
+    if (@{[($limit =~ m/unlimited$/mg)]}!=5) {
         warn "Note: ulimit is not unlimited for daemon (" . join(',', $limit =~ m/\w+$/mg) . ")\n";
     }
 
