@@ -71,12 +71,12 @@ Adapter sequences with _5p in their label will match 'end's,
 and sequences with _3p in their label will match 'start's,
 otherwise the 'end' is auto-determined.
 
-Skew is when one cycle is poor, skewed towrd a particular base.
+Skew is when one cycle is poor, skewed toward a particular base.
 If any nucleotide is less than the skew percentage, then the
 whole cycle is removed.  Disable for methyl-seq, etc
 
 Set the skew (-k) or N-pct (-x) to 0 to turn it off (should be done
-for miRNA, amplicon and other low-complexity situations!)
+for miRNA, amplicon and other low-complexity situations)
 
 Duplicate read filtering is appropriate for assembly tasks, and
 never when read length < expected coverage.  -D 50 will use
@@ -102,3 +102,5 @@ Adapter file format is fasta.  You can set it to /dev/null, and pass "-f" to do 
  * Default settings are probably too conservative when it comes to trimming poor quality/detecting base-skew.
 
  * It won't trim the "insides" of a paired-end read.   It also will no longer attempt to quality filter a barcode read.   No override for these, but I can't think of a reason to.
+
+ * The -x percentage can be a confusing parameter.   it causes the *entire* cycle to be removed from *all* reads.... even ones without N's... if more than, say, 20% of that cycle is N's.
