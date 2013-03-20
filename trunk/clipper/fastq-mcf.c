@@ -77,8 +77,8 @@ const char *cmd_align_se = "bowtie -S %i -f %1";
 const char *cmd_align_pe = "bowtie -S %i -1 %1 -2 %2";
 
 // quality filter args
-int qf_mean=0, qf_max_ns=0, qf_xgt_num=0, qf_xgt_min=0;
-int qf2_mean=0, qf2_max_ns=0, qf2_xgt_num=0, qf2_xgt_min=0;
+int qf_mean=0, qf_max_ns=-1, qf_xgt_num=0, qf_xgt_min=0;
+int qf2_mean=0, qf2_max_ns=-1, qf2_xgt_num=0, qf2_xgt_min=0;
 
 // phred used
 char phred = 0;
@@ -1366,7 +1366,7 @@ bool evalqual(struct fq &fq, int file_num) {
     } else {
         // applies to file 2 or greater, only if they are set
         t_mean=qf2_mean > 0 ? qf2_mean : qf_mean;
-        t_max_ns=qf_max_ns > 0 ? qf2_max_ns : qf_max_ns;
+        t_max_ns=qf_max_ns > -1 ? qf2_max_ns : qf_max_ns;
         t_xgt_num=qf_xgt_num > 0 ? qf2_xgt_num : qf_xgt_num;
         t_xgt_min=qf_xgt_min > 0 ? qf2_xgt_min : qf_xgt_min;
     }
@@ -1381,7 +1381,7 @@ bool evalqual(struct fq &fq, int file_num) {
             return false;
         }
     }
-    if (t_max_ns > 0) {
+    if (t_max_ns >= 0) {
         int t = 0;
         int i;
         for (i=0;i<=fq.seq.n;++i) {
