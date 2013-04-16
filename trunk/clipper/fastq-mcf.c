@@ -31,7 +31,7 @@ See "void usage" below for usage.
 
 #include "fastq-lib.h"
 
-#define VERSION "1.01"
+#define VERSION "1.02"
 #define SVNREV atoi(strchr("$LastChangedRevision$", ':')+1)
 
 #define MAX_ADAPTER_NUM 1000
