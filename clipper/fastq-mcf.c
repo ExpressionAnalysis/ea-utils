@@ -202,6 +202,8 @@ int main (int argc, char **argv) {
 	int duplen = 0;
 	int dupskip = 0;
     bool noexec = 0;
+    bool hompol_filter = 0;
+    float hompol_pct = .95;
 
     dupset.set_deleted_key("<>");
 
@@ -227,11 +229,12 @@ int main (int argc, char **argv) {
        {"mate-max-ns", 1, 0, 0},
        {"mate-qual-gt", 1, 0, 0},
        {"mate-min-len", 1, 0, 0},
+       {"homopolymer-pct", 1, 0, 0},
        {0, 0, 0, 0}
     };
 
     int option_index = 0;
-    while (	(c = getopt_long(argc, argv, "-nf0uUVSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:D:",long_options,&option_index)) != -1) {
+    while (	(c = getopt_long(argc, argv, "-nf0uUVHSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:D:",long_options,&option_index)) != -1) {
 		switch (c) {
 			case '\0':
                 { 
@@ -240,6 +243,9 @@ int main (int argc, char **argv) {
                         qf_mean=atoi(optarg);
                     } else if(!strcmp(oname, "mate-qual-mean")) {
                         qf2_mean=atoi(optarg);
+                    } else if(!strcmp(oname, "homopolymer-pct")) {
+                        hompol_pct=atof(optarg)/100.0;
+                        hompol_filter=1;
                     } else if(!strcmp(oname, "qual-gt")) {
                         if (!strchr(optarg, ',')) {
                             fprintf(stderr, "Error, %s requires NUM,THR as argument\n", oname);
@@ -279,6 +285,7 @@ int main (int argc, char **argv) {
 			case '0': nmax=0; skewpct=0; pctns=0; rmns=0; qthr=0; nkeep=0; ilv3=-1;  break;
 			case 'u': ilv3=1; break;
 			case 'U': ilv3=0; break;
+			case 'H': hompol_filter=1; break;
 			case 'k': skewpct = atof(optarg); break;
 			case 'q': qthr = atoi(optarg); break;
 			case 'Q': qspec = optarg; break;
@@ -830,6 +837,7 @@ int main (int argc, char **argv) {
 	int nerr=0;
 	int nok=0;
 	int ntooshort=0;
+	int ntoohompol=0;
 	int nfiltered=0;
 	// total per read
 	int ntrim[MAX_FILES]; meminit(ntrim);
@@ -885,6 +893,8 @@ int main (int argc, char **argv) {
 
 		int dotrim[MAX_FILES][2];
 		bool skip = 0;							// skip whole record?
+		int hompol_tab[B_CNT+1]; if (hompol_filter) meminit(hompol_tab);
+		int hompol_cnt=0;
 		int f;	
 		for (f=0;f<i_n;++f) {
 			dotrim[f][0] = sktrim[f][0];					// default, trim to detected skew levels
@@ -909,6 +919,16 @@ int main (int argc, char **argv) {
 						break;
 				}
 			}
+
+            if (hompol_filter) {
+                char p; int h = 0;
+                for (i = dotrim[f][0];i<fq[f].seq.n;++i) {
+                    if (fq[f].seq.s[i] != 'N') {
+                        ++hompol_tab[char2bp(fq[f].seq.s[i])];
+                        ++hompol_cnt;
+                    }
+                }
+            }
 
 			if (qthr > 0) {
 				bool istrimq = false;
@@ -1057,6 +1077,19 @@ int main (int argc, char **argv) {
 			}
 		}
 
+        int hompol_skip=0;
+        if (hompol_filter) {
+            int hompol_max = hompol_pct * hompol_cnt;
+//            printf("max:%d\n", hompol_max);
+            for (i=0;i<B_N;++i) {
+//                printf("tab:%d,%d\n", i, hompol_tab[i]);
+                if (hompol_tab[i] >= hompol_max) {
+                    hompol_skip=i+1;
+                }
+            }
+            if (hompol_skip) skip = true;
+        }
+
 		if (!skip) {
 			int f;
 			for (f=0;f<o_n;++f) {
@@ -1134,7 +1167,11 @@ int main (int argc, char **argv) {
             }
 		} else {
 			if (skipb) saveskip(fskip, i_n, fq);
-			++ntooshort;
+            if (hompol_skip) {
+    			++ntoohompol;
+            } else {
+    			++ntooshort;
+            }
 		}
 	}
 
@@ -1150,6 +1187,8 @@ int main (int argc, char **argv) {
 	fprintf(fstat, "Filtered on quality: %d\n", nfiltered);
     if (dupskip)
 	fprintf(fstat, "Filtered on duplicates: %d\n", dupskip);
+    if (ntoohompol)
+	fprintf(fstat, "Filtered on hompolymer: %d\n", ntoohompol);
 
 	int f;
 	if (i_n == 1) {
@@ -1244,6 +1283,7 @@ void usage(FILE *f, const char *msg) {
 "    -x N     'N' (Bad read) percentage causing cycle removal (20)\n"
 "    -q N     quality threshold causing base removal (10)\n"
 "    -w N     window-size for quality trimming (1)\n"
+"    -H       remove >95%% homopolymer reads (no)\n"
 //"    -F FIL  remove sequences that align to FIL\n"
 "    -0       Set all default parameters to zero/do nothing\n"
 "    -U|u     Force disable/enable Illumina PF filtering (auto)\n"
@@ -1254,11 +1294,12 @@ void usage(FILE *f, const char *msg) {
 "    -S       Save all discarded reads to '.skip' files\n"
 "    -d       Output lots of random debugging stuff\n"
 "\n"
-"Quality filtering options*:\n"
+"Filtering options*:\n"
 "    --[mate-]qual-mean  NUM       Minimum mean quality score\n"
 "    --[mate-]qual-gt    NUM,THR   At least NUM quals > THR\n" 
 "    --[mate-]max-ns     NUM       Maxmium N-calls in a read\n"
 "    --[mate-]min-len    NUM       Minimum remaining length (same as -l)\n"
+"    --hompolymer-pct    PCT       Homopolymer filter percent (95)\n"
 "\n"
 "If mate- prefix is used, then applies to second non-barcode read only\n"
 /*
