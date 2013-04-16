@@ -41,7 +41,7 @@
 
 #include "fastq-lib.h"
 
-const char * VERSION = "1.36";
+const char * VERSION = "1.37";
 
 #define SVNREV atoi(strchr("$LastChangedRevision$", ':')+1)
 
@@ -220,6 +220,8 @@ int main(int argc, char **argv) {
                {0,0,0,0},
     };
     int long_index=0;
+    const char *prefix;
+
     while ( (c = getopt_long(argc, argv, "?BArR:Ddx:MhS:", long_options, &long_index)) != -1) {
                 switch (c) {
                 case 'd': ++debug; break;                                       // increment debug level
@@ -228,6 +230,7 @@ int main(int argc, char **argv) {
                 case 'A': max_chr=1000000; break;                               // max chrom
                 case 'R': rnafile=optarg;                                       // pass through
                 case 'r': max_chr=1000000; rnamode=1; if (histnum < 60) histnum=60; break;
+                case 'O': prefix=optarg; break;
                 case 'S': histnum=atoi(optarg); break;
                 case 'x': ext=optarg; break;
                 case 'M': newonly=1; break;
@@ -262,6 +265,9 @@ int main(int argc, char **argv) {
 	build_basemap();                            // precompute matrices for rabit base->integer (A->0, C->1,. ...etc) lookups
 
 	debugout("argc:%d, argv[1]:%s, multi:%d, ext:%s\n", argc,argv[optind],multi,ext);
+
+    FILE *rnao = NULL;
+
 
 	const char *p;
 	// for each input file
@@ -364,7 +370,16 @@ int main(int argc, char **argv) {
 		} else 
 			c = 31;		// 31 == bam
 
-
+        if (rnafile) {
+            rnao=fopen(rnafile,"w");
+            if (!rnao) {
+                warn("Can't write %s: %s\n", rnafile, strerror(errno));
+                return 1;
+            }
+        } else {
+            rnao=o;
+        }
+ 
 		// parse sam or bam as needed
 		if (c != 31) {
 			// (could be an uncompressed bam... but can't magic in 1 char)
@@ -423,12 +438,19 @@ int main(int argc, char **argv) {
 					}
 					++it;
 				}
-				fprintf(o,"mapped reads\t%d\n", (int) s.dups.size()*(s.dat.pe+1)-sing);
+                int mapped = (int) s.dups.size()*(s.dat.pe+1)-sing;
+
+				fprintf(o,"mapped reads\t%d\n", mapped);
 				if (amb > 0) {
+                    int unmapped=s.dat.n-s.dat.mapn;
+					fprintf(o,"pct align\t%.6f\n", 100.0*((double)mapped/(double)(mapped+unmapped)));
 					fprintf(o,"ambiguous\t%d\n", amb*(s.dat.pe+1));
 					fprintf(o,"pct ambiguous\t%.6f\n", 100.0*((double)amb/(double)s.dups.size()));
 					fprintf(o,"max dup align\t%.d\n", s.dat.dupmax-s.dat.pe);
-				}
+				} else {
+                    // no ambiguous mappings... simple
+				    fprintf(o, "pct align\t%.6f\n", 100.0*(double)s.dat.mapn/(double)s.dat.n);
+                }
 				if (sing)
 					fprintf(o,"singleton mappings\t%.d\n", sing);
 				// number of total mappings
@@ -436,6 +458,7 @@ int main(int argc, char **argv) {
 			} else {
 				// dup-id's not tracked
 				fprintf(o, "mapped reads\t%d\n", s.dat.mapn);
+				fprintf(o, "pct align\t%.6f\n", 100.0*(double)s.dat.mapn/(double)s.dat.n);
 				// todo: add support for bwa's multiple alignment tag
 				// fprintf(o, "total mappings\t%d\n", s.dat.mapn);
 			}
@@ -455,13 +478,7 @@ int main(int argc, char **argv) {
 		}
 
 		if (s.dat.mapn > 0) {
-            if (rnafile) {
-                rnao=fopen(rnafile,"w");
-            } else {
-                rnao=o;
-            }
-
-            if (s.dat.mapn > 100) {
+           if (s.dat.mapn > 100) {
                 // at least 100 mappings to call a meaningful "percentage" 
     			fprintf(o, "pct forward\t%.3f\n", 100*(s.dat.nfor/(double)(s.dat.nfor+s.dat.nrev)));
             }
@@ -897,14 +914,15 @@ void usage(FILE *f) {
 "\n"
 "Options (default in parens):\n"
 "\n"
-"-D             Keep track of multiple alignments (slower!)\n"
-"-M             Only overwrite if newer (requires -x, or multiple files)\n"
+"-D             Keep track of multiple alignments\n"
+"-O PREFIX      Output prefix enabling extended output (see below)\n"
+"-R FIL         Coverage/RNA output (coverage, 3' bias, etc, implies -A)\n"
 "-A             Report all chr sigs, even if there are more than 1000\n"
-"-R             RNA-Seq stats output (coverage, 3' bias, etc)\n"
-"-B             Input is bam, don't bother looking at magic\n"
-"-x FIL         File extension for multiple files (stats)\n"
 "-b INT         Number of reads to sample for per-base stats (1M)\n"
 "-S INT         Size of ascii-signature (30)\n"
+"-x FIL         File extension for handling multiple files (stats)\n"
+"-M             Only overwrite if newer (requires -x, or multiple files)\n"
+"-B             Input is bam, don't bother looking at magic\n"
 "\n"
 "OUTPUT:\n"
 "\n"
@@ -922,10 +940,11 @@ void usage(FILE *f) {
 "  mapped bases      : total of the lengths of the aligned reads\n"
 "  forward           : number of forward-aligned reads\n"
 "  reverse           : number of reverse-aligned reads\n"
-"  snp rate          : mismatched bases / total bases\n"
+"  snp rate          : mismatched bases / total bases (snv rate)\n"
 "  ins rate          : insert bases / total bases\n"
 "  del rate          : deleted bases / total bases\n"
 "  pct mismatch      : percent of reads that have mismatches\n"
+"  pct align         : percent of reads that aligned\n"
 "  len <STATS>       : read length stats, ignored if fixed-length\n"
 "  mapq <STATS>      : stats for mapping qualities\n"
 "  insert <STATS>    : stats for insert sizes\n"
@@ -939,6 +958,14 @@ void usage(FILE *f) {
 "  A ascii-histogram of mapped reads by chromosome position.\n"
 "  It is only output if the original SAM/BAM has a header. The values\n"
 "  are the log2 of the # of mapped reads at each position + ascii '0'.\n"
+"\n"
+"Extended output mode produces a set of files:\n"
+"  .stats           : primary output\n"
+"  .fastx           : fastx-toolkit compatible output\n"
+"  .rcov            : per-reference counts & coverage\n"
+"  .xdist           : mismatch distribution\n"
+"  .ldist           : length distribution (if applicable)\n"
+"  .mqdist          : mapping quality distribution\n"
 "\n"
         ,VERSION, SVNREV);
 }
