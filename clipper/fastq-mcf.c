@@ -402,6 +402,7 @@ int main (int argc, char **argv) {
 		char *q = NULL; size_t naq = 0; int nq =0;
 		int j;
 		int ilv3det=2;
+        int skipped = 0;
 
         struct stat st;
         stat(ifil[i], &st);
@@ -446,8 +447,9 @@ int main (int argc, char **argv) {
 				nq=fin[i].getline(&q, &naq);		// qual is 2 lines down
 
 				// skip poor quals/lots of N's when doing sampling
-				if (st.st_size > (sampcnt * 500) && nr < max_in_buffer/8 && poorqual(i, ns, s, q)) {
-					if (debug) fprintf(stderr, "Skip \n");
+				if (st.st_size > (sampcnt * 500) && skipped < max_in_buffer/8 && poorqual(i, ns, s, q)) {
+					if (debug) fprintf(stderr, "Skip poorqual\n");
+                    ++skipped;
 					continue;
                 }
 
@@ -534,6 +536,7 @@ int main (int argc, char **argv) {
 		char *q = NULL; size_t naq = 0; int nq =0;
 		char *d = NULL; size_t nad = 0; int nd =0;
 
+        int skipped = 0;
 		while ((nd=fin[i].getline(&d, &nad)) > 0) {
 			if (*d == '@')  {
 				if ((ns=fin[i].getline(&s, &na)) <=0) 
@@ -544,8 +547,10 @@ int main (int argc, char **argv) {
 				--nq; --ns;				// don't count newline for read len
 
 				// skip poor quals/lots of N's when doing sampling (otherwise you'll miss some)
-				if ((st.st_size > (sampcnt * 500)) && nr < max_in_buffer/8 && poorqual(i, ns, s, q))
+				if ((st.st_size > (sampcnt * 500)) && skipped < max_in_buffer/8 && poorqual(i, ns, s, q)) {
+                    ++skipped;
 					continue;
+                }
 
 				if (nq != ns) {
 					if (warncount < MAXWARN) {
