@@ -10,7 +10,7 @@ varcall does two tasks:
 
 The tool is not complete.   
 
-In particular: the VCF output is broken, and the error rate calculations should probably be regional, not global.   
+In particular: the VCF output is broken, and the error rate calculations should probably be regional, not global.   Also when inputting "bams" all varcall does is call samtools mpileup... it has no real native bam reader. 
 
 One of the advantages is the parameterization, allowing varcall to be used in any situation, this is also a shortcoming... since users must know the meanings of every parameter.
 
