@@ -20,8 +20,8 @@ By the time we reach version 1, all of these should be fixed, including better d
 
 {{{
 
-Usage: varcall <-s|-v> <-f REF> [options] bam1 [bam2...]
-   or: varcall <-s|-v> [options] pileup.txt
+Usage: varcall <-s|-v> [options] pileup.txt[.gz]
+   or: varcall <-s|-v> <-f REF> [options] bam1 [bam2...]
 Version: 0.9.1 (BETA)
 
 Either outputs summry stats for the list of files, or performs variant calling
@@ -30,7 +30,6 @@ Options (later options override earlier):
 
 -s          Calculate statistics
 -v          Calculate variants bases on supplied parameters (see -S)
--f          Reference fasta (required if using bams, ignored otherwise)
 -m          Min locii depth (0)
 -a          Min allele depth (0)
 -p          Min allele pct by quality (0)
@@ -38,7 +37,6 @@ Options (later options override earlier):
 -Q          Min mapping quality (0)
 -b          Min pct balance (strand/total) (0)
 -D FLOAT    Max duplicate read fraction (depth/length per position) (1)
--B          Turn off BAQ correction (false)
 -R          Homopolymer repeat indel filtering (8)
 -e FLOAT    Alpha filter to use, requires -l or -S (.05)
 -g FLOAT    Global minimum error rate (default: assume phred is ok)
@@ -48,6 +46,8 @@ Options (later options override earlier):
 -S FIL      Read in statistics and params from a previous run with -s (do this!)
 -A ANNOT    Calculate in-target stats using the annotation file (requires -o)
 -o PREFIX   Output prefix (note: overlaps with -N)
+-f          Reference fasta (required if using bams, ignored otherwise)
+-B          Turn off BAQ correction (false, ignored unless using bams)
 
 Input files
 
