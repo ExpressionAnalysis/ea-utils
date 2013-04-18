@@ -21,6 +21,7 @@ By the time we reach version 1, all of these should be fixed, including better d
 {{{
 
 Usage: varcall <-s|-v> <-f REF> [options] bam1 [bam2...]
+   or: varcall <-s|-v> [options] pileup.txt
 Version: 0.9.1 (BETA)
 
 Either outputs summry stats for the list of files, or performs variant calling
