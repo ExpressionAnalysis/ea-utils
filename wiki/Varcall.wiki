@@ -1,0 +1,75 @@
+#summary varcall: highly configurable snp and indel calling tool.
+
+= Introduction =
+
+varcall does two tasks:
+
+ * Calculates error rate statistics in a pileup
+ * Outputs variants per position
+
+
+The tool is not complete.   
+
+In particular: the VCF output is broken, and the error rate calculations should probably be regional, not global.   
+
+One of the advantages is the vast number of parameters, allowing varcall to be used in any situation, this is also a shortcoming... since users must know the meanings of every parameter.
+
+By the time we reach version 1, all of these should be fixed, including better docs, and better "auto-configuration" based on sampling.  If you are using varcall before then, carefully experiment with parameters and compare to other tools.
+
+= Usage =
+
+{{{
+
+Usage: varcall <-s|-v> <-f REF> [options] bam1 [bam2...]
+Version: 0.9.1 (BETA)
+
+Either outputs summry stats for the list of files, or performs variant calling
+
+Options (later options override earlier):
+
+-s          Calculate statistics
+-v          Calculate variants bases on supplied parameters (see -S)
+-f          Reference fasta (required if using bams, ignored otherwise)
+-m          Min locii depth (0)
+-a          Min allele depth (0)
+-p          Min allele pct by quality (0)
+-q          Min qual (3)
+-Q          Min mapping quality (0)
+-b          Min pct balance (strand/total) (0)
+-D FLOAT    Max duplicate read fraction (depth/length per position) (1)
+-B          Turn off BAQ correction (false)
+-R          Homopolymer repeat indel filtering (8)
+-e FLOAT    Alpha filter to use, requires -l or -S (.05)
+-g FLOAT    Global minimum error rate (default: assume phred is ok)
+-l INT      Number of locii in total pileup used for bonferroni (1 mil)
+-x CHR:POS  Output this pos only, then quit
+-N FIL      Output noise stats to FIL
+-S FIL      Read in statistics and params from a previous run with -s (do this!)
+-A ANNOT    Calculate in-target stats using the annotation file (requires -o)
+-o PREFIX   Output prefix (note: overlaps with -N)
+
+Input files
+
+Files must be sorted bam files with bai index files available.  Alternatively,
+a single pileup file can be supplied.
+
+Output files
+
+Varcalls go to stdout.  Stats go to stdout, or stderr if varcalling too
+
+If an output prefix is used, files are created as follows:
+   PREFIX.var       Variant calls in tab delimited 'varcall' format
+   PREFIX.eav       Variant calls in tab delimited 'ea-var' format
+   PREFIX.vcf       Variant calls, in vcf format
+   PREFIX.varsum    Summary of variant calls
+   PREFIX.tgt       On-target stats detail
+   PREFIX.tgtsum    Summary of on-target stats
+   PREFIX.noise     Noise stats detail
+
+Stats Output:
+
+Contains mean, median, quartile information for depth, base quality, read len,
+mapping quality, indel levels. Also estimates parameters suitable for
+variant calls, and can be passed directly to this program for variant calls
+
+}}}
