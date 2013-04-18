@@ -12,7 +12,7 @@ The tool is not complete.
 
 In particular: the VCF output is broken, and the error rate calculations should probably be regional, not global.   
 
-One of the advantages is the vast number of parameters, allowing varcall to be used in any situation, this is also a shortcoming... since users must know the meanings of every parameter.
+One of the advantages is the parameterization, allowing varcall to be used in any situation, this is also a shortcoming... since users must know the meanings of every parameter.
 
 By the time we reach version 1, all of these should be fixed, including better docs, and better "auto-configuration" based on sampling.  If you are using varcall before then, carefully experiment with parameters and compare to other tools.
 
