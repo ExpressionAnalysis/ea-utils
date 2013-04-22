@@ -75,7 +75,7 @@ void usage( FILE * f ) {
 #include <stdarg.h>
 #include <sys/stat.h>
 #include <string>
-#include <google/sparse_hash_map> // or sparse_hash_set, dense_hash_map, ...
+#include <sparsehash/sparse_hash_map> // or sparse_hash_set, dense_hash_map, ...
 #include <iostream>
 #include "fastq-lib.h"
 #include "gcModel.h"

@@ -338,10 +338,10 @@ if ($make) {
 		}
 		my @t = m/([<>])\s*(\S+)/g;
 		if (@t) {
-                        for (my $i=0;$i<@t;++$i) {
-                                push @i, $t[$i+1] if $t[$i] eq '<';
-                                push @o, $t[$i+1] if $t[$i] eq '>';
-                        }
+            for (my $i=0;$i<@t;$i+=2) {
+                push @i, $t[$i+1] if $t[$i] eq '<' && $t[$i+1]=~/^\s*\w/;
+                push @o, $t[$i+1] if $t[$i] eq '>' && $t[$i+1]=~/^\s*\w/;
+            }
 		}
 	}
 	die "Unable to determine i/o for -M (make) semantics\n\n" . usage()
@@ -351,6 +351,7 @@ if ($make) {
 	for my $i (@i) {
 		for my $o (@o) {
 			if (! (-s $o) || (fmodtime($i) > fmodtime($o))) {
+	            warn "# need $o\n" if $opt{noexec} || $verbose;
 				$need=1;
 			}
 		}
@@ -635,10 +636,13 @@ sub readsocks {
 		if ($sock == $listener) {
 			my $new_sock = $sock->accept();
 			if ($new_sock) {
+                $new_sock->timeout(5);
 				if ($WIN32) {
 					ioctl($new_sock, 0x8004667e, pack("I", 1));
 				} else {
 					fcntl($new_sock, F_SETFL, O_NONBLOCK);
+                    setsockopt($new_sock,SOL_SOCKET, SO_LINGER,pack("II",1,120));
+                    setsockopt($sock, SOL_SOCKET, SO_KEEPALIVE, 1);
 				}
 				$read_set->add($new_sock);
 				*$new_sock{HASH}->{time} = time();
@@ -682,6 +686,16 @@ sub readsocks {
 			}
 		}
 		$ret = 1;
+	}
+
+    foreach my $sock (@$new_error) {
+        if ($sock == $listener) {
+			xlog("error", "Listener failure, quitting... maybe restart or something here.");
+			exit(99)
+		} else {
+			xlog("debug", "Closing $sock after error\n");
+			close_sock($sock);
+		}
 	}
 
 	foreach my $sock ($write_set->can_write(0)) {
@@ -892,7 +906,11 @@ sub process_message {
 						xlog("error", "Job $jid force kill requested for ip $ip");
 						return "Job $jid ip mismatch, force failed\n";
 					} else {
-						return "Forward $ip:" . $nodes{$ip}->{port};
+						if ($nodes{$ip}) {
+							return "Forward $ip:" . $nodes{$ip}->{port};
+						} else {
+							return "Job $jid, node $ip not online, can't kill\n";
+						}
 					}
 				}
 			}
@@ -1234,7 +1252,11 @@ sub process_message {
 					xlog("error", "No ip for job $jid");
 				}
 # route to correct node
-				return (jid=>$jid, ip=>$ip, port=>$nodes{$ip}->{port}, hostname=>$nodes{$ip}->{hostname});
+				if (!$nodes{$ip}) {
+					xlog("error", "Job $jid is linked to $ip which is not responding");
+				} else {
+					return (jid=>$jid, ip=>$ip, port=>$nodes{$ip}->{port}, hostname=>$nodes{$ip}->{hostname});
+				}
 			}
 		} else {
             # wait for job start
@@ -1393,7 +1415,7 @@ sub schedule {
 
 			#xlog("debug", "Sched $n->{ip}: j:$job->{cpus}?$n->{avail}>c:$cpus , j:$job->{memory}?$n->{mem}>m:$mem");
 
-			if ($n->{ping} > (time()-$conf{ping_secs}*3)) {
+			if ($n->{ping} > (time()-$conf{ping_secs}*6)) {
 				my $ok = 1;
 				for (@metrics) {
 					if (($n->{"param-$_"} - $n->{"a_$_"}) < $job->{param}->{$_}) {
@@ -2102,6 +2124,8 @@ sub _sendcmd {
 		xlog("error",$@="Can't connect to $host:$port", Carp::longmess());
 		return undef;
 	}
+    setsockopt($sock,SOL_SOCKET, SO_LINGER,pack("II",1,120));
+    setsockopt($sock, SOL_SOCKET, SO_KEEPALIVE, 1);
 	if ($sock->send($xcmd)) {
 		return $sock;
 	}
@@ -2342,7 +2366,7 @@ sub showhist {
 			$cmd =~ s/^\s+//;
 			$cmd =~ s/\s+$//;
 			$cmd =~ s/\n/;/g;
-			if ($nodes{$job{host}}->{hostname}) {
+			if ($nodes{$job{host}} && $nodes{$job{host}}->{hostname}) {
 				$job{host}=$nodes{$job{host}}->{hostname} 
 			} elsif (-e (my $n="$conf{spool}/nodes/$job{host}.reg")) {
 				my @node=unpackcmd(slurp($n), 0);
@@ -2725,7 +2749,7 @@ sub startdaemon {
 		$SIG{TERM} = $SIG{INT};
 		$SIG{HUP}  = \&init;
 
-		$listener = IO::Socket::INET->new(Proto=>"tcp",LocalPort=>$conf{port}, LocalAddr=>$conf{bind}, Reuse=>1, Timeout=>1, Listen=>100)
+		$listener = IO::Socket::INET->new(Proto=>"tcp",LocalPort=>$conf{port}, LocalAddr=>$conf{bind}, Reuse=>1, Timeout=>2, Listen=>100)
 		  or die "Can't make TCP server on port $conf{port}: $@";
 		$read_set = new IO::Select();
 		$write_set = new IO::Select();
@@ -2760,6 +2784,7 @@ sub killgpid {
 	if (!kill(2, $gpid)) {
 		die "Can't kill -INT $gpid: $!\n";
 	}
+	sleep 1;
 	$gpid = 0;
 }
 
