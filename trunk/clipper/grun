@@ -25,6 +25,7 @@ use IO::Socket;
 use IO::Select;
 use IO::File;
 use POSIX qw(:sys_wait_h strftime);
+use Socket qw(IPPROTO_TCP TCP_NODELAY TCP_KEEPIDLE TCP_KEEPINTVL TCP_KEEPCNT);
 use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
 use Safe;
 use Cwd;
@@ -643,6 +644,9 @@ sub readsocks {
 					fcntl($new_sock, F_SETFL, O_NONBLOCK);
                     setsockopt($new_sock,SOL_SOCKET, SO_LINGER,pack("II",1,120));
                     setsockopt($sock, SOL_SOCKET, SO_KEEPALIVE, 1);
+                    setsockopt($sock, IPPROTO_TCP, TCP_KEEPIDLE,  30);
+                    setsockopt($sock, IPPROTO_TCP, TCP_KEEPINTVL,  10);
+                    setsockopt($sock, IPPROTO_TCP, TCP_KEEPCNT,    10);
 				}
 				$read_set->add($new_sock);
 				*$new_sock{HASH}->{time} = time();
@@ -835,23 +839,24 @@ sub process_message {
 # this is the 'node ping'
 		if (ref($args[0]) eq 'HASH') {		# bit of validation
 			my $ip = $sock->peerhost();	# store info in a file, for fun
-				my $file = "$conf{spool}/nodes/$ip.reg";
 			if (!$ip) {
-				xlog("error", "Socket has no ip?");
-			}
-			open(F, ">$file") || return("Error: can't create $file : $!");
-			print F $data;
-			close F;
-# also stick in memory
-			my $node = $args[0];
-			if (!$nodes{$ip}) {
-				xlog("note", "Registering node $ip:$node->{port} $node->{hostname}");
-			}
-			$nodes{$ip} = $args[0];
-			$nodes{$ip}->{ip} = $ip;
-# save execution node ping time for diagnostic (times out of sync or very slow transmission, etc)
-			$nodes{$ip}->{ex_ping} = $nodes{$ip}->{ping};
-			$nodes{$ip}->{ping} = time();
+				xlog("error", "Socket has no ip: $! ($data)");
+			} else {
+                my $file = "$conf{spool}/nodes/$ip.reg";
+                open(F, ">$file") || return("Error: can't create $file : $!");
+                print F $data;
+                close F;
+    # also stick in memory
+                my $node = $args[0];
+                if (!$nodes{$ip}) {
+                    xlog("note", "Registering node $ip:$node->{port} $node->{hostname}");
+                }
+                $nodes{$ip} = $args[0];
+                $nodes{$ip}->{ip} = $ip;
+    # save execution node ping time for diagnostic (times out of sync or very slow transmission, etc)
+                $nodes{$ip}->{ex_ping} = $nodes{$ip}->{ping};
+                $nodes{$ip}->{ping} = time();
+            }
 		} else {
 			return "Error: invalid node registration info";	
 		}
