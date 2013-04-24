@@ -12,7 +12,7 @@ Options:
 -o FIL          See 'Output' below
 -v C            Verifies that the 2 files probe id's match up to char C
                   use '/' for Illumina reads
--p N            N-percent maximum difference (.20)
+-p N            N-percent maximum difference (8)
 -m N            N-minimum overlap (6)
 -r FIL          Verbose stitch length report
 
