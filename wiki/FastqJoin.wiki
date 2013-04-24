@@ -15,6 +15,7 @@ Options:
 -p N            N-percent maximum difference (8)
 -m N            N-minimum overlap (6)
 -r FIL          Verbose stitch length report
+-R              No reverse complement
 
 Output:
 
