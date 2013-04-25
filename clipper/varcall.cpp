@@ -696,7 +696,7 @@ void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref) {
 
 		const char *nobaq = no_baq ? "-B" : "";
 
-		string mpil_cmd = string_format("samtools mpileup -d 100000 %s -f '%s'", nobaq, ref);
+		string mpil_cmd = string_format("samtools mpileup -Q 0 -d 100000 %s -f '%s'", nobaq, ref);
 
 		int i;
 		for (i=0;i<in_n;++i) {
