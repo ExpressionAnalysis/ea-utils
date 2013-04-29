@@ -1,20 +1,41 @@
 #!/usr/bin/perl
 
-# LICENSE:  LMK1.0:  This software is free.   There's no warranty.  This license 
-#  must be preserved.  Also, if you use this software, please let me know....so i 
-# don't think it was a waste of time writing it.
+####
+#Copyright (c) 2012 Erik Aronesty (erik@q32.com)
+#
+#Permission is hereby granted, free of charge, to any person obtaining a copy
+#of this software and associated documentation files (the "Software"), to deal
+#in the Software without restriction, including without limitation the rights
+#to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+#copies of the Software, and to permit persons to whom the Software is
+#furnished to do so, subject to the following conditions:
+#
+#The above copyright notice and this permission notice shall be included in
+#all copies or substantial portions of the Software.
+#
+#THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+#IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+#FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+#AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+#LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+#OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+#THE SOFTWARE.
+#
+#ALSO, IT WOULD BE NICE IF YOU LET ME KNOW YOU USED IT.
+#
 
 use strict;
 use POSIX qw(mkfifo);
 use Data::Dumper;
 
-use Getopt::Long;
+use Getopt::Long qw(:config no_ignore_case);
 
 my %opt;
-GetOptions(\%opt, "sort", "fai=s", "noindel");
+GetOptions(\%opt, "sort|s", "fai=s", "noindel", "strand|S=s", "keep", "debug");
 
 my $f = shift @ARGV;
 my $o = shift @ARGV;
+my $keep = $opt{keep};
 
 die "Usage: $0 [options] <input-bam> <output-bam>
 
@@ -25,34 +46,33 @@ or to EXPRESS (without -n or -f).
 
     -s  sort by id, use if the source bam is not sorted by id
 
-    -f  gene index (samtools faidx'ed fasta), used to discard XA
-        alignments that go beyond the edge of the file (bug in 
-        some versions of sampe can do this)
-
     -n  no indels ... removes indels and soft-clip information
         from the cigar string... ruining the validity of the MD tag
         and any variation results... but good for pipelines (like
         rna counting) that don't use/want this info
-" unless $f =~ /\.bam$/ && $o =~ /bam$/;
+" unless $f && $o =~ /bam$/;
 
 my %FAI;
 if ($opt{fai}) {
-    $opt{fai} = $opt{fai} =~ /fa$/ ? "$opt{fai}.fai" : $opt{fai};
-    die "Failed to open $opt{fai}\n" unless open(IN, $opt{fai});
-    while(<IN>) {
-        my ($id, $len) = split /\t/, $_;
-        die "Invalid file $opt{fai}\n" unless $len > 0;
-        $FAI{$id}=$len+0;
-    }
-    close(IN);
+    warn "Obsolete argument -f, ignoring\n";
 }
 
-open IN, "samtools view $f |";
-open OUT, "|samtools view -S -b - > $o 2> /dev/null";
+open IN, $f =~ /\.bam$/ ? "samtools view -h $f |" : "$f";
 
-# take a quick sampling of the file for a rough estimate of the insert size
-my ($pe, $cnt, @lens);
+if ($opt{sort} && $f !~ /\.bam$/) {
+    die "Specify presorted or use a regular bam file\n";
+}
+
+my ($pe, $cnt, @lens, @IN);
+
+# first 5000 proper aligned reads... make an insert size
 while (<IN>) {
+    # save to stack
+    if (/^\@SQ\s+SN:(\S+)\s+LN:(\d+)/ ) {
+        $FAI{$1}=$2+0;
+    }
+
+    push @IN, $_;
     my ($id, $bits, $nmo, $pos, $qual, $cig, $f1, $f2, $f3, $seq, $qseq, @fdx) = split /\t/, $_;
     next unless $pos > 0;
     ++$cnt;
@@ -64,23 +84,30 @@ while (<IN>) {
     }
     last if $cnt > 5000;
 }
-close IN;
+$opt{fai} = "-";
 
-# this is a trimmed mean... 
+# trimmed mean
 @lens=sort {$a<=>$b} (@lens);
 $cnt = 0;
 my $insert = 0;
 for(my $i=(@lens*.10);$i<(@lens*.90);++$i) {
     $insert+=$lens[$i];  $cnt+=1;
 }
-$insert/=$cnt;
 
-if (!$cnt) {
-    die "No alignments in $0, quitting\n";
+if (!$cnt && $pe) {
+    die "No paired alignments in '$f' quitting\n";
 }
 
-# sort the file first
+if (!$cnt) {
+    $insert="n/a";
+} else {
+    $insert/=$cnt;
+}
+warn "Insert size: $insert\n" if $opt{debug};
+
 if ($opt{sort}) {
+    die "-sort only if input is bam\n" unless $f =~ /\.bam$/;
+
     my $sb = $f;
     $sb =~ s/\.bam$//;
     $sb .= ".ntmp";
@@ -97,14 +124,13 @@ if ($opt{sort}) {
     }
     # now read from the id-sorted bam, instead of the chromosome-sorted bam
     $f = "$sb.bam";
+    close IN;
+    @IN=();
+    open IN, $f =~ /\.bam$/ ? "samtools view $f |" : "$f";
 }
-
-# read from fifo
-open IN, "samtools view -h $f |";
 
 my (@m);
 
-# save the output
 sub saveout {
     my ($out, $mate, $nmo, $pos, $len, $isrev, $origid, $cig) = @_;
     if ($pe) {
@@ -114,19 +140,26 @@ sub saveout {
                 my $f1 = shift @{$m[0]};
                 my $f2 = shift @{$m[1]};
 
-                # if the chromosomes are the same
                 if ($f1->[1] eq $f2->[1] ) {
                     if (!($f1->[1] eq '*') && !($f2->[1] eq '*') && !($f1->[6] eq '*') && !($f2->[6] eq '*')) {
-                    if (!$opt{fai} || ((($f1->[2]+$f1->[3]) < $FAI{$f1->[1]}) &&
-                                       (($f2->[2]+$f2->[3]) < $FAI{$f2->[1]}))) {
+                    if (((($f1->[2]+$f1->[3]) < $FAI{$f1->[1]}) &&
+                        (($f2->[2]+$f2->[3]) < $FAI{$f2->[1]}))) {
                         # only output proper pair, with '*' nmo's and cigs, and where both alignments are within the fai
                         print OUT $f1->[0];
                         print OUT $f2->[0];
+                    } else {
+                        # warn discard?
                     }
+                    } else {
+                        if ($keep && (($f1->[1] eq '*') && ($f2->[1] eq '*'))) {
+                            print OUT $f1->[0];
+                            print OUT $f2->[0];
+                        } else {
+                            # warn discard
+                        }
                     }
                 }
 
-                # if we have alternative alignments
                 if (@{$m[0]} && @{$m[1]}) {
 
                     # prune proper ... only matching mates
@@ -142,7 +175,6 @@ sub saveout {
                         $have{$_->[1]}=2 if $have{$_->[1]} == 1;
                     }
 
-                    # do i have any chromosome-matching mates?
                     %have = map { $have{$_}==2 ? ($_=>1) : () } keys(%have);
 
                     $have{'*'} = undef;
@@ -202,10 +234,9 @@ sub saveout {
                         my ($out1, $nmo1, $pos1, $len1, $isrev1, $origid, $cig) = @{$m[0][$i]};
                         my ($out2, $nmo2, $pos2, $len2, $isrev2, $origid, $cig) = @{$m[1][$i]};
 
-                        # replace insert-size and mate-pos
+                        # replace insert-size and mate-pos (slow!)
                         my $dist1 = $pos2-$pos1-$len2 if $isrev1 && $pos2 && $pos1;
                         $dist1 = $pos2-$pos1+$len2 if !$isrev1 && $pos2 && $pos1;
-                        # finally, we're dine... print out the mate pair
                         $out1 = replacetab($out1, 8, $dist1);
                         $out1 = replacetab($out1, 7, $pos2);
 
@@ -222,14 +253,32 @@ sub saveout {
         }
         push @{$m[$mate]}, [$out, $nmo, $pos, $len, $isrev, $origid, $cig];
     } else {
-        # not paired-end... super easy!
-        print OUT $out if (!($nmo eq '*')) && (!($cig eq '*'));
+        # only print clearly good or clearly unaligned
+        print OUT $out if ($keep && $nmo eq '*') || ((!($nmo eq '*')) && (!($cig eq '*')) && (($pos+$len) < $FAI{$nmo}));
+        # warn discard?
     }
 }
 
+warn "Reading '$f', writing to '$o'\n" if $opt{debug};
+
+#open OUT, "|samtools view -S -b - > $o 2> /dev/null";
+open OUT, "|samtools view -S -b - > $o";
+
 my $mate = 1;
 my $previd;
-while (<IN>) {
+
+while (1){
+    if (@IN) {
+        # pop stack
+        $_ = shift @IN;
+    } else {
+        $_ = <IN>;
+    }
+    if (!$_) {
+        warn "Finished reading $f\n" if $opt{debug};
+        last;
+    }
+
 	next if /^\@PG/ && $opt{noindel};
 	print(OUT) && next if /^\@/;
 	chomp;
@@ -240,10 +289,13 @@ while (<IN>) {
 
     my $origid = $id;
 
-    if (!$pe && $cig eq '*' || $nmo eq '*') {
+    if (!$pe && ($cig eq '*' || $nmo eq '*')) {
+	    print OUT $_, "\n" if $keep;
         next;
     }
 
+# ensure progression even if errors in code
+eval {
     if ($pe && $mate  && $previd) {
         # paired-end read id's have to match each other ... IE: bowtie output
         $_ = replacetab($_, 0, $previd);
@@ -288,7 +340,7 @@ while (<IN>) {
 
 	for (split /;/, $xa) {
         # for each x alignment
-		my ($nmo, $pos, $cig, $mm) = split /,/, $_;
+        my ($nmo, $pos, $cig, $mm) = m/(.*),([^,]+),([^,]+),([^,]+)/;
 
         # set reverse bits as appropriate
         $bits = $bits & ~16;
@@ -335,7 +387,7 @@ while (<IN>) {
         # save output
         saveout("$id\t$bits\t$nmo\t$pos\t$qual\t$cig\t$f1\t$f2\t$f3\t$s\t$q\t$fdx\n", $mate, $nmo, $pos, length($seq), $bits & 16, $origid, $cig);
 	}
-}
+}}
 
 $mate = !$mate;
 saveout("",$mate) if $mate == 0;
