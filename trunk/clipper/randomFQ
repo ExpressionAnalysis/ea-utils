@@ -1,0 +1,236 @@
+#!/usr/bin/perl
+use strict;
+use Getopt::Long;
+
+# Author: Erik Aronesty (earonesty@xpressionanalysis.com) 
+# Outputs a random sampled fastq or fasta file, from an input fastq
+# Copyright (c) 2011 Expression Analysis
+
+
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+my $cnt;
+my $fasta;
+my $out;
+my $seed=1;
+my $window;
+my $always;
+my $pct;
+GetOptions("count=i"=>\$cnt, "pct=f"=>\$pct, "fasta"=>\$fasta, "out=s"=>\$out, "seed=i"=>\$seed, "window=i"=>\$window, "always"=>\$always) || die usage();
+if ($window < $cnt) {
+	$window = $cnt * 5; 
+	$window = 100000 if $window < 100000;
+}
+
+if ($seed) {
+	srand($seed);
+}
+
+die usage() unless $cnt>0||$pct>0;
+
+my $in = shift;
+my $mate = shift;
+my $mate2 = shift;
+
+die "Can't see $in\n" unless -e $in;
+die "Can't see $mate\n" unless !$mate || -e $mate;
+die "Can't see $mate2\n" unless !$mate2 || -e $mate2;
+
+my $s = -s $in;
+my $sm = -s $mate;
+my $sm2 = -s $mate2;
+
+die "Need -out <prefix> for paired-end" if $mate && !$out;
+
+my $suff;
+if ($out =~ s/\%(.*)//) {
+	$suff = $1;
+}
+$out =~ s/_$//;
+
+my $gzmeth = $suff =~ /\.gz/ ? "|gzip -c " : "";
+
+open(IN, $in=~/\.gz$/?"gunzip -c $in|":$in) || die;
+
+if ($mate) {
+	open(MI, $mate=~/\.gz$/?"gunzip -c $mate|":$mate) || die;
+	open(MI2, $mate2=~/\.gz$/?"gunzip -c $mate2|":$mate2) if $mate2;
+	open(O1, "$gzmeth>${out}_1$suff") || die;
+	open(O2, "$gzmeth>${out}_2$suff") || die;
+	if ($mate2) {
+		open(O3, "$gzmeth>${out}_3$suff") || die;
+	}
+} else {
+	my $gzmeth = $out =~ /\.gz/ ? "|gzip -c " : "";
+	if ($out) {
+		open(O1, "$gzmeth>$out");
+	} else {
+		open(O1, ">&STDOUT");
+	}
+}
+
+my $lc = 0+`alc -o $in`;
+my $stats = $in; $stats =~ s/\.gz$//;  $stats .= ".stats";
+if (-e $stats) {
+	my $rlc = `grep ^reads $stats | cut -f 2`+0;
+	$lc = $rlc if $rlc;
+} else {
+    if ($in =~ /gz$/) {
+        $lc *= .90;         # lower guess
+    }
+}
+
+if (!$always && ($cnt > $lc/2)) {
+	$cnt *= 4;
+	warn "Source is too small relative to count requested, just returning tail -$cnt\n";
+	if ($mate) {
+		if ($in=~/gz$/) {
+			system("zhead -$cnt $in $gzmeth> ${out}_1$suff");
+		} else {
+			system("tail -$cnt $in $gzmeth> ${out}_1$suff");
+		}
+		if ($mate=~/gz$/) {
+			system("zhead -$cnt $mate $gzmeth> ${out}_2$suff");
+		} else {
+			system("tail -$cnt $mate $gzmeth> ${out}_2$suff");
+		}
+		if ($mate2=~/gz$/) {
+			system("zhead -$cnt $mate2 $gzmeth> ${out}_3$suff");
+		} else {
+			system("tail -$cnt $mate2 $gzmeth> ${out}_3$suff") if ($mate2);
+		}
+		exit 0;
+	} else {
+		if ($out) {
+			$gzmeth = $out =~ /\.gz/ ? "|gzip -c " : "";
+			$out = "$gzmeth>$out";
+		}
+		if ($in=~/gz$/) {
+			exec("zhead -$cnt $in $out");
+			die("Exec failed : $!\n");
+		} else {
+			exec("tail -$cnt $in $out");
+			die("Exec failed : $!\n");
+		}
+	}
+}
+
+# reads to sample from....whole file or a smaller part?
+$window = $lc if $window > $lc;
+
+my $fudge = 1.5;                # top weighted
+$fudge = 1.2 if $always;        # less top-weighted
+
+# larger = more chance to keep read
+my $prob = ($cnt*$fudge)/$window;
+
+if ($pct) {
+    $prob = $pct/100;
+    $cnt = 10000000000;
+}
+
+# we used to seek ... but this broke too much ... if you want to fix... fix randomFQ-broken ... 
+if (!$always) {
+    # skip some reads at the beginning
+    my $skip = ($lc-$window) / 10;
+    $skip = 200000 if $skip > 200000;
+    for (my $i=0;$i<$skip;++$i)	{
+        scalar <IN>; scalar <IN>; scalar <IN>; scalar <IN>;
+        scalar <MI>; scalar <MI>; scalar <MI>; scalar <MI>;
+        scalar <MI2>; scalar <MI2>; scalar <MI2>; scalar <MI2>;
+    }
+}
+
+while ($cnt > 0) {
+	if (rand() > $prob) {
+		# discard
+		<IN>; <IN>; <IN>; <IN>;
+		<MI>; <MI>; <MI>; <MI>;
+		<MI2>; <MI2>; <MI2>; <MI2>;
+		next;
+	}
+
+	# id
+	my $i = <IN>;
+    if (!$i) {
+        $cnt = 0;
+        last;
+    }
+	my $i2 = <MI> if $mate;
+	my $i3 = <MI2> if $mate2;
+
+	# read
+	my $r = <IN>;
+	my $r2 = <MI> if $mate;
+	my $r3 = <MI2> if $mate2;
+
+	if ($fasta) {
+		# only need id and read
+		$i=~ s/^\@/>/;
+		$i2=~ s/^\@/>/;
+		$i3=~ s/^\@/>/;
+		print O1 "$i$r";
+		print O2 "$i2$r2" if $mate;
+		print O3 "$i3$r3" if $mate2;
+		<IN>;<IN>;
+		<MI>;<MI>;
+	} else {
+		# print id and read
+		print O1 "$i$r";
+		print O2 "$i2$r2";
+		print O3 "$i3$r3";
+		# copy comment and quality
+		print O1 scalar <IN>;
+		print O2 scalar <MI> if $mate;
+		print O3 scalar <MI2> if $mate2;
+		print O1 scalar <IN>;
+		print O2 scalar <MI> if $mate;
+		print O3 scalar <MI2> if $mate2;
+	}
+	--$cnt;
+}
+
+close IN;
+
+sub usage() {
+	return <<EOF
+usage: $0 -c <count> [-fasta] [-out <prefix>] [-seed <int>] <input-fastq> [<input-2> [<index-3>] ]
+
+Returns <count> number of random entries from the input fastq. 
+
+Output is fastq, unless you specify -fasta
+
+If the -out parameter ends in .gz, the result is gzipped in-place.
+
+SINGLE END:
+
+Outputs to standard output, unless -out <file> is specified.   
+
+PAIRED END:
+
+Pass 2 (or 3) files as input, -out is required.
+
+If the paired-end output contains a "%" sign, it is replaced with the 1 & 2 for paired-end.
+
+IE: -o output_%.fastq.gz
+
+*** If one file is an indexed read, it has to be the 3rd file (for now).
+EOF
+}
+
+sub max {
+	return $_[0] > $_[1] ? $_[0] : $_[1];
+}
+
