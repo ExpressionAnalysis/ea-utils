@@ -44,7 +44,7 @@ THE SOFTWARE.
 
 #include "fastq-lib.h"
 
-const char * VERSION = "0.9.1";
+const char * VERSION = "0.9.3";
 
 #define MIN_READ_LEN 20
 #define DEFAULT_LOCII 1000000
@@ -67,6 +67,7 @@ double quantile(const std::vector<int> &vec, double p);
 double quantile(const std::vector<double> &vec, double p);
 double pnorm(double x);
 double qnorm(double x);
+int rand_round(double x);
 
 // basic utils
 std::vector<char *> split(char* str, const char* delim);
@@ -104,10 +105,10 @@ public:
 
 class vcall {
 public:
-    vcall() {base='\0'; mn_qual=mq0=fwd=rev=qual=is_ref=qual_ssq=mq_sum=mq_ssq=0;}
+    vcall() {base='\0'; mn_qual=mq0=fwd=rev=qual=is_ref=qual_ssq=mq_sum=mq_ssq=tail_rev=tail_fwd=0;}
     char base;
 	bool is_ref;
-    int qual, fwd, rev, mq0, mn_qual, qual_ssq, mq_sum, mq_ssq;
+    int qual, fwd, rev, mq0, mn_qual, qual_ssq, mq_sum, mq_ssq, tail_rev, tail_fwd;
 	vector <string> seqs;
     int depth() const {return fwd+rev;}
     int mq_rms() const {return sqrt(mq_ssq/depth());}
@@ -240,6 +241,8 @@ int min_qual=3;
 int repeat_filter=7;
 double artifact_filter=1;
 int min_adepth=2;
+int read_tail_pct=.6;
+int read_tail_len=4;
 int min_idepth=3;
 int no_baq=0;
 double zygosity=.5;		        // set to .1 for 1 10% admixture, or even .05 for het/admix
@@ -374,6 +377,8 @@ int main(int argc, char **argv) {
 	char **in=&argv[optind];
 	int in_n = argc-optind;
 
+    // not really random
+    srand(1);
 
     max_phred = -log10(global_error_rate)*10;
 
@@ -840,7 +845,9 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 
 		bool skip = 0;
 
-		if (artifact_filter > 0 && (depthbypos[pia] > artifact_filter * (1+(Depth/rds.MeanReadLen())))) {
+        // probably should not be adding anything here... but the old code added 1 and floored... new code adds .5 and rounds... which is comparable
+        // really.. should just be adding zero, the reason the old code had it was because of a lack of max()
+		if (artifact_filter > 0 && (depthbypos[pia] > max(1,rand_round(0.5+artifact_filter * (Depth/rds.MeanReadLen()))))) {
 			++SkipDupReads;
 			skip=1;
 		} else if (mq < min_mapq) {
@@ -872,6 +879,16 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
             Calls[j].mq_ssq+=mq*mq;
             Calls[j].mq_sum+=mq;
             Calls[j].qual_ssq+=q*q;
+/*
+            if (pia <= read_tail_len || (rds.MeanReadLen()-pia) <= read_tail_len) {
+                if ( o == ',' || o == 'a' || o == 'c' || o == 't' || o == 'g' ) {
+                    ++Calls[j].tail_rev;
+                } else {
+                    ++Calls[j].tail_fwd;
+                }
+            }
+*/
+
             if (vcf_f) {
                 if (mq == 0) 
                     Calls[j].mq0++; 
@@ -1133,6 +1150,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 	int skipped_balance=0;
 	int skipped_alpha=0;
 	int skipped_indel=0;
+	int skipped_tail_hom=0;
 	int skipped_depth=0;
 	int skipped_repeat=0;
 
@@ -1146,8 +1164,12 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 		if (!p.Calls[i].base)
 			continue;
 
+		if (!p.Calls[i].depth())
+			continue;
+
+		double bpct = (double) min(p.Calls[i].fwd,p.Calls[i].rev)/p.Calls[i].depth();
+
 		if (pct > pct_depth && qpct >= pct_qdepth && (p.Calls[i].depth() >= min_adepth)) {
-			double bpct = (double) min(p.Calls[i].fwd,p.Calls[i].rev)/p.Calls[i].depth();
             if (bpct < pct_balance) {
                 int fwd_adj=0, rev_adj=0;
                 // f=b*(f+r); r=f/b-f; adj=r-(f/b-f)
@@ -1165,11 +1187,20 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                     p.Calls[i].rev -= rev_adj;
                     p.Calls[i].fwd -= fwd_adj;
                     skipped_balance+=rev_adj+fwd_adj;
+
+                    // fixed bpct
                     bpct = (double) min(p.Calls[i].fwd,p.Calls[i].rev)/p.Calls[i].depth();
                 } else {
                     // it's junk anyway
                 }
+
+                // fix depths after adjustment!
+                pct = (double) p.Calls[i].depth()/p.Depth;
+                qpct = (double) p.Calls[i].qual/p.TotQual;
             }
+        }
+
+		if (pct > pct_depth && qpct >= pct_qdepth && (p.Calls[i].depth() >= min_adepth)) {
 			// balance is meaningless at low depths
 			if ((bpct >= pct_balance) || (p.Calls[i].depth()<4)) {
 				if (p.Calls[i].base == '+' || p.Calls[i].base == '-') {
@@ -1201,7 +1232,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                             // only calls 1 indel at a given position
                             if ((repeat_filter == 0) || (p.RepeatCount < repeat_filter)) {
                                 // maybe use rms here... see if it helps
-                                int mean_qual = p.Calls[i].qual/p.Calls[i].depth();
+                                double mean_qual = p.Calls[i].qual/(double)p.Calls[i].depth();
                                 double err_rate = mean_qual < max_phred ? pow(10,-mean_qual/10.0) : global_error_rate;
                                 // expected number of non-reference = error_rate*depth
                                 double pval=(p.Depth*err_rate==0)?0:gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
@@ -1247,8 +1278,16 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                             p.Calls[i].rev-=ins_rev;
                         }
 
+                        double mean_qual = p.Calls[i].qual/(double)p.Calls[i].depth();
+
+/*
+                        if ( (repeat_filter > 0) && (p.RepeatCount >= repeat_filter) ) {
+                           p.Calls[i].fwd-=p.Calls[i].tail_fwd; 
+                           p.Calls[i].rev-=p.Calls[i].tail_rev;
+                           skipped_tail_hom+=p.Calls[i].tail_fwd+p.Calls[i].tail_rev;
+                        }
+*/
                         if (p.Calls[i].depth() >= min_adepth && p.Calls[i].depth() > 0) {
-                            int mean_qual = p.Calls[i].qual/p.Calls[i].depth();
                             double err_rate = mean_qual < max_phred ? pow(10,-mean_qual/10.0) : global_error_rate;
                             // expected number of non-reference bases at this position is error_rate*depth
                             double pval=(p.Depth*err_rate==0)?0:gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
@@ -1264,7 +1303,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                                 vfinal final(p.Calls[i]);
                                 final.padj=padj;
                                 final_calls.push_back(final);
-                           } else {
+                            } else {
                                 skipped_alpha+=p.Calls[i].depth();
                             }
                         }
@@ -1413,6 +1452,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 		    fprintf(stderr,"xpos-skip-bal\t%d\n",skipped_balance);
 		    fprintf(stderr,"xpos-skip-depth\t%d\n",skipped_depth);
 		    fprintf(stderr,"xpos-skip-indel\t%d\n",skipped_indel);
+//		    fprintf(stderr,"xpos-skip-tail-imbalance\t%d\n",skipped_tail_hom);
 		    fprintf(stderr,"xpos-skip-repeat\t%d\n",skipped_repeat);
 		    fprintf(stderr,"xpos-skip-alpha\t%d\n",skipped_alpha);
             if (repeat_filter > 0) {
@@ -1655,5 +1695,10 @@ std::vector<char *> split(char* str,const char* delim)
         token = strtok(NULL,delim);
     }
     return result;
+}
+
+int rand_round(double x) {
+    return floor(x)+((rand()>(x-int(x))) ? 1 : 0);
+//warn("rr:%f=%d\n",x);
 }
 
