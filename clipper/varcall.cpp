@@ -281,13 +281,14 @@ int main(int argc, char **argv) {
     char *target_annot = NULL;
     char *read_stats = NULL;
 
-	while ( (c = getopt_long(argc, argv, "?svBhe:m:N:x:f:p:a:g:q:Q:i:o:D:R:b:L:S:",NULL,NULL)) != -1) {
+	while ( (c = getopt_long(argc, argv, "?svVBhe:m:N:x:f:p:a:g:q:Q:i:o:D:R:b:L:S:",NULL,NULL)) != -1) {
 		switch (c) {
 			case 'h': usage(stdout); return 0;
 			case 'm': umindepth=atoi(optarg); break;
 			case 'q': min_qual=atoi(optarg); break;
 			case 'o': out_prefix=optarg; break;
 			case 'Q': min_mapq=atoi(optarg); break;
+			case 'V': printf("Version: %s.%d\n", VERSION, SVNREV); exit(0); break;
 			case 'R': repeat_filter=atoi(optarg); break;
 			case 'A': target_annot=optarg; break;
 			case 'a': uminadepth=atoi(optarg);break;
