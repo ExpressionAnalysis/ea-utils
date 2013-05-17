@@ -44,7 +44,7 @@ THE SOFTWARE.
 
 #include "fastq-lib.h"
 
-#define SVNREV atoi(strchr("$revision: 572 $", ':')+1)
+#define SVNREV atoi(strchr("$Revision: 572 $", ':')+1)
 const char * VERSION = "0.9";
 
 #define MIN_READ_LEN 20
