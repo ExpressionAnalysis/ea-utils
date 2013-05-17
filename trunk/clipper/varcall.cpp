@@ -44,7 +44,8 @@ THE SOFTWARE.
 
 #include "fastq-lib.h"
 
-const char * VERSION = "0.9.3";
+#define SVNREV atoi(strchr("$revision: 572 $", ':')+1)
+const char * VERSION = "0.9";
 
 #define MIN_READ_LEN 20
 #define DEFAULT_LOCII 1000000
@@ -392,7 +393,7 @@ int main(int argc, char **argv) {
 
 		parse_bams(vstat, in_n, in, ref);
 
-		stat_out("version\tvarcall-%s\n", VERSION);
+		stat_out("version\tvarcall-%s.%d\n", VERSION, SVNREV);
         stat_out("min depth\t%d\n", minsampdepth);
         stat_out("alpha\t%f\n", alpha);
 
@@ -530,7 +531,7 @@ int main(int argc, char **argv) {
 			fprintf(varsum_f,"warning\toutputting all variations, no minimum depths specified\n");
 		}
 
-		fprintf(varsum_f,"version\tvarcall-%s\n", VERSION);
+		fprintf(varsum_f,"version\tvarcall-%s.%d\n", VERSION, SVNREV);
 		fprintf(varsum_f,"min depth\t%d\n", min_depth);
 		fprintf(varsum_f,"min call depth\t%d\n", min_adepth);
 		fprintf(varsum_f,"alpha\t%f\n", alpha);
@@ -743,6 +744,7 @@ void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref) {
             v.Parse(l.s);
             ++cnt;
         }
+        v.Finish();
 
         if (is_popen) pclose(fin); else fclose(fin);
     }
@@ -1015,6 +1017,13 @@ void VarCallVisitor::Visit(PileupSummary &p) {
         }
     }
 
+    // initialize the window with nothing, if it's not full
+    while (Win.size() < WinMax) {
+        JunkSummary.Base = '@';
+        JunkSummary.Pos = 0;
+        Win.push_back(JunkSummary);
+    }
+
     Win.push_back(p);
 
     if (Win.size() > WinMax)        // queue too big?  pop
@@ -1025,8 +1034,8 @@ void VarCallVisitor::Visit(PileupSummary &p) {
     char lrb, rrb;                  // left repeat base...
     int vx;
 
-    if (Win.size() < WinMax/2) {    // small window?  look at leading edge only
-        vx = Win.size()-1;
+    if (Win.size() < WinMax) {    // small window?  look at leading edge only
+        return;
     } else {
         vx = WinMax/2;              // larger window? look at midpoint
     }
@@ -1112,6 +1121,7 @@ void VarCallVisitor::Visit(PileupSummary &p) {
 }
 
 void VarCallVisitor::Finish() {
+    // finish out the rest of the pileup, with the existing window
     int vx = WinMax/2;
     while (vx < Win.size()) {
         VisitX(Win[vx++]);
@@ -1563,7 +1573,7 @@ void VarStatVisitor::Visit(PileupSummary &p) {
 void usage(FILE *f) {
         fprintf(f,
 "Usage: varcall <-s|-v> <-f REF> [options] bam1 [bam2...]\n"
-"Version: %s (BETA)\n"
+"Version: %s.%d (BETA)\n"
 "\n"
 "Either outputs summry stats for the list of files, or performs variant calling\n"
 "\n"
@@ -1616,7 +1626,7 @@ void usage(FILE *f) {
 "\n"
 "Filtering Details:\n"
 "\n"
-        ,VERSION);
+        ,VERSION, SVNREV);
 }
 
 std::string string_format(const std::string &fmt, ...) {
