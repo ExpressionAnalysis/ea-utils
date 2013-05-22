@@ -35,6 +35,7 @@ use Socket qw(IPPROTO_TCP TCP_NODELAY TCP_KEEPIDLE TCP_KEEPINTVL TCP_KEEPCNT);
 use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
 use Safe;
 use Cwd qw(abs_path cwd);
+use List::Util qw(min max);
 
 our ($REVISION) = (q$Revision: 123 $ =~ /(\d+)/);
 
@@ -42,11 +43,9 @@ our $VERSION = "0.9.$REVISION";				# 0.10 wil be feature lock, after sql impl.  
 
 my $PPID=$$;
 my $WIN32 = ($^O =~ /Win32/);
-my $SOCK_WAIT = -1;				# wait for resp
-my $SOCK_FILE = -2;				# send file chunk
-my $SOCK_RAW = -3;				# send pre-encoded resp
 my $DEFAULT_MEM = 10000;
 my $TIMEFMT = 'command:%C\ncpu-real:%E\ncpu-user:%U\ncpu-sys:%S\nmem-max:%M\nmem-avg:%t\nctx-wait:%w\nfs-in:%I\nfs-out:%O';
+my @DAEMON_OPTIONS;
 
 my ($daemon, $killjob, $editjob);
 my (%conf, %def, @metrics, @labels);
@@ -689,6 +688,7 @@ sub selfcmd {
 	process_message($cmd, undef);
 }
 
+my $debugzid;
 sub process_message {
 	my ($src_data, $zid) = @_;
 
@@ -720,10 +720,10 @@ sub process_message {
 		} elsif ($args[0] eq 'rest') {
 			xlog("note", "Restarting from remote command");
 			$quit = 1;
-			zmq_safe_term();
+            zmq_unbind($router, "tcp://$conf{bind}:$conf{port}");
 			if (!fork) {
                 zmq_fork_undef();
-				exec($GRUN_PATH, '-d');
+				exec($GRUN_PATH, @DAEMON_OPTIONS);
 			}
 			return "ok";
 		} elsif ($args[0] eq 'stat') {
@@ -731,19 +731,34 @@ sub process_message {
 			return shownodes(@args);
 		} elsif ($args[0] eq 'hist') {
 			shift @args;
-			return showhist(@args);
+            if (@args && (@args > 1 || $args[0] !~ /^\d+$/)) {
+                # fork... do it in parallel
+                forkandgo($zid, \&showhist, @args);
+                return();
+            } else {
+                # inline... do it now, less expensive than fork!
+    			return showhist(@args);
+            }
 		} elsif ($args[0] eq 'conf') {
 			return showconf();
 		} elsif ($args[0] eq 'jobs') {
 			shift @args;
 			return showjobs(@args);
-        } elsif ($args[0] eq 'file') {
-            shift @args;
-            xlog("note", "Sending file [@args] to remote");
-            return ($SOCK_FILE, @args);
+#        } elsif ($args[0] eq 'file') {
+#            shift @args;
+#            xlog("note", "Sending file [@args] to remote");
+#            return ($SOCK_FILE, @args);
 		} else {
 			return "Error: unknown xcmd '$args[0]'";	
 		}
+    } elsif ($cmd eq 'frep') {
+#		warn("router is $router, zid is $debugzid\n");
+        my ($dat) = @args;
+        if ($dat->{zid}) {
+            xlog("debug", "Sending response to $dat->{zid}");
+		    replymsg(pack("h*",$dat->{zid}),$dat->{out});
+		    #replymsg($debugzid,$dat->{out});
+        }
 	} elsif ($cmd eq 'node') {
 # this is the 'node ping'
 		if (ref($args[0]) eq 'HASH') {		# bit of validation
@@ -880,6 +895,7 @@ sub process_message {
                         delete $opts{id};
                         $opts{status}+=0;
                         $job->{usage} = \%opts;
+                        $job->{host} = $nodes{$ip} && $nodes{$ip}->{hostname} ? $nodes{$ip}->{hostname} : $ip;
                         my $jhistfile=jhistpath($jid);
                         xlog("debug", "Writing history for $jid to $jhistfile");
                         open(ST, ">$jhistfile");
@@ -1046,28 +1062,31 @@ sub process_message {
                 } else {
                     # job is toast... but maybe some streams are waiting
                     my $job=unpack_file($jhistfile);
-                    if ($nodes{$job->{ip}}) {
+                    if ($nodes{$job->{host}}) {
                         #compat
-                        $job->{port}=$nodes{$job->{ip}}->{port};
+                        $job->{port}=$nodes{$job->{host}}->{port};
                         $job->{jid}=$jid;
                         delete $job->{env};
                         return(%$job);
                     } else {
-				        xlog("error", "Job '$jid' execution node $nodes{$job->{ip}} not listed, please wait");
+				        xlog("error", "Job '$jid' execution node $nodes{$job->{host}} not listed, please wait");
+                        return ();
                     }
                 }
 			} else {
 				my $job_ip = slurp("$conf{spool}/jobs/$jid.ip");
 				if (!$job_ip) {
 					xlog("error", "No ip for job $jid");
-				}
-# route to correct node
-				if (!$nodes{$job_ip}) {
-					xlog("error", "Job $jid is linked to $job_ip which is not responding");
-				    return (warn=>"Job $jid is linked to $job_ip which is not responding");
+                    return ();
 				} else {
-					return (jid=>$jid, ip=>$job_ip, port=>$nodes{$job_ip}->{port}, hostname=>$nodes{$job_ip}->{hostname});
-				}
+# route to correct node
+                    if (!$nodes{$job_ip}) {
+                        xlog("error", "Job $jid is linked to $job_ip which is not responding");
+                        return (warn=>"Job $jid is linked to $job_ip which is not responding");
+                    } else {
+                        return (jid=>$jid, ip=>$job_ip, port=>$nodes{$job_ip}->{port}, hostname=>$nodes{$job_ip}->{hostname});
+                    }
+                }
 			}
 		} else {
             # wait for job start
@@ -1091,7 +1110,7 @@ sub process_message {
 
 # stick the ip the job came from in the options
             $job->{time}=time();
-            $job->{ip}=$ip;
+            $job->{fromip}=$ip;
             $job->{trace}=$trace;
 
             if ( -e $gfile) {
@@ -1180,7 +1199,7 @@ sub schedule {
 	}
 
 	for my $n (values %nodes) {
-		if ($n->{ip}) {
+		if (defined $n->{a_cpus}) {
 			$n->{a_cpus} = $n->{a_memory} = 0;
 		}
 	}
@@ -1222,6 +1241,7 @@ sub schedule {
 		}
 	}
 
+    my @nlist = values %nodes;
 	# no attempt here to prioritize jobs, just match and go
 	my $cnt=0;
     for my $jid (@D) {
@@ -1243,10 +1263,17 @@ sub schedule {
 		if ($cnt >= $conf{max_sched}) {
 			last;
 		}
+        if (!@nlist) {
+			xlog("debug", "No available nodes, not scheduling");
+            last;
+        }
+
 		++$cnt;
 		my $spread = rand() > $conf{spread_pct}/100;
 
-		for my $n (values %nodes) {
+		for (my $i = 0; $i < @nlist; ++$i) {
+            my $n = $nlist[$i];
+
 			# jobs need enough memory, cpu availability and disk space... that's it
 			if (!$n->{ip}) {
 				xlog("error", "Node has no ip! " . packdump($n));
@@ -1258,8 +1285,14 @@ sub schedule {
 			my $mem = $n->{tmem} - $n->{a_memory};
 			$mem = $n->{mem} if ($n->{tmem} == 0) || ($n->{mem} < $mem);
 
-			xlog("debug", "Sched $n->{ip}: j:$job->{cpus}?$n->{avail}>c:$cpus , j:$job->{memory}?$n->{mem}>m:$mem");
+			xlog("debug", "Sched $n->{ip}: jcpu:$job->{cpus}, ncpu:$n->{cpus}, nall:$n->{a_cpus}, nav:$n->{avail}, cpus:$cpus , j:$job->{memory}?$n->{mem}>m:$mem");
 
+            if ($cpus <= 0) {
+                # pull the node out of the list
+			    xlog("debug", "Removing $n->{hostname} from node list");
+                splice(@nlist, $i, 1);
+                --$i;                
+            }
 			if ($n->{ping} > (time()-$conf{ping_secs}*6)) {
 				my $ok = 1;
 				for (@metrics) {
@@ -1329,8 +1362,9 @@ sub schedule {
 				my $jptr = "$job->{file}" . ".ip";
 				burp($jptr, $max_n->{ip});
                 noderun($max_n, $jid, $job);
-                $max_n->{a_cpus} += $job->{cpus} + 1;
+                $max_n->{a_cpus} += $job->{cpus};
                 $max_n->{a_memory} += $job->{memory}; 
+                ++$jcnt;
 			}
 		} else {
 			if ($conf{backup_grid}) {
@@ -1423,7 +1457,6 @@ sub getbench {
 	my ($force)=@_;
         my $bench = slurp("$conf{spool}/bench");
 	if (!$bench||$force||(fmodtime("$conf{spool}/bench")<(time()-$conf{bench_secs}))) {
-        require Time::HiRes;
 		my $s = Time::HiRes::time();
 		my $i=0;
 		while (Time::HiRes::time() < $s+3) {
@@ -1462,9 +1495,10 @@ sub srvexec {
 		$conf{node}->{arch} = `arch`; chomp $conf{node}->{arch};
 		($conf{node}->{tmem},$conf{node}->{mem}) = getmem();					# free mem
 		$conf{node}->{load} = slurp("/proc/loadavg");			# load
-		$conf{node}->{cpus} = $conf{cpus} ? $conf{cpus} : getcpus();	# num cores
+        my $orig_cpus = getcpus();
+		$conf{node}->{cpus} = $conf{cpus} ? $conf{cpus} : $orig_cpus;	# num cores
 		$conf{node}->{bench} = $conf{bench} ? $conf{bench} : getbench();	# num cores
-		$conf{node}->{avail} = $conf{node}->{cpus} - $conf{node}->{load};	
+		$conf{node}->{avail} = min($conf{node}->{cpus}, $orig_cpus - $conf{node}->{load});	
 		$conf{node}->{ping} = time();
 		$conf{node}->{port} = $conf{port};
 		$conf{node}->{hostname} = $conf{hostname};
@@ -1776,19 +1810,16 @@ sub waitmsg_retry {
 }
 
 sub recvmsg {
-    my ($sock, $timeout) = @_;
+    my ($sock) = @_;
     my @ret;
     my ($buf, $dat);
-    if ($timeout) {
-    } else {
-        if (my $msg = zmq_recvmsg($sock)) {
-            $msg = zmq_recvmsg($sock);
-            if ($msg) {
-                my $buf = zmq_msg_data($msg);
-                xlog("debug", "Client got response: $buf") if $conf{trace};
-                if ($buf) {
-                    return unpackcmd($buf);
-                }
+    if (my $msg = zmq_recvmsg($sock)) {
+        $msg = zmq_recvmsg($sock);
+        if ($msg) {
+            my $buf = zmq_msg_data($msg);
+            xlog("debug", "Client got response: $buf") if $conf{trace};
+            if ($buf) {
+                return unpackcmd($buf);
             }
         }
     }
@@ -2025,11 +2056,12 @@ sub showhist {
 
 	$opt{fmt} = '%jid\t%user\t%stat\t%cwd\t%cmd\t%host\t%mtime\n';
 
-        {
-                local @ARGV = @_;
-                GetOptions(\%opt, "count|c=i", "user=s","job=i","resubmit","fmt|F=s","long","grep|g=s","dump");
-                @_=@ARGV;
-        }
+    {
+            local @ARGV = @_;
+            GetOptions(\%opt, "count|c=i", "user=s","job=i","resubmit","fmt|F=s","long","grep|g=s","dump");
+            @_=@ARGV;
+    }
+
 	if ($_[0] =~ /[a-z]/ && !$opt{user}) {
 		$opt{user} = $_[0]
 	} elsif ($_[0] =~ /^\d+$/) {
@@ -2086,7 +2118,7 @@ sub showhist {
 			next if $opt{user} && ! ($job->{user} eq $opt{user});
 			next if $opt{grep} && "$job->{user}\t@cmd\t$job->{cwd}" !~ $opt{grep};
 			--$count;
-                        my %job=%{$job};
+            my %job=%{$job};
 
 			$job{status} = ($job{status} >> 8) if 0 == ($job{status} & 0xFF);
 			# standard
@@ -2126,18 +2158,16 @@ sub showhist {
 				delete $job{usage};
 			}
 			if ($opt{long}) {
-				$opt{fmt} = '----------\n';
+				$r .= "----------\n";
 				for(sort(keys(%job))) {
-					$opt{fmt} .= "$_=" . $job{$_} . '\n';
+					$r .= "$_=" . (ref($job{$_})?packdump($job{$_}):$job{$_}) . "\n";
 				}
-			}
-	
-			if ($opt{dump}) {
+			} elsif ($opt{dump}) {
 				$r .= packdump($job) . "\n";
 			} else {
 				$r .= fmtstr($opt{fmt}, \%job);
 			}
-                }
+        }
 		last if $count == 0;
         }
         return $r;
@@ -2228,12 +2258,11 @@ sub showjobs {
 			$job->{memory} = $DEFAULT_MEM/1000 if ! $job->{memory};
 			$job->{cmd} = join(' ', @cmd);
 			if ($opt{long}) {
-					$opt{fmt} = '----------\n';
-					for(sort(keys(%$job))) {
-							$opt{fmt} .= "$_=" . $job->{$_} . '\n';
-					}
-			}
-			if ($opt{dump}) {
+                $r .= "----------\n";
+                for(sort(keys(%$job))) {
+                    $opt{fmt} .= "$_=" . (ref($job->{$_})?packdump($job->{$_}):$job->{$_}) . "\n";
+                }
+			} elsif ($opt{dump}) {
 				$r .= packdump($job) . "\n";
 			} else {
 				$r .= fmtstr($opt{fmt}, $job);
@@ -2245,10 +2274,10 @@ sub showjobs {
 }
 
 sub fmtstr {
-        my ($fmt, $hash) = @_;
+    my ($fmt, $hash) = @_;
 
-	# get list of fields
-        my @fds = $fmt =~ m/%(?:[#0 +,I:-]*(?:\d+)?(?:\.\d+)?\w{1,2}:)?([\w-]+|(?:{[^{}]+}))/g;
+# get list of fields
+    my @fds = $fmt =~ m/%(?:[#0 +,I:-]*(?:\d+)?(?:\.\d+)?\w{1,2}:)?([\w-]+|(?:{[^{}]+}))/g;
 
 	%{$safe->varglob("i")}=%{$hash};
 	my @vals;
@@ -2256,7 +2285,11 @@ sub fmtstr {
 		if ($_ =~ /^\{(.+)\}/) {
 			push @vals, $safe->reval($1);
 		} else {
-			push @vals, $hash->{$_};
+            if (ref($hash->{$_}) eq 'HASH') {
+    			push @vals, packdump($hash->{$_});
+            } else {
+    			push @vals, $hash->{$_};
+            }
 		}
 	}
 	undef %{$safe->varglob("i")};
@@ -2405,6 +2438,8 @@ sub getnodes {
 sub startdaemon {
 	my ($dkill, $restart, $reload, $node, $all, $dobench, $nofork);
 
+    @DAEMON_OPTIONS = @ARGV;
+
 	GetOptions("kill"=>\$dkill, "restart|R"=>\$restart, "benchmark|B"=>\$dobench, "reload|r"=>\$reload, "host=s"=>\$node, "all"=>\$all, "nofork|F"=>\$nofork) ||
 		die usage();
 
@@ -2516,8 +2551,8 @@ sub startdaemon {
 		$quit = 0;
 		$conf{loop_num} = 0;
 		while (!$quit) {
-            my $start = Time::HiRes::time();
             my $did=0;
+            my $start = Time::HiRes::time();
 			++$conf{loop_num};
 			eval {$did|=readsocks()};
 			last if $quit;
@@ -2844,10 +2879,12 @@ sub execute_job {
             if (!$err) {
 
                 my $code = -1;
+                my $start = Time::HiRes::time();
                 eval {
                     $code = system(@cmd);
                     $0="GRUN:$opts->{id}:$code";
                 };
+                my $elapsed = Time::HiRes::time() - $start;
 
                 open(SAVERR, ">&STDERR");
                 open(SAVOUT, ">&STDOUT");
@@ -2861,13 +2898,13 @@ sub execute_job {
 
                 xlog("debug", "Done running job $opts->{id}, code $code as user $uid") if $opts->{trace};
 
-                my ($usertime, $systemtime,
+                my ($utime, $stime,
                  $maxrss, $ixrss, $idrss, $isrss, $minflt, $majflt, $nswap,
                  $inblock, $oublock, $msgsnd, $msgrcv,
                  $nsignals, $nvcsw, $nivcsw);
 
                 eval {
-                    ($usertime, $systemtime,
+                    ($utime, $stime,
                      $maxrss, $ixrss, $idrss, $isrss, $minflt, $majflt, $nswap,
                      $inblock, $oublock, $msgsnd, $msgrcv,
                      $nsignals, $nvcsw, $nivcsw) = getrusage(RUSAGE_CHILDREN);
@@ -2875,23 +2912,21 @@ sub execute_job {
 
                 xlog("debug", "Really done with job $opts->{id} (@cmd = $@)\n") if $opts->{trace};
 
+                # $msgsnd, $msgrcv, $nsignals not used in Linux....
+
                 my $out = {
                     id=>$opts->{id},
                     status=>$code,
-                    usertime=>$usertime,
-                    systemtime=>$usertime,
+                    utime=>$utime,
+                    stime=>$stime,
+                    rtime=>$elapsed,
                     pid=>$$,
-                    maxrss=>$usertime,
-                    ixrss=>$ixrss,
-                    idrss=>$idrss,
-                    isrss=>$isrss,
+                    maxrss=>$maxrss,
                     minflt=>$minflt,
                     majflt=>$majflt,
                     nswap=>$nswap,
                     inblock=>$inblock,
-                    msgsnd=>$msgsnd,
-                    msgrcv=>$msgrcv,
-                    nsignals=>$nsignals,
+                    oublock=>$oublock,
                     nvcsw=>$nvcsw,
                     nivcsw=>$nivcsw
                 };
@@ -3132,4 +3167,32 @@ sub getjobstathash {
         return $stat;
     }
     return undef;
+}
+
+sub forkandgo {
+    my ($zid, $sub, @args) = @_;
+
+    if (!(my $pid=fork)) {
+        my $out="";
+        my $err="";
+        if (! defined $pid) {
+            $err = "Error: Can't fork";
+        } else {
+            zmq_fork_undef();
+            $context=zmq_init();
+
+            $0="GRUN:fork-handler";
+            # no accidental messages go out on this context
+            $out=eval{&$sub(@args)};
+            $err=$@;
+        }
+
+        $out = $err if $err && !$out;
+
+        sendcmd($conf{bind}, $conf{port}, 'frep', {zid=>unpack("h*",$zid), out=>$out});
+
+        if (defined($pid)) {
+            exit(0);
+        }
+    }
 }
