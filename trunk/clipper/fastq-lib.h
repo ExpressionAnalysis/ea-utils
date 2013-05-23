@@ -67,6 +67,9 @@ struct fq {
 };
 
 
+void free_line(struct line *l);
+void free_fq(struct fq *fq);
+
 // not GNU?  no getline...
 #if !defined( __GNUC__) || defined(WIN32) || defined(__APPLE__)
 	ssize_t getline(char **lineptr, size_t *n, FILE *stream);
