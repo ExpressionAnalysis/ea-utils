@@ -171,6 +171,7 @@ int main (int argc, char **argv) {
                 fputs(res.c_str(),stdout);                             // echo
                 fputc('\n',stdout);
             }
+            free_line(&l);
         }
 
         for (f_i=0;f_i<vin.size();++f_i) 

@@ -200,6 +200,7 @@ string tidx::lookup(const char *chr, int pos, const char *msep) {
         res += msep;
         res += string(l.s, l.n);
     }
+    free_line(&l);
     return res;
 }
 
@@ -222,6 +223,7 @@ string tidx::lookup_r(const char *chr, int beg, int end, const char *msep) {
         res += msep;
         res += string(l.s, l.n);
     }
+    free_line(&l);
     return res;
 }
 
@@ -323,6 +325,8 @@ void tidx::build(const char *in, const char *sep, int nchr, int nbeg, int nend, 
 	}
     dense_hash_map<string,vector<annot> >::iterator it;
 
+    free_line(&l);
+ 
     // for each chromosome
     it = map.begin();
     while (it != map.end()) {

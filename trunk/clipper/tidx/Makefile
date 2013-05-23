@@ -1,14 +1,14 @@
 # set these if you want to override
 
 PREFIX?=/usr
-CPPFLAGS?=-O3
+CPPFLAGS?=-O3 -I.
 REL := $(shell svnversion 2>/dev/null | perl -ne 'print $$1 if /:(\d+)/' )
 VER := $(shell perl -e 'do "perl/lib/Text/Tidx.pm"; print "$$Text::Tidx::VERSION\n"' )
 
 all: tidx perl/Tidx.bs
 
 debug:
-	CPPFLAGS=-g	${MAKE} $(MFLAGS) all
+	CPPFLAGS="-I. -g" ${MAKE} $(MFLAGS) all
 
 # no fPIC for linking main module
 tidx: tidx.cpp tidx-lib.cpp fastq-lib.cpp utils.cpp tidx.h
