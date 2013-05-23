@@ -43,7 +43,6 @@ our $VERSION = "0.9.$REVISION";				# 0.10 wil be feature lock, after sql impl.  
 
 my $PPID=$$;
 my $WIN32 = ($^O =~ /Win32/);
-my $DEFAULT_MEM = 10000;
 my $TIMEFMT = 'command:%C\ncpu-real:%E\ncpu-user:%U\ncpu-sys:%S\nmem-max:%M\nmem-avg:%t\nctx-wait:%w\nfs-in:%I\nfs-out:%O';
 
 my ($daemon, $killjob, $editjob);
@@ -55,6 +54,7 @@ $def{spool} = "/var/spool/grun";		# dir to place jobs
 $def{port} = 5184;				# listen/connect port
 $def{bind} = '0.0.0.0';				# listen addr
 $def{env} = ['PATH'];			# list of environment vars to copy from submit through to exec
+$def{default_memory} = 1000 * 1000;        # default job memory
 $def{ping_secs} = 30;				# how often to tell about load/mem/stats
 $def{remove_secs} = '$ping_secs * 1000';	# don't even try kickstarting if the node is this old
 $def{idle_load} = .3;				# how often to tell about load/mem/stats
@@ -458,6 +458,8 @@ sub grun_client {
             # convert mB to kB
             $opt{memory} *= 1000;
         }
+    } else {
+        $opt{memory} = $conf{default_memory};
     }
 
     # no socket io unless waiting
@@ -494,7 +496,7 @@ sub grun_client {
     }
 
     if ($verbose) {
-        printf STDERR "Memory:	%d\n", $opt{memory} ? $opt{memory}/1000 : $DEFAULT_MEM/1000;
+        printf STDERR "Memory:	%d\n", $opt{memory} ? $opt{memory}/1000 : $conf{default_memory};
         printf STDERR "CPUs:	%d\n", $opt{cpus} ? $opt{cpus} : 1;
         printf STDERR "Hosts:	%s\n", $opt{hosts} if $opt{hosts};
         for ((@metrics,@labels)) {
@@ -1232,7 +1234,7 @@ sub schedule {
 
 		# this should be config, min requirements
 		$job->{cpus} = 1 if $job->{cpus} == 0;
-		$job->{memory} = $DEFAULT_MEM if $job->{memory} == 0;
+		$job->{memory} = ($conf{default_memory}*1000) if $job->{memory} == 0;
 		for ((@metrics, @labels)) {
 			$job->{$_} = $conf{"default-$_"} if !$job->{$_} && $conf{"default-$_"};
 		}
@@ -1269,7 +1271,7 @@ sub schedule {
 
 		# this should be config, min requirements
 		$job->{cpus} = 1 if $job->{cpus} == 0;
-		$job->{memory} = $DEFAULT_MEM if $job->{memory} == 0;
+		$job->{memory} = ($conf{default_memory}*1000) if $job->{memory} == 0;
 
 		my @dereg;
 		my @n;
@@ -2282,7 +2284,7 @@ sub showjobs {
 			$job->{jid} = $jid;
 			$job->{stat} = $stat;
 			$job->{cpus} = 1 if ! $job->{cpus};
-			$job->{memory} = $DEFAULT_MEM/1000 if ! $job->{memory};
+			$job->{memory} = $conf{default_memory} if ! $job->{memory};
 			$job->{cmd} = join(' ', @cmd);
 			if ($opt{long}) {
                 $r .= "----------\n";
