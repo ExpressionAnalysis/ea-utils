@@ -542,6 +542,7 @@ sub grun_client {
     $SIG{PIPE} = \&client_sigh;
 
     $opt{cmd} = \@cmd;
+    $opt{hard_factor} = $conf{hard_factor};
     $opt{frompid} = $$;
     $opt{guid} = $opt{jobx} ? "$conf{hostname}:$opt{jobx}" : create_guid();
 
@@ -2791,8 +2792,11 @@ sub execute_job {
             }
             chown($uid,0,$shfile);
 
-            if ($conf{hard_factor}) {eval{
-                print SHFILE "ulimit -m " . ($opts->{memory} * $conf{hard_factor})/1000 . "\n" if $opts->{memory};
+            my $hard_factor = defined($opts->{hard_factor}) ? $opts->{hard_factor} : $conf{hard_factor};
+            if ($hard_factor) {eval{
+                # todo... other limits
+                print SHFILE "ulimit -m " . ($opts->{memory} * $conf{hard_factor})/1000 . "\n" 
+                    if $opts->{memory};
             }}
 
             if ($cmd[0] !~ / /) {
