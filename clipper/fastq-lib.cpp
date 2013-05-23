@@ -205,6 +205,22 @@ void revcomp(struct fq *d, struct fq *s) {
         d->qual.s[s->seq.n]='\0';
 }
 
+void free_line(struct line *l) {
+   if (l) {
+       if (l->s) free(l->s); 
+       l->s=NULL;
+   }
+}
+
+void free_fq(struct fq *f) {
+    if (f) {
+        free_line(&f->id);
+        free_line(&f->seq);
+        free_line(&f->com);
+        free_line(&f->qual);
+    }
+}
+
 
 /* getline.c -- Replacement for GNU C library function getline
 
@@ -311,5 +327,6 @@ ssize_t getline(char **lineptr, size_t *n, FILE *stream)
 {
   return getstr (lineptr, n, stream, '\n', 0);
 }
+
 
 #endif
