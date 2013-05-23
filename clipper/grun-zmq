@@ -629,7 +629,7 @@ sub grun_client {
         if ($stat == 11) {
             $err = 'Segmentation fault';
         }
-        if ($stat) {
+        if ($stat > 127) {
             # shift... but if that doesn't get you anything, set to -1 (unknown error)
             $stat = $stat>>8;
             $stat = -1 if !$stat;
@@ -1304,7 +1304,7 @@ sub schedule {
 
             if ($cpus <= 0) {
                 # pull the node out of the list
-			    xlog("debug", "Removing $n->{hostname} from node list");
+			    xlog("debug", "Removing $n->{hostname} from node list, cpus are $cpus");
                 splice(@nlist, $i, 1);
                 --$i;                
             }
@@ -1424,8 +1424,8 @@ sub noderun {
 sub init {
     $ENV{HOSTNAME} = `hostname`;
     chomp $ENV{HOSTNAME};
-
 	readconf();
+    $conf{version}=$VERSION;
 	if ($daemon) {
 		mkdir $conf{spool};
 		mkdir "$conf{spool}/jobs";
@@ -2146,6 +2146,7 @@ sub showhist {
 			--$count;
             my %job=%{$job};
 
+			$job{status} = $job->{usage}->{status} if $job->{usage} && ! $job->{status};
 			$job{status} = ($job{status} >> 8) if 0 == ($job{status} & 0xFF);
 			# standard
 			$job{status} = 'OK' 		if $job{status} eq 0;
@@ -2286,7 +2287,7 @@ sub showjobs {
 			if ($opt{long}) {
                 $r .= "----------\n";
                 for(sort(keys(%$job))) {
-                    $opt{fmt} .= "$_=" . (ref($job->{$_})?packdump($job->{$_}):$job->{$_}) . "\n";
+                    $r .= "$_=" . (ref($job->{$_})?packdump($job->{$_}):$job->{$_}) . "\n";
                 }
 			} elsif ($opt{dump}) {
 				$r .= packdump($job) . "\n";
@@ -3040,7 +3041,7 @@ sub create_guid {
 sub exec_clean {
     my ($jid) = @_;
     if (!-e "$conf{spool}/jpids/$jid") {
-        xlog("error", "Clean $jid which is already gone");
+        xlog("debug", "Clean $jid which is already gone");
     } else {
         xlog("debug", "Cleaning $jid") if $conf{trace};
         # stop tracking this pid, head node got all the info
