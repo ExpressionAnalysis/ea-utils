@@ -45,7 +45,6 @@ my $PPID=$$;
 my $WIN32 = ($^O =~ /Win32/);
 my $DEFAULT_MEM = 10000;
 my $TIMEFMT = 'command:%C\ncpu-real:%E\ncpu-user:%U\ncpu-sys:%S\nmem-max:%M\nmem-avg:%t\nctx-wait:%w\nfs-in:%I\nfs-out:%O';
-my @DAEMON_OPTIONS;
 
 my ($daemon, $killjob, $editjob);
 my (%conf, %def, @metrics, @labels);
@@ -65,7 +64,7 @@ $def{max_buf} = 1000000;			# how often to retry notifications
 $def{expire_secs} = 14400;			# remove jobs whose execution nodes haven't reported back in this amount of time
 $def{io_keep} = 3600;				# keep io for this long after a job with i/o is finished in a detached session
 #$def{hard_factor} = 2;				# hard limit factor
-$def{sched_secs} = '1';				# how often to try scheduling
+$def{sched_secs} = 1;				# how often to try scheduling
 $def{max_sched} = 50;				# how many different jobs to try and match before giving up on the rest (queue busy)
 $def{spread_pct} = 5;				# how often to "distribute jobs", versus "clump" them
 $def{master} = 'localhost:5184';		# central scheduler
@@ -85,6 +84,8 @@ my ($qinfo, $help, $config, $ver);
 Getopt::Long::Configure qw(require_order no_ignore_case passthrough);
 
 my $context = zmq_init();
+
+my @ORIG_ARGV= @ARGV;
 
 GetOptions("daemon"=>\$daemon, "CONF:s"=>\$config, "trace"=>\$def{trace}, "query"=>\$qinfo, "V"=>\$ver) ||
 	die usage();
@@ -218,7 +219,7 @@ if ($killjob) {
 		if ($job !~ /^\d/) {
             @id=(guid=>"$conf{hostname}:$job");
 		} else {
-            @id=(job=>$job);
+            @id=(jid=>$job);
         }
 		my $err = kill_job(@id, sig=>$sig, force=>$kforce);
 		if (!defined($err) && $@) {
@@ -710,22 +711,26 @@ sub process_message {
 
 		if ($args[0] eq 'relo') {
 # reread config... maybe rebind stuff too
-			xlog("note", "Reload from remote command");
-			init();
-			return 'ok';
+			xlog("note", "Reload from remote command (ARGS: @ORIG_ARGV)");
+	        eval{init();};
+            if ($@) {
+			    return "Error: $conf{config}, $@";
+            } else {
+    			return "Ok, reloaded from $conf{config}";
+            }
 		} elsif ($args[0] eq 'term') {
 			xlog("note", "Shutdown from remote command");
 			$quit = 1;
-			return 'ok';
+			return 'Ok, shutdown initiated';
 		} elsif ($args[0] eq 'rest') {
-			xlog("note", "Restarting from remote command");
+			xlog("note", "Restarting from remote command  ($GRUN_PATH @ORIG_ARGV)");
 			$quit = 1;
             zmq_unbind($router, "tcp://$conf{bind}:$conf{port}");
 			if (!fork) {
                 zmq_fork_undef();
-				exec($GRUN_PATH, @DAEMON_OPTIONS);
+				exec($GRUN_PATH, @ORIG_ARGV);
 			}
-			return "ok";
+			return "Ok, restart initiated";
 		} elsif ($args[0] eq 'stat') {
 			shift @args;
 			return shownodes(@args);
@@ -765,23 +770,27 @@ sub process_message {
             my $node = $args[0];
 
             $node->{ip}=$ip unless $node->{ip};
+            $ip=$node->{ip};
 
-            my $file = "$conf{spool}/nodes/$ip.reg";
-            open(F, ">$file") || return("Error: can't create $file : $!");
-            print F packfile($node);
-            close F;
-# also stick in memory
+            if ($ip) {
+                my $file = "$conf{spool}/nodes/$ip.reg";
+                open(F, ">$file") || return("Error: can't create $file : $!");
+                print F packfile($node);
+                close F;
+    # also stick in memory
 
-            if (!$nodes{$ip}) {
-                xlog("note", "Registering node $ip:$node->{port} $node->{hostname}");
+                if (!$nodes{$ip}) {
+                    xlog("note", "Registering node $ip:$node->{port} $node->{hostname}");
+                }
+
+                $node->{ping} = time();
+                $node->{ex_ping} = $nodes{$ip}->{ping};
+                $node->{zid} = $zid;
+
+                $nodes{$ip} = $node;
+            } else {
+                    xlog("note", "Can't register node with no ip");
             }
-
-            $node->{ping} = time();
-            $node->{ex_ping} = $nodes{$ip}->{ping};
-            $node->{zid} = $zid;
-
-            $nodes{$ip} = $node;
-
 # save execution node ping time for diagnostic (times out of sync or very slow transmission, etc)
 		} else {
 			return "Error: invalid node registration info";	
@@ -1192,11 +1201,17 @@ sub schedule {
 
 	return unless %nodes;
 
+    while ((my $kid = waitpid(-1, WNOHANG))>1) {
+        $did=1;
+    }
+
+    # this should not be necessary .. remove
 	if (time() > ($conf{lastschedtime} + $conf{sched_secs})) {
 		$conf{lastschedtime} = time();
 	} else {
 		return;
 	}
+    ## end remove
 
 	for my $n (values %nodes) {
 		if (defined $n->{a_cpus}) {
@@ -1425,7 +1440,11 @@ sub init {
 		delete $conf{node};
 	}
 
-	$conf{hostip} = host2ip($conf{hostname});
+	$conf{hostip} = host2ip($conf{hostname}) unless $conf{hostip};
+
+    if (!$conf{hostip}) {
+        die "Can't start server without knowing ip.   $conf{hostname} does not resolve to ip, and no hostip defined\n";
+    }
 }
 
 sub getmem {
@@ -1501,6 +1520,7 @@ sub srvexec {
 		$conf{node}->{avail} = min($conf{node}->{cpus}, $orig_cpus - $conf{node}->{load});	
 		$conf{node}->{ping} = time();
 		$conf{node}->{port} = $conf{port};
+		$conf{node}->{ip} = $conf{hostip};
 		$conf{node}->{hostname} = $conf{hostname};
 		$conf{node}->{kernel} = `uname -rv`; chomp $conf{node}->{kernel};
 		$conf{node}->{arch} = `uname -m`; chomp $conf{node}->{arch};
@@ -1833,6 +1853,9 @@ sub sendcmd {
 }
 
 sub packcmd {
+    if (!$conf{hostip}) {
+        confess("Need a defined hostip");
+    }
     return encode_json([$conf{hostip},$conf{trace},@_]);
 }
 
@@ -1855,6 +1878,9 @@ sub unpackcmd {
 
 sub packfile {
     croak unless ref $_[0];
+    if (ref $_[0] eq 'HASH') {
+        $_[0]->{version}=$VERSION;
+    }
     return encode_json($_[0]);
 }
 
@@ -2114,7 +2140,7 @@ sub showhist {
         my $job=unpack_file($f);
         
         if (ref($job)) {
-            my @cmd=@{$job->{cmd}};
+            my @cmd=ref $job->{cmd} ? @{$job->{cmd}} : ($job->{cmd});
 			next if $opt{user} && ! ($job->{user} eq $opt{user});
 			next if $opt{grep} && "$job->{user}\t@cmd\t$job->{cwd}" !~ $opt{grep};
 			--$count;
@@ -2388,6 +2414,8 @@ sub kicknodes {
     return if (time() < ($conf{lastkicktime} + $conf{ping_secs} * 4));
 	$conf{lastkicktime} = time();
 	for my $node (@nodes) {
+		# not just started
+		if ($conf{loop_num} > 5) {
 		# sometime in the last 24 hours?
 		if ($node->{ping} > (time() - ($conf{remove_secs}))) {
 			# but not in the last couple minutes
@@ -2409,6 +2437,7 @@ sub kicknodes {
 				}
 			}
 		}
+        }
 	}
     return $did;
 }
@@ -2421,15 +2450,17 @@ sub getnodes {
 		return values %nodes;
 	}
 	# read all from disk, including old ones
-        opendir(D,"$conf{spool}/nodes");
-        while($_=readdir(D)) {
+    opendir(D,"$conf{spool}/nodes");
+    while($_=readdir(D)) {
         $_ = "$conf{spool}/nodes/$_";
         next unless -f $_;
-        my $node=unpack_file($_);
-		if (! defined $node->{avail}) {
-			$node->{avail} = $node->{cpus}-$node->{load};
-		}
-        push @r, $node;
+        my $node=eval{unpack_file($_)};
+        if ($node) {
+            if (! defined $node->{avail}) {
+                $node->{avail} = $node->{cpus}-$node->{load};
+            }
+            push @r, $node;
+        }
 	}
 	closedir D;
 	return @r;
@@ -2437,8 +2468,6 @@ sub getnodes {
 
 sub startdaemon {
 	my ($dkill, $restart, $reload, $node, $all, $dobench, $nofork);
-
-    @DAEMON_OPTIONS = @ARGV;
 
 	GetOptions("kill"=>\$dkill, "restart|R"=>\$restart, "benchmark|B"=>\$dobench, "reload|r"=>\$reload, "host=s"=>\$node, "all"=>\$all, "nofork|F"=>\$nofork) ||
 		die usage();
@@ -2535,7 +2564,6 @@ sub startdaemon {
                 open STDERR, '>&STDOUT';
             }
         }
-		chdir '/';
 
 		POSIX::setsid();
 
