@@ -41,6 +41,7 @@ our ($REVISION) = (q$Revision: 123 $ =~ /(\d+)/);
 
 our $VERSION = "0.9.$REVISION";				# 0.10 wil be feature lock, after sql impl.  0.9.X is zmq & json::xs
 
+my $STATUS_NEVERRUN=199;
 my $PPID=$$;
 my $WIN32 = ($^O =~ /Win32/);
 my $TIMEFMT = 'command:%C\ncpu-real:%E\ncpu-user:%U\ncpu-sys:%S\nmem-max:%M\nmem-avg:%t\nctx-wait:%w\nfs-in:%I\nfs-out:%O';
@@ -867,8 +868,8 @@ sub process_message {
 				}
 			}
 		} else {
-            # it never ran... don't worry about it
-			unlink "$conf{spool}/jobs/$jid";
+            my $job = unpack_file("$conf{spool}/jobs/$jid");
+            archive_job($jid, $job, $STATUS_NEVERRUN, undef, undef);
 			return "Job $jid aborted";
 		}
 	} elsif ($cmd eq 'jstat') {
@@ -903,26 +904,8 @@ sub process_message {
                 if ( -e "$conf{spool}/jobs/$jid:$ip.run" ) {
                     my $job = unpack_file("$conf{spool}/jobs/$jid:$ip.run");
                     if ($job) {
-                        delete $opts{ip};
-                        delete $opts{id};
-                        $opts{status}+=0;
-                        $job->{usage} = \%opts;
-                        $job->{host} = $nodes{$ip} && $nodes{$ip}->{hostname} ? $nodes{$ip}->{hostname} : $ip;
-                        my $jhistfile=jhistpath($jid);
-                        xlog("debug", "Writing history for $jid to $jhistfile");
-                        open(ST, ">$jhistfile");
-                        print ST packfile($job);
-                        close ST;
-
-                        xlog("debug", "Unlinking $conf{spool}/jobs/$jid:$ip.run, $conf{spool}/jobs/$jid.ip");
-
-                        unlink("$conf{spool}/jobs/$jid:$ip.run");
-                        unlink("$conf{spool}/jobs/$jid.ip");
-                        if ($job->{guid}) {
-                    # can't query by guid anymore, except maybe in a history database
-                            unlink("$conf{spool}/guids/$job->{guid}");
-                        }
-                    } else {
+                        archive_job($jid, $job, $opts{status}, $ip, \%opts);
+                   } else {
 				        xlog("debug", "Bad job file $conf{spool}/jobs/$jid:$ip.run");
                     }
 			        sendcmd($conf{master}, $conf{master_port}, 'dack', jid=>$jid);
@@ -2158,6 +2141,7 @@ sub showhist {
 			$job{status} = ($job{status} >> 8) if 0 == ($job{status} & 0xFF);
 			# standard
 			$job{status} = 'OK' 		if $job{status} eq 0;
+			$job{status} = 'KILLED' 	if $job{status} eq 199;
 			$job{status} = 'INT' 		if $job{status} eq 2;
 			$job{status} = 'ORPHAN' 	if $job{status} eq -8;
 			$job{status} = 'SIGSEGV'	if $job{status} eq 11;
@@ -3236,3 +3220,43 @@ sub forkandgo {
         }
     }
 }
+
+sub archive_job {
+    my ($jid, $job, $status, $ip, $usage) = @_;
+
+    # double-check
+    carp "Need a job ref" unless ref($job);
+    carp "Need a usage ref" unless !defined($usage) || ref($usage);
+
+    $status+=0;
+    if ($usage) {
+        delete $usage->{ip};
+        delete $usage->{id};
+        $usage->{status}=$status;
+        $job->{usage} = $usage;
+    } else {
+        $job->{usage}->{status} = $status;
+
+    }
+    $job->{status} = $status;
+    if ($ip) {
+        $job->{host} = $nodes{$ip} && $nodes{$ip}->{hostname} ? $nodes{$ip}->{hostname} : $ip;
+    }
+
+    my $jhistfile=jhistpath($jid);
+    xlog("debug", "Writing history for $jid to $jhistfile");
+    open(ST, ">$jhistfile");
+    print ST packfile($job);
+    close ST;
+
+    xlog("debug", "Unlinking $conf{spool}/jobs/$jid:$ip.run, $conf{spool}/jobs/$jid.ip, $conf{spool}/jobs/$jid");
+
+    unlink("$conf{spool}/jobs/$jid:$ip.run");
+    unlink("$conf{spool}/jobs/$jid.ip");
+    unlink("$conf{spool}/jobs/$jid");
+    if ($job->{guid}) {
+# can't query by guid anymore, except maybe in a history database
+        unlink("$conf{spool}/guids/$job->{guid}");
+    }
+}
+
