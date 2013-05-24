@@ -1380,8 +1380,13 @@ sub schedule {
 				my $jptr = "$job->{file}" . ".ip";
 				burp($jptr, $max_n->{ip});
                 noderun($max_n, $jid, $job);
-                $max_n->{a_cpus} += $job->{cpus};
-                $max_n->{a_memory} += $job->{memory}; 
+
+                # TODO: handle metrics universally, allocated, total, and current
+ 
+                $max_n->{a_cpus} += $job->{cpus};                   # allocate
+                $max_n->{a_memory} += $job->{memory};
+                $max_n->{avail} -= $job->{cpus};                    # assume being used
+                $max_n->{mem} -= $job->{memory};                    # assume being used
                 ++$jcnt;
 			}
 		} else {
