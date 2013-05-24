@@ -64,8 +64,7 @@ $def{bench_secs} = 86400;			# how often to re-benchmark
 $def{max_buf} = 1000000;			# how often to retry notifications
 $def{expire_secs} = 14400;			# remove jobs whose execution nodes haven't reported back in this amount of time
 $def{io_keep} = 3600;				# keep io for this long after a job with i/o is finished in a detached session
-#$def{hard_factor} = 2;				# hard limit factor
-$def{sched_secs} = 1;				# how often to try scheduling
+#$def{hard_factor} = 1.5;				# hard limit factor
 $def{max_sched} = 50;				# how many different jobs to try and match before giving up on the rest (queue busy)
 $def{spread_pct} = 5;				# how often to "distribute jobs", versus "clump" them
 $def{master} = 'localhost:5184';		# central scheduler
@@ -901,9 +900,21 @@ sub process_message {
 					if -e "$conf{spool}/jobs/$jid:$ip.run";
 			} elsif (defined $opts{status}) {
 # job is done
-                if ( -e "$conf{spool}/jobs/$jid:$ip.run" ) {
+
+               if ( -e "$conf{spool}/jobs/$jid:$ip.run" ) {
                     my $job = unpack_file("$conf{spool}/jobs/$jid:$ip.run");
-                    if ($job) {
+                   if ($job) {
+                        if (my $n=$nodes{$ip}) {
+                            $n->{a_cpus} -= $job->{cpus};                   # deallocate
+                            $n->{a_memory} -= $job->{memory};               # deallocate
+
+                            # TODO: probably would be nice, in a jstat, to include metrics so all these aren't guessing
+
+                            $n->{avail} += $job->{cpus};                    # return to avail, until %node is updated
+                            $n->{mem} += $job->{memory};                    # return mem
+
+                            $n->{avail} = max($n->{avail},min($n->{cpus},$n->{orig_cpus}-$n->{load}));          # better guess
+                        }
                         archive_job($jid, $job, $opts{status}, $ip, \%opts);
                    } else {
 				        xlog("debug", "Bad job file $conf{spool}/jobs/$jid:$ip.run");
@@ -1057,6 +1068,8 @@ sub process_message {
                 } else {
                     # job is toast... but maybe some streams are waiting
                     my $job=unpack_file($jhistfile);
+                    #####TODO  ... store host ip in archive so this has a chance of working, or remove the whole section
+                    ##### because this is never observed!!!
                     if ($nodes{$job->{host}}) {
                         #compat
                         $job->{port}=$nodes{$job->{host}}->{port};
@@ -1191,14 +1204,6 @@ sub schedule {
         $did=1;
     }
 
-    # this should not be necessary .. remove
-	if (time() > ($conf{lastschedtime} + $conf{sched_secs})) {
-		$conf{lastschedtime} = time();
-	} else {
-		return;
-	}
-    ## end remove
-
 	for my $n (values %nodes) {
 		if (defined $n->{a_cpus}) {
 			$n->{a_cpus} = $n->{a_memory} = 0;
@@ -1286,7 +1291,7 @@ sub schedule {
 			my $mem = $n->{tmem} - $n->{a_memory};
 			$mem = $n->{mem} if ($n->{tmem} == 0) || ($n->{mem} < $mem);
 
-			xlog("debug", "Sched $n->{ip}: jcpu:$job->{cpus}, ncpu:$n->{cpus}, nall:$n->{a_cpus}, nav:$n->{avail}, cpus:$cpus , j:$job->{memory}?$n->{mem}>m:$mem");
+			xlog("debug", "Sched $n->{ip}: jcpu:$job->{cpus}, norig: $n->{orig_cpus}, ncpu:$n->{cpus}, nall:$n->{a_cpus}, nav:$n->{avail}, cpus:$cpus , j:$job->{memory}?$n->{mem}>m:$mem");
 
             if ($cpus <= 0) {
                 # pull the node out of the list
@@ -1505,10 +1510,10 @@ sub srvexec {
 		$conf{node}->{arch} = `arch`; chomp $conf{node}->{arch};
 		($conf{node}->{tmem},$conf{node}->{mem}) = getmem();					# free mem
 		$conf{node}->{load} = slurp("/proc/loadavg");			# load
-        my $orig_cpus = getcpus();
-		$conf{node}->{cpus} = $conf{cpus} ? $conf{cpus} : $orig_cpus;	# num cores
+		$conf{node}->{orig_cpus} = getcpus();
+		$conf{node}->{cpus} = $conf{cpus} ? $conf{cpus} : $conf{node}->{orig_cpus};	# num cores
 		$conf{node}->{bench} = $conf{bench} ? $conf{bench} : getbench();	# num cores
-		$conf{node}->{avail} = min($conf{node}->{cpus}, $orig_cpus - $conf{node}->{load});	
+		$conf{node}->{avail} = min($conf{node}->{cpus}, $conf{node}->{orig_cpus} - $conf{node}->{load});	
 		$conf{node}->{ping} = time();
 		$conf{node}->{port} = $conf{port};
 		$conf{node}->{ip} = $conf{hostip};
