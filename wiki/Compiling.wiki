@@ -33,4 +33,6 @@ On CENTOS/REDHAT :
 
 rpm -i gsl-devel
 
-On WINDOWS: use MinGW, and use the [http://gnuwin32.sourceforge.net/packages/gsl.htm Windows port of GSL]
+On WINDOWS: 
+
+Use MinGW, and use the [http://gnuwin32.sourceforge.net/packages/gsl.htm Windows port of GSL]
