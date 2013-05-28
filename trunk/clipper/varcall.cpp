@@ -55,8 +55,14 @@ using namespace google;
 
 void usage(FILE *f);
 
+// #define DEBUG 1
+
 #define meminit(l) (memset(&l,0,sizeof(l)))
-#define debug(s,...) if (debug) fprintf(stderr,s,##__VA_ARGS__)
+#ifdef DEBUG
+    #define debug(s,...) fprintf(stderr,s,##__VA_ARGS__)
+#else
+    #define debug(s,...)
+#endif
 #undef warn
 #define warn(s,...) ++errs; fprintf(stderr,s,##__VA_ARGS__)
 #define die(s,...) (fprintf(stderr,s,##__VA_ARGS__), exit(1))
@@ -1027,6 +1033,8 @@ void VarCallVisitor::Visit(PileupSummary &p) {
 
     Win.push_back(p);
 
+    //debug("Visit: %d\n", p.Pos);
+
     if (Win.size() > WinMax)        // queue too big?  pop
         Win.pop_front();
     
@@ -1123,13 +1131,16 @@ void VarCallVisitor::Visit(PileupSummary &p) {
 
 void VarCallVisitor::Finish() {
     // finish out the rest of the pileup, with the existing window
-    int vx = WinMax/2;
+    int vx = WinMax/2+1;
     while (vx < Win.size()) {
+        ///debug("Finish: %d\n", Win[vx].Pos);
         VisitX(Win[vx++]);
     }
 }
 
 void VarCallVisitor::VisitX(PileupSummary &p) {
+    //debug("VisitX: %d\n", p.Pos);
+
 	if (debug_xpos) {
 		if (p.Pos != debug_xpos)
 			return;
