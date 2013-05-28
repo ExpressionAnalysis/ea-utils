@@ -42,6 +42,7 @@ our ($REVISION) = (q$Revision: 123 $ =~ /(\d+)/);
 our $VERSION = "0.9.$REVISION";				# 0.10 wil be feature lock, after sql impl.  0.9.X is zmq & json::xs
 
 my $STATUS_NEVERRUN=199;
+my $STATUS_ORPHAN=-8;
 my $PPID=$$;
 my $WIN32 = ($^O =~ /Win32/);
 my $TIMEFMT = 'command:%C\ncpu-real:%E\ncpu-user:%U\ncpu-sys:%S\nmem-max:%M\nmem-avg:%t\nctx-wait:%w\nfs-in:%I\nfs-out:%O';
@@ -875,15 +876,16 @@ sub process_message {
 # sent by the execution node to say what the status of a job is
 		my %opts = %{$args[0]};
 		if (my $jid = $opts{id}) {
+            my $should = slurp("$conf{spool}/jobs/$opts{id}.ip");
+
             if (! -e "$conf{spool}/jobs/$opts{id}:$ip.run") {
-                my $should = slurp("$conf{spool}/jobs/$opts{id}.ip");
                 if (!$should) {
                     # this could be a repeat, and that's ok
                     xlog("debug", "Probably already got 'jstat' for $jid");
                 } else {
                     if ($opts{pid}<0) {
-                        xlog("error", "Orphaned job report $jid");
-                        $ip=$should if !$ip;
+                        xlog("error", "Orphaned job report $jid, from $ip for $should, status: $opts{status}");
+                        $ip=$should if $opts{status} == $STATUS_ORPHAN;
                     } else {
                         if (!($ip eq $should)) {
                             xlog("error", "Got a report ($opts{status},$opts{jrun}) for job $jid from $ip, should be $should");
@@ -900,7 +902,6 @@ sub process_message {
 					if -e "$conf{spool}/jobs/$jid:$ip.run";
 			} elsif (defined $opts{status}) {
 # job is done
-
                if ( -e "$conf{spool}/jobs/$jid:$ip.run" ) {
                     my $job = unpack_file("$conf{spool}/jobs/$jid:$ip.run");
                    if ($job) {
@@ -927,7 +928,7 @@ sub process_message {
 				        xlog("debug", "Got a duplicate report for job $jid ($jhistfile)");
     			        sendcmd($conf{master}, $conf{master_port}, 'dack', jid=>$jid);
                     } else {
-				        xlog("error", "Got a report for an unknown job $jid");
+				        xlog("error", "Got a report for an unknown job $jid, from $ip, status: $opts{status}");
                     }
                 }
 			} else {
@@ -1233,7 +1234,7 @@ sub schedule {
 		# check to see whether job has expired
 		if ($conf{loop_num}>5 && $conf{expire_secs} && (fmodtime($job->{file}) < (time()-$conf{expire_secs}))) {
             $did=1;
-			selfcmd('jstat', {pid=>-1, id=>$jid, status => -8, error=>"Orphaned job (" . (time()-fmodtime($job->{file})) . "s)"});
+			selfcmd('jstat', {pid=>-1, id=>$jid, status => $STATUS_ORPHAN, error=>"Orphaned job (" . (time()-fmodtime($job->{file})) . "s)"});
 		} else {
 			my $job_ip = slurp("$conf{spool}/jobs/$jid.ip");
 			if ($job_ip =~ /\d/ && $nodes{$job_ip} && $nodes{$job_ip}->{ip}) {
@@ -1570,7 +1571,7 @@ sub srvexec {
                 notifystat({id=>$jid, jrun=>1});
                 touch("$conf{spool}/jpids/$jid") if -e "$conf{spool}/jpids/$jid";
             } else {
-                notifystat({id=>$jid, status=>-8, error=>"Unknown $jid exit code, really bad!"});
+                notifystat({id=>$jid, status=>$STATUS_ORPHAN, error=>"Unknown $jid exit code, really bad!"});
             }
 		}
 		closedir D;
@@ -2148,7 +2149,7 @@ sub showhist {
 			$job{status} = 'OK' 		if $job{status} eq 0;
 			$job{status} = 'KILLED' 	if $job{status} eq 199;
 			$job{status} = 'INT' 		if $job{status} eq 2;
-			$job{status} = 'ORPHAN' 	if $job{status} eq -8;
+			$job{status} = 'ORPHAN' 	if $job{status} eq $STATUS_ORPHAN;
 			$job{status} = 'SIGSEGV'	if $job{status} eq 11;
 			$job{status} = 'SIGPIPE'	if $job{status} eq 13;
 			$job{status} = 'SIGFPE'		if $job{status} eq 8;
@@ -2646,7 +2647,7 @@ sub zmq_fork_undef() {
     # close all duped file descriptors
     opendir(D,"/proc/$$/fd");
     while(my $fd = readdir(D)) {
-        if ($fd > 2 && (POSIX::lseek($fd, 0, SEEK_CUR) == -1)) {
+        if ($fd > 2 && (POSIX::lseek($fd, 0, POSIX::SEEK_CUR) == -1)) {
             if (POSIX::ESPIPE == POSIX::errno()) {
                 POSIX::close($fd) if $fd > 2;
             }
