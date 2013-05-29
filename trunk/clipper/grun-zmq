@@ -1131,7 +1131,7 @@ sub process_message {
 			print F packfile($job);
 			close F;
 
-			print G $job->{guid};
+			print G $jid;
 			close G;
 			return (jid=>$jid);
 		}	
