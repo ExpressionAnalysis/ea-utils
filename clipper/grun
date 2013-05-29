@@ -412,13 +412,17 @@ sub grun_client {
 
             $prof = $cpu if ref($cpu) eq 'HASH';
 
+            # alias names
+            $prof->{cpus}=$prof->{cpu} if !$prof->{cpus} && $prof->{cpu};
+            $prof->{memory}=$prof->{mem} if !$prof->{memory} && $prof->{mem};
+
             if ($prof && ref($prof) eq 'HASH') {
                 $prof->{memory} = $mem if defined($mem) && !ref($mem) && !$prof->{memory};
                 $prof->{cpus} = $cpu if defined($cpu) && !ref($cpu) && !$prof->{cpus};
 
                 $opt{memory}=$prof->{memory} if $prof->{memory} && !$opt{memory};
                 $opt{cpus}=$prof->{cpus} if $prof->{cpus} && !$opt{cpus};
-                $opt{hosts}=$prof->{cpus} if $prof->{hosts} && !$opt{hosts};
+                $opt{hosts}=$prof->{hosts} if $prof->{hosts} && !$opt{hosts};
 
                 for ((@metrics,@labels)) {
                     # as if the user entered it
