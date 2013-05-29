@@ -37,13 +37,14 @@ use Safe;
 use Cwd qw(abs_path cwd);
 use List::Util qw(min max);
 
-our ($REVISION) = (q$Revision: 123 $ =~ /(\d+)/);
+our ($REVISION) = (q$LastChangedRevision$ =~ /(\d+)/);
 
 our $VERSION = "0.9.$REVISION";				# 0.10 wil be feature lock, after sql impl.  0.9.X is zmq & json::xs
 
+my $STATUS_NEVERRUN=199;
+my $STATUS_ORPHAN=-8;
 my $PPID=$$;
 my $WIN32 = ($^O =~ /Win32/);
-my $DEFAULT_MEM = 10000;
 my $TIMEFMT = 'command:%C\ncpu-real:%E\ncpu-user:%U\ncpu-sys:%S\nmem-max:%M\nmem-avg:%t\nctx-wait:%w\nfs-in:%I\nfs-out:%O';
 
 my ($daemon, $killjob, $editjob);
@@ -55,6 +56,7 @@ $def{spool} = "/var/spool/grun";		# dir to place jobs
 $def{port} = 5184;				# listen/connect port
 $def{bind} = '0.0.0.0';				# listen addr
 $def{env} = ['PATH'];			# list of environment vars to copy from submit through to exec
+$def{default_memory} = 1000 * 1000;        # default job memory
 $def{ping_secs} = 30;				# how often to tell about load/mem/stats
 $def{remove_secs} = '$ping_secs * 1000';	# don't even try kickstarting if the node is this old
 $def{idle_load} = .3;				# how often to tell about load/mem/stats
@@ -63,8 +65,7 @@ $def{bench_secs} = 86400;			# how often to re-benchmark
 $def{max_buf} = 1000000;			# how often to retry notifications
 $def{expire_secs} = 14400;			# remove jobs whose execution nodes haven't reported back in this amount of time
 $def{io_keep} = 3600;				# keep io for this long after a job with i/o is finished in a detached session
-#$def{hard_factor} = 2;				# hard limit factor
-$def{sched_secs} = 1;				# how often to try scheduling
+#$def{hard_factor} = 1.5;				# hard limit factor
 $def{max_sched} = 50;				# how many different jobs to try and match before giving up on the rest (queue busy)
 $def{spread_pct} = 5;				# how often to "distribute jobs", versus "clump" them
 $def{master} = 'localhost:5184';		# central scheduler
@@ -458,6 +459,8 @@ sub grun_client {
             # convert mB to kB
             $opt{memory} *= 1000;
         }
+    } else {
+        $opt{memory} = $conf{default_memory};
     }
 
     # no socket io unless waiting
@@ -494,7 +497,7 @@ sub grun_client {
     }
 
     if ($verbose) {
-        printf STDERR "Memory:	%d\n", $opt{memory} ? $opt{memory}/1000 : $DEFAULT_MEM/1000;
+        printf STDERR "Memory:	%d\n", $opt{memory} ? $opt{memory}/1000 : $conf{default_memory};
         printf STDERR "CPUs:	%d\n", $opt{cpus} ? $opt{cpus} : 1;
         printf STDERR "Hosts:	%s\n", $opt{hosts} if $opt{hosts};
         for ((@metrics,@labels)) {
@@ -540,6 +543,7 @@ sub grun_client {
     $SIG{PIPE} = \&client_sigh;
 
     $opt{cmd} = \@cmd;
+    $opt{hard_factor} = $conf{hard_factor};
     $opt{frompid} = $$;
     $opt{guid} = $opt{jobx} ? "$conf{hostname}:$opt{jobx}" : create_guid();
 
@@ -629,7 +633,7 @@ sub grun_client {
         if ($stat == 11) {
             $err = 'Segmentation fault';
         }
-        if ($stat) {
+        if ($stat > 127) {
             # shift... but if that doesn't get you anything, set to -1 (unknown error)
             $stat = $stat>>8;
             $stat = -1 if !$stat;
@@ -864,23 +868,24 @@ sub process_message {
 				}
 			}
 		} else {
-            # it never ran... don't worry about it
-			unlink "$conf{spool}/jobs/$jid";
+            my $job = unpack_file("$conf{spool}/jobs/$jid");
+            archive_job($jid, $job, $STATUS_NEVERRUN, undef, undef);
 			return "Job $jid aborted";
 		}
 	} elsif ($cmd eq 'jstat') {
 # sent by the execution node to say what the status of a job is
 		my %opts = %{$args[0]};
 		if (my $jid = $opts{id}) {
+            my $should = slurp("$conf{spool}/jobs/$opts{id}.ip");
+
             if (! -e "$conf{spool}/jobs/$opts{id}:$ip.run") {
-                my $should = slurp("$conf{spool}/jobs/$opts{id}.ip");
                 if (!$should) {
                     # this could be a repeat, and that's ok
                     xlog("debug", "Probably already got 'jstat' for $jid");
                 } else {
                     if ($opts{pid}<0) {
-                        xlog("error", "Orphaned job report $jid");
-                        $ip=$should if !$ip;
+                        xlog("error", "Orphaned job report $jid, from $ip for $should, status: $opts{status}");
+                        $ip=$should if $opts{status} == $STATUS_ORPHAN;
                     } else {
                         if (!($ip eq $should)) {
                             xlog("error", "Got a report ($opts{status},$opts{jrun}) for job $jid from $ip, should be $should");
@@ -897,29 +902,22 @@ sub process_message {
 					if -e "$conf{spool}/jobs/$jid:$ip.run";
 			} elsif (defined $opts{status}) {
 # job is done
-                if ( -e "$conf{spool}/jobs/$jid:$ip.run" ) {
+               if ( -e "$conf{spool}/jobs/$jid:$ip.run" ) {
                     my $job = unpack_file("$conf{spool}/jobs/$jid:$ip.run");
-                    if ($job) {
-                        delete $opts{ip};
-                        delete $opts{id};
-                        $opts{status}+=0;
-                        $job->{usage} = \%opts;
-                        $job->{host} = $nodes{$ip} && $nodes{$ip}->{hostname} ? $nodes{$ip}->{hostname} : $ip;
-                        my $jhistfile=jhistpath($jid);
-                        xlog("debug", "Writing history for $jid to $jhistfile");
-                        open(ST, ">$jhistfile");
-                        print ST packfile($job);
-                        close ST;
+                   if ($job) {
+                        if (my $n=$nodes{$ip}) {
+                            $n->{a_cpus} -= $job->{cpus};                   # deallocate
+                            $n->{a_memory} -= $job->{memory};               # deallocate
 
-                        xlog("debug", "Unlinking $conf{spool}/jobs/$jid:$ip.run, $conf{spool}/jobs/$jid.ip");
+                            # TODO: probably would be nice, in a jstat, to include metrics so all these aren't guessing
 
-                        unlink("$conf{spool}/jobs/$jid:$ip.run");
-                        unlink("$conf{spool}/jobs/$jid.ip");
-                        if ($job->{guid}) {
-                    # can't query by guid anymore, except maybe in a history database
-                            unlink("$conf{spool}/guids/$job->{guid}");
+                            $n->{avail} += $job->{cpus};                    # return to avail, until %node is updated
+                            $n->{mem} += $job->{memory};                    # return mem
+
+                            $n->{avail} = max($n->{avail},min($n->{cpus},$n->{orig_cpus}-$n->{load}));          # better guess
                         }
-                    } else {
+                        archive_job($jid, $job, $opts{status}, $ip, \%opts);
+                   } else {
 				        xlog("debug", "Bad job file $conf{spool}/jobs/$jid:$ip.run");
                     }
 			        sendcmd($conf{master}, $conf{master_port}, 'dack', jid=>$jid);
@@ -930,7 +928,7 @@ sub process_message {
 				        xlog("debug", "Got a duplicate report for job $jid ($jhistfile)");
     			        sendcmd($conf{master}, $conf{master_port}, 'dack', jid=>$jid);
                     } else {
-				        xlog("error", "Got a report for an unknown job $jid");
+				        xlog("error", "Got a report for an unknown job $jid, from $ip, status: $opts{status}");
                     }
                 }
 			} else {
@@ -1071,6 +1069,8 @@ sub process_message {
                 } else {
                     # job is toast... but maybe some streams are waiting
                     my $job=unpack_file($jhistfile);
+                    #####TODO  ... store host ip in archive so this has a chance of working, or remove the whole section
+                    ##### because this is never observed!!!
                     if ($nodes{$job->{host}}) {
                         #compat
                         $job->{port}=$nodes{$job->{host}}->{port};
@@ -1131,7 +1131,7 @@ sub process_message {
 			print F packfile($job);
 			close F;
 
-			print G $job->{guid};
+			print G $jid;
 			close G;
 			return (jid=>$jid);
 		}	
@@ -1205,14 +1205,6 @@ sub schedule {
         $did=1;
     }
 
-    # this should not be necessary .. remove
-	if (time() > ($conf{lastschedtime} + $conf{sched_secs})) {
-		$conf{lastschedtime} = time();
-	} else {
-		return;
-	}
-    ## end remove
-
 	for my $n (values %nodes) {
 		if (defined $n->{a_cpus}) {
 			$n->{a_cpus} = $n->{a_memory} = 0;
@@ -1232,7 +1224,7 @@ sub schedule {
 
 		# this should be config, min requirements
 		$job->{cpus} = 1 if $job->{cpus} == 0;
-		$job->{memory} = $DEFAULT_MEM if $job->{memory} == 0;
+		$job->{memory} = ($conf{default_memory}*1000) if $job->{memory} == 0;
 		for ((@metrics, @labels)) {
 			$job->{$_} = $conf{"default-$_"} if !$job->{$_} && $conf{"default-$_"};
 		}
@@ -1242,7 +1234,7 @@ sub schedule {
 		# check to see whether job has expired
 		if ($conf{loop_num}>5 && $conf{expire_secs} && (fmodtime($job->{file}) < (time()-$conf{expire_secs}))) {
             $did=1;
-			selfcmd('jstat', {pid=>-1, id=>$jid, status => -8, error=>"Orphaned job (" . (time()-fmodtime($job->{file})) . "s)"});
+			selfcmd('jstat', {pid=>-1, id=>$jid, status => $STATUS_ORPHAN, error=>"Orphaned job (" . (time()-fmodtime($job->{file})) . "s)"});
 		} else {
 			my $job_ip = slurp("$conf{spool}/jobs/$jid.ip");
 			if ($job_ip =~ /\d/ && $nodes{$job_ip} && $nodes{$job_ip}->{ip}) {
@@ -1269,7 +1261,7 @@ sub schedule {
 
 		# this should be config, min requirements
 		$job->{cpus} = 1 if $job->{cpus} == 0;
-		$job->{memory} = $DEFAULT_MEM if $job->{memory} == 0;
+		$job->{memory} = ($conf{default_memory}*1000) if $job->{memory} == 0;
 
 		my @dereg;
 		my @n;
@@ -1300,11 +1292,11 @@ sub schedule {
 			my $mem = $n->{tmem} - $n->{a_memory};
 			$mem = $n->{mem} if ($n->{tmem} == 0) || ($n->{mem} < $mem);
 
-			xlog("debug", "Sched $n->{ip}: jcpu:$job->{cpus}, ncpu:$n->{cpus}, nall:$n->{a_cpus}, nav:$n->{avail}, cpus:$cpus , j:$job->{memory}?$n->{mem}>m:$mem");
+			xlog("debug", "Sched $n->{ip}: jcpu:$job->{cpus}, norig: $n->{orig_cpus}, ncpu:$n->{cpus}, nall:$n->{a_cpus}, nav:$n->{avail}, cpus:$cpus , j:$job->{memory}?$n->{mem}>m:$mem");
 
             if ($cpus <= 0) {
                 # pull the node out of the list
-			    xlog("debug", "Removing $n->{hostname} from node list");
+			    xlog("debug", "Removing $n->{hostname} from node list, cpus are $cpus");
                 splice(@nlist, $i, 1);
                 --$i;                
             }
@@ -1377,8 +1369,13 @@ sub schedule {
 				my $jptr = "$job->{file}" . ".ip";
 				burp($jptr, $max_n->{ip});
                 noderun($max_n, $jid, $job);
-                $max_n->{a_cpus} += $job->{cpus};
-                $max_n->{a_memory} += $job->{memory}; 
+
+                # TODO: handle metrics universally, allocated, total, and current
+ 
+                $max_n->{a_cpus} += $job->{cpus};                   # allocate
+                $max_n->{a_memory} += $job->{memory};
+                $max_n->{avail} -= $job->{cpus};                    # assume being used
+                $max_n->{mem} -= $job->{memory};                    # assume being used
                 ++$jcnt;
 			}
 		} else {
@@ -1514,10 +1511,10 @@ sub srvexec {
 		$conf{node}->{arch} = `arch`; chomp $conf{node}->{arch};
 		($conf{node}->{tmem},$conf{node}->{mem}) = getmem();					# free mem
 		$conf{node}->{load} = slurp("/proc/loadavg");			# load
-        my $orig_cpus = getcpus();
-		$conf{node}->{cpus} = $conf{cpus} ? $conf{cpus} : $orig_cpus;	# num cores
+		$conf{node}->{orig_cpus} = getcpus();
+		$conf{node}->{cpus} = $conf{cpus} ? $conf{cpus} : $conf{node}->{orig_cpus};	# num cores
 		$conf{node}->{bench} = $conf{bench} ? $conf{bench} : getbench();	# num cores
-		$conf{node}->{avail} = min($conf{node}->{cpus}, $orig_cpus - $conf{node}->{load});	
+		$conf{node}->{avail} = min($conf{node}->{cpus}, $conf{node}->{orig_cpus} - $conf{node}->{load});	
 		$conf{node}->{ping} = time();
 		$conf{node}->{port} = $conf{port};
 		$conf{node}->{ip} = $conf{hostip};
@@ -1574,7 +1571,7 @@ sub srvexec {
                 notifystat({id=>$jid, jrun=>1});
                 touch("$conf{spool}/jpids/$jid") if -e "$conf{spool}/jpids/$jid";
             } else {
-                notifystat({id=>$jid, status=>-8, error=>"Unknown $jid exit code, really bad!"});
+                notifystat({id=>$jid, status=>$STATUS_ORPHAN, error=>"Unknown $jid exit code, really bad!"});
             }
 		}
 		closedir D;
@@ -2146,11 +2143,13 @@ sub showhist {
 			--$count;
             my %job=%{$job};
 
+			$job{status} = $job->{usage}->{status} if $job->{usage} && ! $job->{status};
 			$job{status} = ($job{status} >> 8) if 0 == ($job{status} & 0xFF);
 			# standard
 			$job{status} = 'OK' 		if $job{status} eq 0;
+			$job{status} = 'KILLED' 	if $job{status} eq 199;
 			$job{status} = 'INT' 		if $job{status} eq 2;
-			$job{status} = 'ORPHAN' 	if $job{status} eq -8;
+			$job{status} = 'ORPHAN' 	if $job{status} eq $STATUS_ORPHAN;
 			$job{status} = 'SIGSEGV'	if $job{status} eq 11;
 			$job{status} = 'SIGPIPE'	if $job{status} eq 13;
 			$job{status} = 'SIGFPE'		if $job{status} eq 8;
@@ -2281,7 +2280,7 @@ sub showjobs {
 			$job->{jid} = $jid;
 			$job->{stat} = $stat;
 			$job->{cpus} = 1 if ! $job->{cpus};
-			$job->{memory} = $DEFAULT_MEM/1000 if ! $job->{memory};
+			$job->{memory} = $conf{default_memory} if ! $job->{memory};
 			$job->{cmd} = join(' ', @cmd);
 			if ($opt{long}) {
                 $r .= "----------\n";
@@ -2648,7 +2647,7 @@ sub zmq_fork_undef() {
     # close all duped file descriptors
     opendir(D,"/proc/$$/fd");
     while(my $fd = readdir(D)) {
-        if ($fd > 2 && (POSIX::lseek($fd, 0, SEEK_CUR) == -1)) {
+        if ($fd > 2 && (POSIX::lseek($fd, 0, POSIX::SEEK_CUR) == -1)) {
             if (POSIX::ESPIPE == POSIX::errno()) {
                 POSIX::close($fd) if $fd > 2;
             }
@@ -2788,8 +2787,11 @@ sub execute_job {
             }
             chown($uid,0,$shfile);
 
-            if ($conf{hard_factor}) {eval{
-                print SHFILE "ulimit -m " . ($opts->{memory} * $conf{hard_factor})/1000 . "\n" if $opts->{memory};
+            my $hard_factor = defined($opts->{hard_factor}) ? $opts->{hard_factor} : $conf{hard_factor};
+            if ($hard_factor) {eval{
+                # todo... other limits
+                print SHFILE "ulimit -m " . ($opts->{memory} * $conf{hard_factor})/1000 . "\n" 
+                    if $opts->{memory};
             }}
 
             if ($cmd[0] !~ / /) {
@@ -3224,3 +3226,43 @@ sub forkandgo {
         }
     }
 }
+
+sub archive_job {
+    my ($jid, $job, $status, $ip, $usage) = @_;
+
+    # double-check
+    carp "Need a job ref" unless ref($job);
+    carp "Need a usage ref" unless !defined($usage) || ref($usage);
+
+    $status+=0;
+    if ($usage) {
+        delete $usage->{ip};
+        delete $usage->{id};
+        $usage->{status}=$status;
+        $job->{usage} = $usage;
+    } else {
+        $job->{usage}->{status} = $status;
+
+    }
+    $job->{status} = $status;
+    if ($ip) {
+        $job->{host} = $nodes{$ip} && $nodes{$ip}->{hostname} ? $nodes{$ip}->{hostname} : $ip;
+    }
+
+    my $jhistfile=jhistpath($jid);
+    xlog("debug", "Writing history for $jid to $jhistfile");
+    open(ST, ">$jhistfile");
+    print ST packfile($job);
+    close ST;
+
+    xlog("debug", "Unlinking $conf{spool}/jobs/$jid:$ip.run, $conf{spool}/jobs/$jid.ip, $conf{spool}/jobs/$jid");
+
+    unlink("$conf{spool}/jobs/$jid:$ip.run");
+    unlink("$conf{spool}/jobs/$jid.ip");
+    unlink("$conf{spool}/jobs/$jid");
+    if ($job->{guid}) {
+# can't query by guid anymore, except maybe in a history database
+        unlink("$conf{spool}/guids/$job->{guid}");
+    }
+}
+
