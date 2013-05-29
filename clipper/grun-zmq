@@ -37,7 +37,7 @@ use Safe;
 use Cwd qw(abs_path cwd);
 use List::Util qw(min max);
 
-our ($REVISION) = (q$Revision: 123 $ =~ /(\d+)/);
+our ($REVISION) = (q$LastChangedRevision$ =~ /(\d+)/);
 
 our $VERSION = "0.9.$REVISION";				# 0.10 wil be feature lock, after sql impl.  0.9.X is zmq & json::xs
 
