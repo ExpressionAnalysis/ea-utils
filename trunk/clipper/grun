@@ -43,6 +43,7 @@ our $VERSION = "0.9.$REVISION";				# 0.10 wil be feature lock, after sql impl.  
 
 my $STATUS_NEVERRUN=199;
 my $STATUS_ORPHAN=-8;
+my $STATUS_UNKNOWN=-9;
 my $PPID=$$;
 my $WIN32 = ($^O =~ /Win32/);
 my $TIMEFMT = 'command:%C\ncpu-real:%E\ncpu-user:%U\ncpu-sys:%S\nmem-max:%M\nmem-avg:%t\nctx-wait:%w\nfs-in:%I\nfs-out:%O';
@@ -609,9 +610,12 @@ sub grun_client {
         # look at all the work you can avoid if you don't wait
         my ($stat, $err, $diderr);
         # connect to executing node directly and ask for stderr, stdout, and status based on job id
+        if (defined $info{status}) {
+            $stat=$info{status};
+        }
         while (!defined $stat && !defined $err) {
             # shadow watcher....
-            if ($info{ip}) {
+            if ($info{ip}=~/^\d/) {
                 if ($opt{io} && !($opt{err} && $opt{out}) ) {
                     ($stat, $err, $diderr) = waitio($info{ip}, $info{port}, $info{jid});
                     if ($stat eq 'requeue') {
@@ -626,6 +630,9 @@ sub grun_client {
                 if ($stat == 65280 && !$err) {
                     print STDERR "Error: [$host] Command returned -1\n";
                 } 
+            } else {
+                $stat=$STATUS_UNKNOWN;
+                $err="Error in grun protocol, unknown status!\n";
             }
             sleep 5 if (!defined $stat && !defined $err);
         }
@@ -1071,20 +1078,13 @@ sub process_message {
 				    xlog("error", "Job '$jid' does not exist from $ip") if $jid;
     				return (error=>"Job '$jid' does not exist during jinfo.");
                 } else {
-                    # job is toast... but maybe some streams are waiting
+                    # job is toast... but maybe some streams are waiting, so return info about it compatible with the jinfo request
                     my $job=unpack_file($jhistfile);
-                    #####TODO  ... store host ip in archive so this has a chance of working, or remove the whole section
-                    ##### because this is never observed!!!
-                    if ($nodes{$job->{host}}) {
-                        #compat
-                        $job->{port}=$nodes{$job->{host}}->{port};
-                        $job->{jid}=$jid;
-                        delete $job->{env};
-                        return(%$job);
-                    } else {
-				        xlog("error", "Job '$jid' execution node $nodes{$job->{host}} not listed, please wait");
-                        return ();
-                    }
+                    delete $job->{env};
+                    $job->{host}="n/a" if !$job->{host};
+                    $job->{ip}=host2ip($job->{host}) if !$job->{ip};
+                    $job->{hostname}=$job->{host};
+                    return(%$job);
                 }
 			} else {
 				my $job_ip = slurp("$conf{spool}/jobs/$jid.ip");
@@ -3251,6 +3251,7 @@ sub archive_job {
     $job->{status} = $status;
     if ($ip) {
         $job->{host} = $nodes{$ip} && $nodes{$ip}->{hostname} ? $nodes{$ip}->{hostname} : $ip;
+        $job->{hostip} = $ip;
     }
 
     my $jhistfile=jhistpath($jid);
