@@ -184,8 +184,12 @@ if ($qinfo) {
 		} elsif ((!samehost($host,$conf{hostname}) || (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|stat$/)))) {
             # this could get ugly, if called a lot, may want to make more efficient
             warn ("waitmsg($host, $port, 'xcmd', $cmd, @arg, %opt)\n") if $opt{debug};
-			my ($res) = waitmsg($host, $port, "xcmd", $cmd, @arg, %opt);
-			print $res;
+            my $more=1;
+            my $res;
+            while($more) {
+			    ($res, $more) = waitmsg($host, $port, "xcmd", $cmd, @arg, %opt);
+			    print $res;
+            }
 		} else {
             warn ("using local queue status, host $host is $conf{bind}/$conf{hostip}, name is $conf{hostname} \n") if $opt{debug};
 			if ($cmd eq 'stat') {
@@ -712,7 +716,7 @@ sub process_message {
 
     $trace=$conf{trace} if !$trace;
 
-    if (debugging) {
+    if (debugging|$trace) {
         my $hid=defined($zid) ? unpack("h*",$zid) : "";
 	    xlog($trace ? "trace" : "debug", "Received command ($hid) '$cmd' : $src_data\n") if $trace;
     }
@@ -776,8 +780,7 @@ sub process_message {
         my ($dat) = @args;
         if ($dat->{zid}) {
             xlog("debug", "Sending response to $dat->{zid}");
-		    replymsg(pack("h*",$dat->{zid}),$dat->{out});
-		    #replymsg($debugzid,$dat->{out});
+		    replymsg(pack("h*",$dat->{zid}),$dat->{out},$dat->{more});
         }
 	} elsif ($cmd eq 'node') {
 # this is the 'node ping'
@@ -3223,6 +3226,11 @@ sub forkandgo {
 
         $out = $err if $err && !$out;
 
+        # over 100k = need multipart possibly b/c of some bug in zmq, only happens in worker->router too
+        # 10k chunks are faster for some reason?
+        while(length($out)>10000) {
+            sendcmd($conf{bind}, $conf{port}, 'frep', {zid=>unpack("h*",$zid), out=>substr($out,0,10000,""), more=>1});
+        }
         sendcmd($conf{bind}, $conf{port}, 'frep', {zid=>unpack("h*",$zid), out=>$out});
 
         if (defined($pid)) {
