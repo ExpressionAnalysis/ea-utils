@@ -153,7 +153,6 @@ if ($qinfo) {
 	}
 	$cmd = $tmp;
 
-			die showconf();
 # some commands default to localhost, others default to queue host... this is confusing... fix?
 
 	my @dest = $opt{hosts} ? expandnodes($opt{hosts}) : 
