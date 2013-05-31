@@ -184,12 +184,8 @@ if ($qinfo) {
 		} elsif ((!samehost($host,$conf{hostname}) || (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd =~ /^conf|stat$/)))) {
             # this could get ugly, if called a lot, may want to make more efficient
             warn ("waitmsg($host, $port, 'xcmd', $cmd, @arg, %opt)\n") if $opt{debug};
-            my $more=1;
-            my $res;
-            while($more) {
-			    ($res, $more) = waitmsg($host, $port, "xcmd", $cmd, @arg, %opt);
-			    print $res;
-            }
+			my ($res) = waitmsg($host, $port, "xcmd", $cmd, @arg, %opt);
+			print $res;
 		} else {
             warn ("using local queue status, host $host is $conf{bind}/$conf{hostip}, name is $conf{hostname} \n") if $opt{debug};
 			if ($cmd eq 'stat') {
@@ -615,7 +611,8 @@ sub grun_client {
         my ($stat, $err, $diderr);
         # connect to executing node directly and ask for stderr, stdout, and status based on job id
         if (defined $info{status}) {
-            $stat=$info{status};
+             $stat=$info{status};
+             $err=$info{error};
         }
         while (!defined $stat && !defined $err) {
             # shadow watcher....
@@ -673,22 +670,31 @@ sub grun_client {
 sub readsocks {
     my $did;
     # identity & data received
-#print "reading socks\n";
+print "reading socks\n";
     while (my $id= zmq_recvmsg($router,ZMQ_NOBLOCK)) {
         $did=1;
         $id = zmq_msg_data($id);
-        my $sep  = zmq_recvmsg($router);
-        my $msg  = zmq_recvmsg($router);
-        my $data = zmq_msg_data($msg);
-        my @resp = process_message($data, $id);
-        if (@resp) {
-            warn("Got resp: @resp\n");
-            replymsg($id, @resp);
-        } else {
-            warn("No resp for $data\n");
+        if (zmq_getsockopt($router,ZMQ_RCVMORE)) {
+#            print "getting sep\n";
+            my $sep  = zmq_recvmsg($router);
+        }
+        if (zmq_getsockopt($router,ZMQ_RCVMORE)) {
+#            print "getting data\n";
+            my $msg  = zmq_recvmsg($router);
+            my $data = zmq_msg_data($msg);
+            my @resp = process_message($data, $id);
+            if (@resp) {
+                print("Got resp: @resp\n");
+                replymsg($id, @resp);
+            } else {
+                warn("No resp for $data\n");
+            }
+        }
+        while (zmq_getsockopt($router,ZMQ_RCVMORE)) {
+                print("Discarding excess multipart data!\n");
         }
     }
-#print "done reading socks\n";
+print "done reading socks\n";
     return $did;
 }
 
@@ -755,14 +761,14 @@ sub process_message {
 			return shownodes(@args);
 		} elsif ($args[0] eq 'hist') {
 			shift @args;
-            if (@args && (@args > 1 || $args[0] !~ /^\d+$/)) {
+#            if (@args && (@args > 1 || $args[0] !~ /^\d+$/)) {
                 # fork... do it in parallel
-                forkandgo($zid, \&showhist, @args);
-                return();
-            } else {
+#                forkandgo($zid, \&showhist, @args);
+#                return();
+#            } else {
                 # inline... do it now, less expensive than fork!
     			return showhist(@args);
-            }
+#            }
 		} elsif ($args[0] eq 'conf') {
 			return showconf();
 		} elsif ($args[0] eq 'jobs') {
@@ -781,6 +787,7 @@ sub process_message {
         if ($dat->{zid}) {
             xlog("debug", "Sending response to $dat->{zid}");
 		    replymsg(pack("h*",$dat->{zid}),$dat->{out},$dat->{more});
+		    #replymsg($debugzid,$dat->{out});
         }
 	} elsif ($cmd eq 'node') {
 # this is the 'node ping'
@@ -934,13 +941,13 @@ sub process_message {
                    } else {
 				        xlog("debug", "Bad job file $conf{spool}/jobs/$jid:$ip.run");
                     }
-			        sendcmd($conf{master}, $conf{master_port}, 'dack', jid=>$jid);
+			        sendcmd_nowait($conf{master}, $conf{master_port}, 'dack', jid=>$jid);
                 } else {
                     my $jhistfile=jhistpath($jid);
                     if (-e $jhistfile) {
                         # repeated acks are ok 
 				        xlog("debug", "Got a duplicate report for job $jid ($jhistfile)");
-    			        sendcmd($conf{master}, $conf{master_port}, 'dack', jid=>$jid);
+    			        sendcmd_nowait($conf{master}, $conf{master_port}, 'dack', jid=>$jid);
                     } else {
 				        xlog("error", "Got a report for an unknown job $jid, from $ip, status: $opts{status}");
                     }
@@ -1081,11 +1088,12 @@ sub process_message {
 				    xlog("error", "Job '$jid' does not exist from $ip") if $jid;
     				return (error=>"Job '$jid' does not exist during jinfo.");
                 } else {
-                    # job is toast... but maybe some streams are waiting, so return info about it compatible with the jinfo request
+                    # job is toast... but maybe some streams are waiting
+                    my $job=unpack_file($jhistfile);
                     my $job=unpack_file($jhistfile);
                     delete $job->{env};
-                    $job->{host}="n/a" if !$job->{host};
-                    $job->{ip}=host2ip($job->{host}) if !$job->{ip};
+                    $job->{host}="n/a" if !$job->{host} && !defined $job->{status};
+                    $job->{ip}=host2ip($job->{host}) if !$job->{ip} && ! defined $job->{status};
                     $job->{hostname}=$job->{host};
                     return(%$job);
                 }
@@ -1833,6 +1841,18 @@ sub waitmsg_retry {
     return @msg;
 }
 
+sub sendcmd_nowait {
+    my ($host, $port, @cmd) = @_;
+    return 0 unless my $sock = getsock($host, $port);
+    my $xcmd = packcmd(@cmd);
+    zmq_send($sock, "", 0, ZMQ_SNDMORE);
+    if (zmq_send($sock, $xcmd,ZMQ_NOBLOCK)==-1) {
+        xlog("error","Can't send [@cmd] to $host:$port : $!", Carp::longmess());
+        return 0;
+    }
+    return 1;
+}
+
 sub recvmsg {
     my ($sock) = @_;
     my @ret;
@@ -1906,6 +1926,7 @@ sub getsock {
         if (!$daemon) {
             # clients should block if messages are queued, not bang on nonexistant servers
             zmq_setsockopt($sock, ZMQ_HWM, 50);
+	        xlog("debug", "Set HWM to 50 for $host\n");
         }
         if (!zmq_connect($sock,"tcp://$host:$port")) {
             $ZMQS{"tcp://$host:$port"} = $sock;
@@ -2430,15 +2451,17 @@ sub kicknodes {
                 $did=1;
 				xlog("note", "Kicking node $node->{hostname}\n");
 				if (!fork) {
-                    zmq_fork_undef();
-                    # be sure this is gone
-					my $cmd = $conf{kickstart};
-					if ($cmd =~ /^\{(.*)\}$/) {
-						$cmd = evalctx($1, node=>$node);
-					}
-					if ($cmd && $cmd !~ /\$/) {
-						exec("$cmd");	
-					}
+                    eval {
+                        zmq_fork_undef();
+                        # be sure this is gone
+                        my $cmd = $conf{kickstart};
+                        if ($cmd =~ /^\{(.*)\}$/) {
+                            $cmd = evalctx($1, node=>$node);
+                        }
+                        if ($cmd && $cmd !~ /\$/) {
+                            exec("$cmd");	
+                        }
+                    };
                     exit(0);
 				}
 			}
@@ -2553,6 +2576,7 @@ sub startdaemon {
     zmq_safe_term();
 
 	if ($nofork || (!($gpid=fork))) {
+        zmq_fork_undef() if !$nofork;
 
         $log_to_stderr = 1 if $nofork;
         $gpid = $$ if $nofork;
@@ -2611,6 +2635,7 @@ sub startdaemon {
                     select(undef, undef, undef, .15-$elapsed);
                 }
             }
+#            print "HERE\n";
 		}
 		xlog("note", "Shutdown");
         zmq_unbind($router, "tcp://$conf{bind}:$conf{port}");
@@ -3209,31 +3234,29 @@ sub getjobstathash {
 sub forkandgo {
     my ($zid, $sub, @args) = @_;
 
+print("FORKING\n");
+
     if (!(my $pid=fork)) {
         my $out="";
         my $err="";
         if (! defined $pid) {
             $err = "Error: Can't fork";
+            sendcmd($conf{bind}, $conf{port}, 'frep', {zid=>unpack("h*",$zid), out=>$err});
         } else {
-            zmq_fork_undef();
-            $context=zmq_init();
-
-            $0="GRUN:fork-handler";
-            # no accidental messages go out on this context
-            $out=eval{&$sub(@args)};
-            $err=$@;
-        }
-
-        $out = $err if $err && !$out;
-
-        # over 100k = need multipart possibly b/c of some bug in zmq, only happens in worker->router too
-        # 10k chunks are faster for some reason?
-        while(length($out)>10000) {
-            sendcmd($conf{bind}, $conf{port}, 'frep', {zid=>unpack("h*",$zid), out=>substr($out,0,10000,""), more=>1});
-        }
-        sendcmd($conf{bind}, $conf{port}, 'frep', {zid=>unpack("h*",$zid), out=>$out});
-
-        if (defined($pid)) {
+            eval {
+                zmq_fork_undef();
+                $daemon=0;
+                $context=zmq_init();
+                $0="GRUN:fork-handler";
+                # no accidental messages go out on this context
+                $out=eval{&$sub(@args)};
+                $err=$@;
+                $out = $err if $err && !$out;
+                while(length($out)>100000) {
+                    sendcmd($conf{bind}, $conf{port}, 'frep', {zid=>unpack("h*",$zid), out=>substr($out,0,100000,""), more=>1});
+                }
+                sendcmd($conf{bind}, $conf{port}, 'frep', {zid=>unpack("h*",$zid), out=>$out});
+            };
             exit(0);
         }
     }
