@@ -20,7 +20,6 @@ use strict;
 
 use Carp qw(carp croak confess cluck);
 use Getopt::Long qw(GetOptions);
-use Data::Dumper;
 use Data::UUID;
 
 use ZMQ::LibZMQ3;
@@ -36,6 +35,8 @@ use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
 use Safe;
 use Cwd qw(abs_path cwd);
 use List::Util qw(min max);
+
+sub pretty_encode;
 
 our ($REVISION) = (q$LastChangedRevision$ =~ /(\d+)/);
 
@@ -152,6 +153,7 @@ if ($qinfo) {
 	}
 	$cmd = $tmp;
 
+			die showconf();
 # some commands default to localhost, others default to queue host... this is confusing... fix?
 
 	my @dest = $opt{hosts} ? expandnodes($opt{hosts}) : 
@@ -394,7 +396,7 @@ sub grun_client {
     }
 
 
-    #die Dumper \@cmd  if $opt{debug};
+    #die pretty_encode \@cmd  if $opt{debug};
 
     if (!@cmd) {
         die usage();
@@ -2102,7 +2104,7 @@ EOF
 }
 
 sub showconf {
-	return Data::Dumper->new([\%conf])->Sortkeys(1)->Indent(1)->Terse(1)->Dump();
+	return pretty_encode(\%conf);
 }
 
 sub showhist {
@@ -3302,6 +3304,16 @@ sub archive_job {
     if ($job->{guid}) {
 # can't query by guid anymore, except maybe in a history database
         unlink("$conf{spool}/guids/$job->{guid}");
+    }
+}
+
+my $coder;
+sub pretty_encode {
+    $coder = JSON::XS->new->ascii->pretty->canonical unless defined $coder;
+    if (@_ > 1 || !ref(@_[0])) {
+        $coder->encode([@_]);
+    } else {
+        $coder->encode(@_[0]);
     }
 }
 
