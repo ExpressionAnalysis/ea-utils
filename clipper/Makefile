@@ -76,13 +76,21 @@ $(PKG).${VER}-${REL}.tar.gz: $(PKG).tar.gz
 
 # why the libbam.a doesn't work?  not sure... *.o works
 sam-stats: sam-stats.cpp samtools/libbam.a samtools/bam.h fastq-lib.h
+ifeq ($(OS),Windows_NT)
+	$(CC) $(CFLAGS) samtools/*.o -lz -lpthread -lws2_32 fastq-lib.cpp $< -o $@
+else
 	$(CC) $(CFLAGS) samtools/*.o -lz -lpthread fastq-lib.cpp $< -o $@
+endif
 
 samtools/libbam.a: samtools/*.c samtools/*.h
 	cd samtools && make libbam.a
 
 varcall: varcall.cpp fastq-lib.cpp tidx/tidx-lib.cpp
+ifeq ($(OS),Windows_NT)
+	echo varcall: not supported yet
+else
 	$(CC) $(CFLAGS) fastq-lib.cpp tidx/tidx-lib.cpp -o $@ $< -lgsl -lgslcblas
+endif
 
 fastq-stats: fastq-stats.cpp fastq-lib.cpp gcModel.c
 	$(CC) $(CFLAGS) fastq-lib.cpp gcModel.c -o $@ $<
