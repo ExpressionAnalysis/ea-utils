@@ -2,9 +2,10 @@
 
 use Getopt::Long qw(:config pass_through);
 
-GetOptions(\%opt,"lines|n=i", "bytes|c=i","verbose","help","quiet|silent|q") || die("Try zhead --help\n");
+GetOptions(\%opt,"lines|n=s", "bytes|c=s","verbose","help","quiet|silent|q") 
+	|| die("Try zhead --help\n");
 
-if ($ARGV[0] =~ /-(\d+)/ && ! $opt{lines}) {
+if ($ARGV[0] =~ /^-(\d+)/ && ! $opt{lines}) {
 	$opt{lines}=$1;
 	shift @ARGV;
 }
@@ -16,16 +17,30 @@ if ($opt{help}) {
 	exec("head --help");
 }
 
+if ($opt{lines} =~ s/([a-z]+)$//) {
+	$i=lc($1);
+	$opt{lines} = $opt{lines} * ( 
+		$i eq 'b' ? 512 :
+		$i eq 'kb' ? 1000 :
+		$i eq 'k' ? 1000 :
+		$i eq 'mb' ? 1000*1000 :
+		$i eq 'm' ? 1024*1024 :
+		$i eq 'gb' ? 1000*1000*1000 :
+		$i eq 'g' ? 1024*1024*1024 :
+		1					# if your using it for TB ... please don't
+	);
+}
+
 $ARGV[0] = '-' if (!@ARGV);
 
 $first = 1;
 for (@ARGV) {
-	open(IN, $_) || die "zhead: cannot open `$_' for reading: $!\n";
-	if (/\.gz$/) {
-		close IN;
-		$_=~ s/'/'"'"'/g;
-		open(IN, "gunzip -c '$_' |") || die "$!\n";
-	}
+    open(IN, $_) || die "zhead: cannot open `$_' for reading: $!\n";
+    if (/\.gz$/) {
+        close IN;
+        $_=~ s/'/'"'"'/g;
+        open(IN, "gunzip -c '$_' |") || die "$!\n";
+    }
 	if (@ARGV > 1 && ! $opt{quiet}) {
 		print "\n" if !$first;
 		print "==> $_ <==\n";
