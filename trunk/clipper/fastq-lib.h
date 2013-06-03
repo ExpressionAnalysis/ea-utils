@@ -70,11 +70,12 @@ struct fq {
 void free_line(struct line *l);
 void free_fq(struct fq *fq);
 
-// not GNU?  no getline...
+// not GNU?  probably no getline & strtok_r...
 #if !defined( __GNUC__) || defined(WIN32) || defined(__APPLE__)
 	ssize_t getline(char **lineptr, size_t *n, FILE *stream);
+	char* strtok_r(char *str, const char *delim, char **nextp);
 #endif
-
+    
 // get file extension
 const char *fext(const char *f);
 

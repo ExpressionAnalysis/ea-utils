@@ -28,10 +28,14 @@
 #define HAVE_SYS_TYPES_H 1
 
 /* Define to 1 if the system has the type `uint16_t'. */
+#ifndef WIN32
 #define HAVE_UINT16_T 1
 
 /* Define to 1 if the system has the type `u_int16_t'. */
 #define HAVE_U_INT16_T 1
+#else
+#define HAVE___UINT16
+#endif
 
 /* Define to 1 if the system has the type `__uint16'. */
 /* #undef HAVE___UINT16 */
