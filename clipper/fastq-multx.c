@@ -147,7 +147,7 @@ int main (int argc, char **argv) {
 			in[f_n++] = optarg;
 			out[f_oarg++] = "n/a";
 			break;
-		case 'l': list = optarg; break;
+		case 'l': list = optarg; usefile1=0; break;
 		case 'L': list = optarg; usefile1=1; break;
 		case 'B': bfil = optarg; list = NULL; break;
 		case 'x': trim = false; break;
