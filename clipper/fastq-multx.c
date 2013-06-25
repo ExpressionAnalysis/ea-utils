@@ -937,10 +937,11 @@ int main (int argc, char **argv) {
                     fputc('-', f);
                     fputs(fq[1].seq.s,f);
                 }
+                fputc('\n', f);
             } else {
+                // id still has chr
                 fputs(fq[i].id.s,f);
             }
-            fputc('\n', f);
             fputs(fq[i].seq.s,f);
             fputc('\n',f);
             fputs(fq[i].com.s,f);
