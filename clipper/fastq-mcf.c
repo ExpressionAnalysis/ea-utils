@@ -206,7 +206,7 @@ int main (int argc, char **argv) {
 	int dupskip = 0;
     bool noexec = 0;
     bool hompol_filter = 0;
-    float hompol_pct = .95;
+    float hompol_pct = .92;
 
     dupset.set_deleted_key("<>");
 
@@ -933,7 +933,8 @@ int main (int argc, char **argv) {
             if (hompol_filter) {
                 char p; int h = 0;
                 for (i = dotrim[f][0]+1;i<fq[f].seq.n;++i) {
-                    if (fq[f].seq.s[i] == fq[f].seq.s[i-1]) {
+                    // N's always match everything
+                    if (fq[f].seq.s[i] == 'N' || (fq[f].seq.s[i] == fq[f].seq.s[i-1])) {
                         ++hompol_seq;
                     }
                     ++hompol_cnt;
@@ -1090,7 +1091,7 @@ int main (int argc, char **argv) {
         int hompol_skip=0;
         if (hompol_filter) {
             int hompol_max = hompol_pct * hompol_cnt;
-//            printf("cnt:%d, max:%d, seq:%d\n", hompol_cnt, hompol_max, hompol_seq);
+            if (debug>0) printf("%s: hompol cnt:%d, max:%d, seq:%d\n", fq[0].id.s, hompol_cnt, hompol_max, hompol_seq);
             if (hompol_seq>=hompol_max) hompol_skip = skip = true;
         }
 
