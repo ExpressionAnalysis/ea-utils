@@ -67,6 +67,8 @@ int char2bp(char c);
 char bp2char(int b);
 void saveskip(FILE **fout, int fo_n, struct fq *fq);
 
+void valid_arg(char c, const char *a);
+
 void usage(FILE *f, const char *msg=NULL);
 int debug=0;
 int warncount = 0;
@@ -288,7 +290,7 @@ int main (int argc, char **argv) {
 			case 'U': ilv3=0; break;
 			case 'H': hompol_filter=1; break;
 			case 'k': skewpct = atof(optarg); break;
-			case 'q': qthr = atoi(optarg); break;
+			case 'q': qthr = atoi(optarg); valid_arg(c,optarg); break;
 			case 'Q': qspec = optarg; break;
 			case 'w': qwin = atoi(optarg); break;
 			case 'C': sampcnt = atoi(optarg); if (sampcnt*8 > max_in_buffer) max_in_buffer = sampcnt * 8; break;
@@ -1463,5 +1465,14 @@ bool evalqual(struct fq &fq, int file_num) {
     }
     return true;
 }
+
+void valid_arg(char opt, const char *arg) {
+    if (!arg || !*arg || *arg == '-') {
+        fprintf(stderr,"Option '%c' requires an argument.\n\n", opt);
+        usage(stderr); 
+        exit(1);
+    }
+}
+
 
 /* vim: set noai ts=4 sw=4: */
