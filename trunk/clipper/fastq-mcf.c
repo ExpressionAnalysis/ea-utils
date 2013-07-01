@@ -31,7 +31,7 @@ See "void usage" below for usage.
 
 #include "fastq-lib.h"
 
-#define VERSION "1.02"
+#define VERSION "1.03"
 #define SVNREV atoi(strchr("$LastChangedRevision$", ':')+1)
 
 #define MAX_ADAPTER_NUM 1000
@@ -178,6 +178,7 @@ public:
             ret = gz ? pclose(fin) : fclose(fin);
             fin=NULL;
        }
+        return ret;
     }
 };
 
@@ -865,6 +866,8 @@ int main (int argc, char **argv) {
 
     google::sparse_hash_map <std::string, int>::const_iterator lookup_it;
 
+    bool io_ok = true;
+
 	while (read_ok=fin[0].read_fq(nrec, &fq[0])) {
 		for (i=1;i<i_n;++i) {
 			int mok=fin[1].read_fq(nrec, &fq[i]);
@@ -898,7 +901,7 @@ int main (int argc, char **argv) {
 
 		int dotrim[MAX_FILES][2];
 		bool skip = 0;							// skip whole record?
-		int hompol_tab[B_CNT+1]; if (hompol_filter) meminit(hompol_tab);
+		int hompol_seq=0;
 		int hompol_cnt=0;
 		int f;	
 		for (f=0;f<i_n;++f) {
@@ -927,11 +930,11 @@ int main (int argc, char **argv) {
 
             if (hompol_filter) {
                 char p; int h = 0;
-                for (i = dotrim[f][0];i<fq[f].seq.n;++i) {
-                    if (fq[f].seq.s[i] != 'N') {
-                        ++hompol_tab[char2bp(fq[f].seq.s[i])];
-                        ++hompol_cnt;
+                for (i = dotrim[f][0]+1;i<fq[f].seq.n;++i) {
+                    if (fq[f].seq.s[i] == fq[f].seq.s[i-1]) {
+                        ++hompol_seq;
                     }
+                    ++hompol_cnt;
                 }
             }
 
@@ -1085,14 +1088,8 @@ int main (int argc, char **argv) {
         int hompol_skip=0;
         if (hompol_filter) {
             int hompol_max = hompol_pct * hompol_cnt;
-//            printf("max:%d\n", hompol_max);
-            for (i=0;i<B_N;++i) {
-//                printf("tab:%d,%d\n", i, hompol_tab[i]);
-                if (hompol_tab[i] >= hompol_max) {
-                    hompol_skip=i+1;
-                }
-            }
-            if (hompol_skip) skip = true;
+//            printf("cnt:%d, max:%d, seq:%d\n", hompol_cnt, hompol_max, hompol_seq);
+            if (hompol_seq>=hompol_max) hompol_skip = skip = true;
         }
 
 		if (!skip) {
@@ -1159,12 +1156,12 @@ int main (int argc, char **argv) {
             }
             if (!skip) {
                for (f=0;f<o_n;++f) {
-                    fputs(fq[f].id.s,fout[f]);
-                    fputs(fq[f].seq.s,fout[f]);
-                    fputc('\n',fout[f]);
-                    fputs(fq[f].com.s,fout[f]);
-                    fputs(fq[f].qual.s,fout[f]);
-                    fputc('\n',fout[f]);
+                    io_ok=io_ok&&(fputs(fq[f].id.s,fout[f])>=0);
+                    io_ok=io_ok&&(fputs(fq[f].seq.s,fout[f])>=0);
+                    io_ok=io_ok&&(fputc('\n',fout[f])>=0);
+                    io_ok=io_ok&&(fputs(fq[f].com.s,fout[f])>=0);
+                    io_ok=io_ok&&(fputs(fq[f].qual.s,fout[f])>=0);
+                    io_ok=io_ok&&(fputc('\n',fout[f])>=0);
                 }
             } else {
                 if (skipb) saveskip(fskip, i_n, fq);
@@ -1181,10 +1178,14 @@ int main (int argc, char **argv) {
 	}
 
 	for (i=0;i<i_n;++i) {
-		if (fout[i])  { if (gzout[i])  pclose(fout[i]);  else fclose(fout[i]); }
+		if (fout[i])  { io_ok = io_ok && ( gzout[i] ? !pclose(fout[i]) : !fclose(fout[i]) ); }
         fin[i].close();
 		if (fskip[i]) { if (gzskip[i]) pclose(fskip[i]); else fclose(fskip[i]); }
 	}
+
+    if (!io_ok) {
+	    fprintf(fstat, "Error during file close, possible partial write, failing\n");
+    }
 
 	fprintf(fstat, "Total reads: %d\n", nrec);
 	fprintf(fstat, "Too short after clip: %d\n", ntooshort);
@@ -1224,6 +1225,9 @@ int main (int argc, char **argv) {
 		fprintf(fstat, "Errors (%s): %d\n", ifil[f], nerr);
 		return 2;
 	}
+    if (!io_ok) {
+        return 3;
+    }
 	return 0;
 }
 
@@ -1366,6 +1370,15 @@ inline int char2bp(char c) {
         if (c == 'T' || c == 't') return B_T;
         return B_N;
 }
+
+inline int char2bp_rc(char c) {
+        if (c == 'A' || c == 'a') return B_T;
+        if (c == 'C' || c == 'c') return B_G;
+        if (c == 'G' || c == 'g') return B_C;
+        if (c == 'T' || c == 't') return B_A;
+        return B_N;
+}
+
 
 inline char bp2char(int b) {
         if (b == B_A) return 'A';
