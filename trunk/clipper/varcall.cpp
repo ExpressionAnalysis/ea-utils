@@ -162,6 +162,7 @@ public:
     int NumReads;
     vector<vcall> Calls;
 
+    int SkipN;
     int SkipDupReads;
     int SkipMinMapq;
     int SkipMinQual;
@@ -794,6 +795,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 	Base=*(d[2]);
 	Depth = atoi(d[3]);
 	SkipDupReads = 0;
+	SkipN = 0;
 	SkipMinQual = 0;
 	SkipMinMapq = 0;
 	MaxDepthByPos = 0;
@@ -852,11 +854,19 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 			is_ref = 1;
 		}
 
+		if (o == '>' || o == '<') {	
+			c = 'N';					// no call
+			is_ref = 1;
+		}
+
 		bool skip = 0;
 
         // probably should not be adding anything here... but the old code added 1 and floored... new code adds .5 and rounds... which is comparable
         // really.. should just be adding zero, the reason the old code had it was because of a lack of max()
-		if (artifact_filter > 0 && (depthbypos[pia] > max(1,rand_round(0.5+artifact_filter * (Depth/rds.MeanReadLen()))))) {
+		if (c == 'N') {
+			++SkipN;
+			skip=1;
+		} else if (artifact_filter > 0 && (depthbypos[pia] > max(1,rand_round(0.5+artifact_filter * (Depth/rds.MeanReadLen()))))) {
 			++SkipDupReads;
 			skip=1;
 		} else if (mq < min_mapq) {
@@ -879,7 +889,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 
 			if ( o == ',' || o == 'a' || o == 'c' || o == 't' || o == 'g' ) {
 				++Calls[j].rev;
-			} else {
+			} else if ( c != 'N' ) {
 				++Calls[j].fwd;
 			}
 
@@ -1152,6 +1162,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
         if (debug_xpos) {
             fprintf(stderr,"xpos-skip-depth\t%d < %d\n",p.Depth, min_depth);
 		    fprintf(stderr,"xpos-skip-dup\t%d\n",p.SkipDupReads);
+		    fprintf(stderr,"xpos-skip-n\t%d\n",p.SkipN);
 		    fprintf(stderr,"xpos-skip-mapq\t%d\n",p.SkipMinMapq);
 		    fprintf(stderr,"xpos-skip-qual\t%d\n",p.SkipMinQual);
         }
@@ -1263,13 +1274,16 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                                 if (padj <= alpha) {
                                     vfinal final(p.Calls[i]);
                              
-                                    padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report as better than the mapping quality
+                                    double mq_padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report pval as better than the total mapping quality
+		                            if (debug_xpos) fprintf(stderr,"xpos-debug-pval\tbase:%c, err:%g, pval:%g, padj:%g, mq_padj:%g, mq_sum:%d\n", p.Calls[i].base, err_rate, pval, padj, mq_padj, p.Calls[i].mq_sum);
+
+                                    if (mq_padj > 1) mq_padj=1;
 
                                     if (need_out == -1) 
                                         need_out = i;
 
 //                                    printf("FINAL: depth:%d base: %s\n", (int) maxc, maxs.c_str());
-                                    final.padj=padj;
+                                    final.padj=mq_padj;
                                     final.max_idl_cnt=maxc;
                                     final.max_idl_seq=maxs;
                                     final_calls.push_back(final);
@@ -1316,14 +1330,18 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                             double padj=total_locii ? pval*total_locii : pval;           // multiple-testing adjustment
 
                             if (padj <= alpha) {
-                                padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report as better than the mapping quality
+                                double mq_padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report as better than the mapping quality
+
+                                if (mq_padj > 1) mq_padj=1;
+
+		                        if (debug_xpos) fprintf(stderr,"xpos-debug-pval\tbase:%c, err:%g, pval:%g, padj:%g, mq_padj:%g, mq_sum:%d\n", p.Calls[i].base, err_rate, pval, padj, mq_padj, p.Calls[i].mq_sum);
 
                                 if (!p.Calls[i].is_ref || debug_xpos) {
                                     if (need_out == -1)
                                         need_out = i;
                                 }
                                 vfinal final(p.Calls[i]);
-                                final.padj=padj;
+                                final.padj=mq_padj;
                                 final_calls.push_back(final);
                             } else {
                                 skipped_alpha+=p.Calls[i].depth();
@@ -1390,7 +1408,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                     pil += string_format("\t%c:%d,%d,%.1e",f.pcall->base,f.pcall->depth(),f.pcall->qual/f.pcall->depth(),f.padj);
                }
             }
-            fprintf(var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_alpha+skipped_depth+skipped_balance+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, pil.c_str());
+            fprintf(var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_alpha+skipped_depth+skipped_balance+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, pil.c_str());
         }
 
         if (vcf_f) {
