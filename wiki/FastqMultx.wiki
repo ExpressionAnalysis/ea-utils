@@ -89,3 +89,26 @@ Standard error will output:
 `Using Barcode Group: TruSeq on File: seq2.fastq.gz (start), Threshold 0.59%`
 
 This indicated that The LB1-LB5 barcodes will be used, and that the filess will be named LB1-LB5, and that the barcode was at the "start" of the reads in the seq2 file.
+
+
+Example of Nextera/Dual-Indexed input:
+
+{{{
+id      seq     style
+D708_508        TAATGCGC-GTACTGAC       TruSeq RNA
+D709_501        CGGCTATG-TATAGCCT       TruSeq RNA
+D709_502        CGGCTATG-ATAGAGGC       TruSeq RNA
+D709_503        CGGCTATG-CCTATCCT       TruSeq RNA
+D709_504        CGGCTATG-GGCTCTGA       TruSeq RNA
+D709_505        CGGCTATG-AGGCGAAG       TruSeq RNA
+D709_506        CGGCTATG-TAATCTTA       TruSeq RNA
+D709_507        CGGCTATG-CAGGACGT       TruSeq RNA
+D709_508        CGGCTATG-GTACTGAC       TruSeq RNA
+D710_501        TCCGCGAA-TATAGCCT       TruSeq RNA
+D710_502        TCCGCGAA-ATAGAGGC       TruSeq RNA
+D710_503        TCCGCGAA-CCTATCCT       TruSeq RNA
+D710_504        TCCGCGAA-GGCTCTGA       TruSeq RNA
+D710_505        TCCGCGAA-AGGCGAAG       TruSeq RNA
+D710_506        TCCGCGAA-TAATCTTA       TruSeq RNA
+D710_507        TCCGCGAA-CAGGACGT       TruSeq RNA
+}}}
