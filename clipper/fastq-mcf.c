@@ -55,6 +55,8 @@ struct ad {
 	int bcntz[MAX_FILES];			// number found at beginning
 	int ecnt[MAX_FILES];			// number found at end
 	int ecntz[MAX_FILES];			// number found at end
+	int wcnt[MAX_FILES];			// number found in entirety
+
 	char end[MAX_FILES];			// 'b' or 'e'
 	int thr[MAX_FILES];			// min-length for clip
 };
@@ -450,7 +452,7 @@ int main (int argc, char **argv) {
 				nq=fin[i].getline(&q, &naq);		// qual is 2 lines down
 
 				// skip poor quals/lots of N's when doing sampling
-				if (st.st_size > (sampcnt * 500) && skipped < max_in_buffer/8 && poorqual(i, ns, s, q)) {
+				if (st.st_size > (sampcnt * 500) && (skipped < sampcnt) && poorqual(i, ns, s, q)) {
 					if (debug) fprintf(stderr, "Skip poorqual\n");
                     ++skipped;
 					continue;
@@ -550,7 +552,7 @@ int main (int argc, char **argv) {
 				--nq; --ns;				// don't count newline for read len
 
 				// skip poor quals/lots of N's when doing sampling (otherwise you'll miss some)
-				if ((st.st_size > (sampcnt * 500)) && skipped < max_in_buffer/8 && poorqual(i, ns, s, q)) {
+				if ((st.st_size > (sampcnt * 500)) && (skipped < sampcnt) && poorqual(i, ns, s, q)) {
                     ++skipped;
 					continue;
                 }
@@ -603,6 +605,7 @@ int main (int argc, char **argv) {
 					// search whole seq for 15 char "end" of adap string
 					if (p = strstr(s+1, ad[a].escan)) { 
 						if (debug > 1) fprintf(stderr, "  END S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", s, ad[a].id, ad[a].escan, (int) (p-s), ns, (p-s) == ns-SCANLEN);
+                        // found at the very end
 						if ((p-s) == ns-SCANLEN) 
 							++ad[a].ecntz[i];
 						++ad[a].ecnt[i];
@@ -621,6 +624,7 @@ int main (int argc, char **argv) {
 					}
 					if (p) { 
 						if (debug > 1) fprintf(stderr, "BEGIN S: %s A: %s (%s), P: %d, SL: %d, Z:%d\n", buf, ad[a].id, ad[a].seq, (int) (p-ad[a].seq), ns, (p-ad[a].seq )  == ad[a].nseq-slen);
+                        // found the end of the adapter
 						if (p-ad[a].seq == ad[a].nseq-slen) 
 							++ad[a].bcntz[i];
 						++ad[a].bcnt[i];
@@ -735,9 +739,9 @@ int main (int argc, char **argv) {
 	for(a=0;a<acnt;++a) {
 		int any=0;
 		for (i=0;i<i_n;++i) {
+			if (debug) fprintf(stderr, "ad:%s, EC:%d, BC:%d, ECZ: %d, BCZ: %d\n", ad[a].id, ad[a].ecnt[i], ad[a].bcnt[i], ad[a].ecntz[i], ad[a].bcntz[i]);
 			if (ad[a].ecnt[i] > athr || ad[a].bcnt[i] > athr) {
 				int cnt;
-				if (debug) fprintf(stderr, "EC: %d, BC:%d, ECZ: %d, BCZ: %d\n", ad[a].ecnt[i], ad[a].bcnt[i], ad[a].ecntz[i], ad[a].bcntz[i]);
 				// heavily weighted toward start/end maches
 				if ((ad[a].ecnt[i] + 10*ad[a].ecntz[i]) >= (ad[a].bcnt[i] + 10*ad[a].bcntz[i])) {
 					ad[a].end[i]='e';
