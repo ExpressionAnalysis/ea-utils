@@ -55,7 +55,6 @@ struct ad {
 	int bcntz[MAX_FILES];			// number found at beginning
 	int ecnt[MAX_FILES];			// number found at end
 	int ecntz[MAX_FILES];			// number found at end
-	int wcnt[MAX_FILES];			// number found in entirety
 
 	char end[MAX_FILES];			// 'b' or 'e'
 	int thr[MAX_FILES];			// min-length for clip
