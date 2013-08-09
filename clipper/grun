@@ -107,6 +107,12 @@ my $stream_quit = 0;
 
 if ($ARGV[0] eq '-X') {
     do_stream();
+    exit(0);
+}
+
+if ($ARGV[0] eq '-Y') {
+    do_execute();
+    exit(0);
 }
 
 
@@ -230,7 +236,7 @@ if ($killjob) {
 	for my $job (@ARGV) {
         my @id;
 		if ($job !~ /^\d/) {
-            @id=(guid=>"$conf{hostname}:$job");
+            @id=(guid=>"$job");
 		} else {
             @id=(jid=>$job);
         }
@@ -311,7 +317,32 @@ sub grun_client {
     $opt{io} = 1;				# copy io back on the socket, implies wait
 
     Getopt::Long::Configure qw(require_order no_ignore_case passthrough);
-    GetOptions(\%opt, "file=s", "int|I", "memory|m=i", "hosts|h=s", "cpus|c=i", "io!", "wait!", "err|e=s", "out|o=s", "jobx|jobid|j=s", "verbose", "make|M", "debug|D", "env|E=s", "alert=s", "param|p=s@");
+
+    GetOptions(\%opt, "file=s", "int|I", "memory|m=i", "hosts|h=s", "cpus|c=i", "io!", "wait!", "err_a|err-append|ea=s", "err|e=s", "out|o=s", "out_a|out-append|oa=s", "ouer|out-err|oe=s", "ouer_a|out-err-append|oea=s", "jobx|jobid|j=s", "verbose", "make|M", "debug|D", "env|E=s", "alert=s", "param|p=s@", "wait-exists|W");
+
+    if ((!!$opt{out} + !!$opt{out_a} + !!$opt{ouer} + !!$opt{ouer_a})>1) {
+        $config=undef;
+        die "ERROR: Specify only one of --out, --out-append, --out-err or --out-err-append\n\n" . usage()
+    }
+
+    if ((!!$opt{err} + !!$opt{err_a} + !!$opt{ouer} + !!$opt{ouer_a})>1) {
+        $config=undef;
+        die "ERROR: Specify only one of --err, --err-append, --out-err or --out-err-append\n\n" . usage()
+    }
+
+    if (my $t=$opt{out_a}?$opt{out_a}:$opt{ouer_a}) {
+        $opt{out}=$t;
+        $opt{out_a}=1;
+        delete $opt{ouer_a};
+    }
+    if (my $t=$opt{err_a}?$opt{err_a}:$opt{ouer_a}) {
+        $opt{err}=$t;
+        $opt{err_a}=1;
+        delete $opt{ouer_a};
+    }
+    if ($opt{ouer}) {
+        $opt{out}=$opt{err}=$opt{ouer}; delete $opt{ouer};
+    }
 
     my $verbose = $opt{verbose}; delete $opt{verbose};
     my $env = $opt{env}; delete $opt{env};
@@ -323,7 +354,6 @@ sub grun_client {
     }
 
     if ($opt{err} && $opt{out}) {
-        $opt{wait} = $opt{wait} || $opt{io};
         $opt{io} = 0;
     }
 
@@ -379,6 +409,7 @@ sub grun_client {
                     push @o, $t[$i+1] if $t[$i] eq '>' && $t[$i+1]=~/^\s*\w/;
                 }
             }
+            s/\%\!\>(>?\s*\S+)/>$1/g;
         }
         die "Unable to determine i/o for -M (make) semantics\n\n" . usage()
             if !@i || !@o;
@@ -513,9 +544,18 @@ sub grun_client {
         open STDERR, ">&STDOUT";
     }
 
+    $opt{memory} = $opt{memory} ? $opt{memory} : $conf{default_memory};
+    $opt{cpus} = $opt{cpus} ? $opt{cpus} : 1;
+
+    for (@metrics) {
+        if ($conf{"default_$_"}) {
+            $opt{$_} = $opt{$_} ? $opt{$_} : $conf{"default_$_"};
+        }
+    }
+
     if ($verbose) {
-        printf STDERR "Memory:	%d\n", $opt{memory} ? $opt{memory}/1000 : $conf{default_memory};
-        printf STDERR "CPUs:	%d\n", $opt{cpus} ? $opt{cpus} : 1;
+        printf STDERR "Memory:	%d\n", $opt{memory};
+        printf STDERR "CPUs:	%d\n", $opt{cpus};
         printf STDERR "Hosts:	%s\n", $opt{hosts} if $opt{hosts};
         for ((@metrics,@labels)) {
             printf STDERR proper($_) . ":	%s\n", $opt{param}->{$_} ? $opt{param}->{$_} : 1;
@@ -562,7 +602,7 @@ sub grun_client {
     $opt{cmd} = \@cmd;
     $opt{hard_factor} = $conf{hard_factor};
     $opt{frompid} = $$;
-    $opt{guid} = $opt{jobx} ? "$conf{hostname}:$opt{jobx}" : create_guid();
+    $opt{guid} = $opt{jobx} ? $opt{jobx} : create_guid();
 
     %info = waitmsg($conf{master}, $conf{master_port}, 'run', \%opt);
 
@@ -581,17 +621,29 @@ sub grun_client {
     }
     my $save_jid = $info{jid};
 
+    $0 = "GRUN:$save_jid";
+
     if ($verbose) {
         printf STDERR "Job_ID:	$info{jid}\n";
     }
 
-    if ($opt{jobx}) {
-        # this is crappy... should be a totally separate set of id's... and should be on the central server
-        # but too much code and not worth it for me right now
-        # with sqlite would be easier
-        mkdir("$ENV{HOME}/.grun") if ! -d "$ENV{HOME}/.grun";
-        mkdir("$ENV{HOME}/.grun/jobx") if ! -d "$ENV{HOME}/.grun/jobx";
-        burp("$ENV{HOME}/.grun/jobx/$opt{jobx}", $info{jid});
+    if ($info{already}) {
+        if ($opt{"wait-exists"}) {
+            my ($res) = waitmsg($conf{master},$conf{master_port}, "jwait", $info{jid});
+            my $st;
+            if ($res && defined $res->{status}) {
+                print "Job $_ status $res->{status}\n";
+                $st = $res->{status} if $res->{status};
+            } else {
+                print "Job $_ status $STATUS_UNKNOWN\n";
+                $st = $STATUS_UNKNOWN;
+            }
+            exit $st;
+        } else {
+            print STDOUT "Job_ID: $info{jid} \n" if !$verbose;
+            printf STDERR "Already running job named $opt{jobx}, try grun -q wait JOB\n";
+            exit -1; 
+        }
     }
 
     if ($opt{wait}) {
@@ -629,7 +681,7 @@ sub grun_client {
             # shadow watcher....
             if ($info{ip}=~/^\d/) {
                 if ($opt{io} && !($opt{err} && $opt{out}) ) {
-                    ($stat, $err, $diderr) = waitio($info{ip}, $info{port}, $info{jid});
+                    ($stat, $err, $diderr) = waitio($info{ip}, $info{port}, $info{jid}, \%opt);
                 } else {
                     my ($key, $dat) = waitmsg_retry($conf{retry_secs}*1000, $info{ip}, $info{port}, 'xstat', $info{jid});
                     $stat=$dat->{status};
@@ -640,14 +692,16 @@ sub grun_client {
                 } 
             } else {
                 $stat=$STATUS_UNKNOWN;
-                $err="Error in grun protocol, unknown status!\n";
+                $err="Error in grun protocol (ip=$info{ip}), unknown status!\n";
             }
             sleep 5 if (!defined $stat && !defined $err);
         }
 
         # send this command into the ether...if exec doesn't get it, clean up after timeout
         if ($opt{io}||$opt{wait}) {
-            sendcmd($info{ip}, $info{port}, 'xclean', $info{jid});
+            if ($info{ip}=~/^\d/) {
+                sendcmd($info{ip}, $info{port}, 'xclean', $info{jid});
+            }
         }
         if ($stat == 11) {
             $err = 'Segmentation fault';
@@ -847,12 +901,12 @@ sub process_message {
 				my $job_ip = slurp("$conf{spool}/jobs/$jid.ip");
 # tell client to send an 'xedit' to the running node
 # needed only for certain edits....think about this
-#                                return "Forward $ip:" . $nodes{$ip}->{port};
+                return "Job $jid is running on $job_ip\n";
 			}
 		} else {
 			my $ref = unpack_file("$conf{spool}/jobs/$jid");
 			for my $key (keys(%ed)) {
-				$ref->[0]->{$key} = $ed{$key};
+				$ref->{$key} = $ed{$key};
 			}
 			burp("$conf{spool}/jobs/$jid.jedit", packfile($ref));
 			rename("$conf{spool}/jobs/$jid.jedit", "$conf{spool}/jobs/$jid");
@@ -912,7 +966,7 @@ sub process_message {
 				} else {
 					if ($job->{force}) {
 						xlog("error", "Job $jid forced kill");
-                        my $job = unpack_file("$conf{spool}/jobs/$jid:$ip.run");
+                        my $job = unpack_file("$conf{spool}/jobs/$jid:$job_ip.run");
 						if ($nodes{$job_ip}) {
                             sendcmd_nowait($job_ip, $nodes{$job_ip}->{port}, 'xabort', $jid, 9);
                         }
@@ -969,15 +1023,19 @@ sub process_message {
                    my $job = unpack_file("$conf{spool}/jobs/$jid:$ip.run");
                    if ($job) {
                         if (my $n=$nodes{$ip}) {
+				            xlog("debug", "Clearing cpu: $job->{cpus}, memory: $job->{memory} from $ip");
                             $n->{a_cpus} -= $job->{cpus};                   # deallocate
                             $n->{a_memory} -= $job->{memory};               # deallocate
-
+                            for (@metrics) {
+                                $n->{"a_$_"} -= $job->{param}->{$_};
+                            }
                             # TODO: probably would be nice, in a jstat, to include metrics so all these aren't guessing
 
                             $n->{avail} += $job->{cpus};                    # return to avail, until %node is updated
                             $n->{mem} += $job->{memory};                    # return mem
-
                             $n->{avail} = max($n->{avail},min($n->{cpus},$n->{orig_cpus}-$n->{load}));          # better guess
+                        } else {
+				            xlog("error", "Got a report for $jid, from $ip, but there's no node like that");
                         }
                         archive_job($jid, $job, $opts{status}, $ip, \%opts);
                    } else {
@@ -1004,7 +1062,7 @@ sub process_message {
 		xlog("debug", "Got dack for $dack{jid}") if $trace;
 		if ($dack{jid}) {
 			if (!$dack{jrun}) {
-                if (!$io_wait{$dack{jid}}) {
+                if (!$io_wait{$dack{jid}} || !$io_wait{$dack{jid}}->{streams}) {
                     exec_clean($dack{jid});
                } else {
 		            xlog("debug", "Still waiting on i/o: " . packdump($io_wait{$dack{jid}}) . ", will clean later") if $trace;
@@ -1015,8 +1073,8 @@ sub process_message {
 		}
 	} elsif ($cmd eq 'jexok') {
         my ($jid) = @_;
-        if ( -e "$conf{spool}/jobs/$jid:$ip.ip" ) {
-            touch("$conf{spool}/jobs/$jid:$ip.ip");
+        if ( -e "$conf{spool}/jobs/$jid:$ip.run" ) {
+            touch("$conf{spool}/jobs/$jid:$ip.run");
         }
 	} elsif ($cmd eq 'xexec') {
 		my ($opts) = @args;
@@ -1041,6 +1099,7 @@ sub process_message {
                 replymsg($_, "quit");
             }
             delete $io_wait{$jid}->{streams};
+            touch("$conf{spool}/jstat/$jid.dumped");
         }
 
 		my $job = unpack_file("$conf{spool}/jpids/$jid");
@@ -1053,14 +1112,14 @@ sub process_message {
 
 			if ($ok) {
                 # report status as "killed"
-                selfcmd("sstat", {id=>$jid,status=>127+$sig,error=>"Job $jid aborted"});
+                selfcmd("sstat", {id=>$jid,status=>127+$sig,error=>"Job $jid aborted",dumped=>1});
 				return "Job $jid aborted"; 
 			} else {
 				return "Job $jid kill $sig failed : $!"; 
 			}
             if ($io_wait{$jid} && $io_wait{$jid}->{zid}) {
-                # tell waiters it's dead
-                replymsg($io_wait{$jid}->{zid},"$jid:stat",{status=>127+$sig, error=>"Job $jid aborted"});
+                # tell waiters it's dead, and streams are dumped
+                replymsg($io_wait{$jid}->{zid},"$jid:stat",{status=>127+$sig, error=>"Job $jid aborted", dumped=>1});
             }
 		} else {
 			return "Job $jid not found for xabort";
@@ -1195,7 +1254,7 @@ sub process_message {
             $job->{trace}=$trace;
 
             if ( -e $gfile) {
-			    return (jid=>slurp($gfile));
+			    return (jid=>slurp($gfile), already=>1);
             }
 			xlog("debug", "Created $file\n") if $trace;
 			open(G, ">$gfile") || return('error'=>"Can't create $gfile : $!");
@@ -1275,7 +1334,7 @@ sub child_exit {
         my $jid=$pid_jobs{$kid}->{jid};
         if ($jid) {
             if (-s "$conf{spool}/jstat/$jid.stat") {
-                notifystat(unpack_file("$conf{spool}/jstat/$jid.stat"));
+                notifystat(unpack_file("$conf{spool}/jstat/$jid.stat"), 1);
                 touch("$conf{spool}/jpids/$jid") if -e "$conf{spool}/jpids/$jid";
             }
         }
@@ -1399,7 +1458,10 @@ sub schedule {
 			my $mem = $n->{tmem} - $n->{a_memory};
 			$mem = $n->{mem} if ($n->{tmem} == 0) || ($n->{mem} < $mem);
 
-			xlog("debug", "Sched $jid: $n->{ip}: jcpu:$job->{cpus}, norig: $n->{orig_cpus}, ncpu:$n->{cpus}, nall:$n->{a_cpus}, nav:$n->{avail}, cpus:$cpus , j:$job->{memory}?$n->{mem}>m:$mem");
+#           See below, only log reason
+#            if (debugging()) {
+#    			xlog("debug", "Sched $jid: $n->{ip}: jcpu:$job->{cpus}, norig: $n->{orig_cpus}, ncpu:$n->{cpus}, nall:$n->{a_cpus}, nav:$n->{avail}, cpus:$cpus , jmem:$job->{memory}, nmem:$n->{mem}, avmem:$mem");
+#            }
 
             if ($cpus <= 0) {
                 # pull the node out of the list
@@ -1407,6 +1469,7 @@ sub schedule {
                 splice(@nlist, $i, 1);
                 --$i;                
             }
+            # did it ping recently?
 			if ($n->{ping} > (time()-$conf{ping_secs}*6)) {
 				my $ok = 1;
 				for (@metrics) {
@@ -1454,7 +1517,23 @@ sub schedule {
 						$max_av = $n->{avail};
 						last;
 					}
-				}
+				} else {
+                    my $reason = "";
+                    if (!($mem >= $job->{memory})) {
+                        $reason = "memory ($mem)";
+                    } elsif (!(($cpus+$conf{idle_load}) >= $job->{cpus})) {
+                        $reason = "cpus ($cpus)";
+                    } elsif (!(($n->{disk} >= $job->{disk}))) {
+                        $reason = "disk ($n->{disk})";
+                    } else {
+                        for (@metrics) {
+                            if (($n->{"param-$_"} - $n->{"a_$_"}) < $job->{param}->{$_}) {
+                                $reason = "$_ (" . $n->{"a_$_"} . ")";
+                            }
+                        }
+                    }
+                    xlog("debug", "Sched $jid: $n->{ip}: $reason");
+                }
 			} else {
 				push @dereg, $n->{ip} if $n->{ip};
 			}
@@ -1468,7 +1547,7 @@ sub schedule {
             $did=1;
 			xlog("debug", "Matched '$max_n->{ip}' to job $job->{file}") if $job->{trace};
 
-			# todo... change this
+			# todo... change this... it's an ugly way of owning jobs
 			my $jmine = "$job->{file}:" . $max_n->{ip} . ".run";
 			touch($job->{file}) if -e $job->{file};
 			rename($job->{file}, $jmine);
@@ -1481,10 +1560,15 @@ sub schedule {
  
                 $max_n->{a_cpus} += $job->{cpus};                   # allocate
                 $max_n->{a_memory} += $job->{memory};
+				for (@metrics) {
+					$max_n->{"a_$_"} += $job->{param}->{$_};
+				}
                 $max_n->{avail} -= $job->{cpus};                    # assume being used
                 $max_n->{mem} -= $job->{memory};                    # assume being used
                 ++$jcnt;
-			}
+            } else {
+			    xlog("error", "Rename failed for $jmine\n");
+            }
 		} else {
 			if ($conf{backup_grid}) {
 				# TODO: fork exec to backup grid, and add to list of pids to track... as if you're an exec node
@@ -1665,7 +1749,7 @@ sub srvexec {
 			next unless $jid =~ /^\d/;
             next unless fmodtime("$conf{spool}/jpids/$jid") < time()-$conf{ping_secs};
             if (-s "$conf{spool}/jstat/$jid.stat") {
-                notifystat(unpack_file("$conf{spool}/jstat/$jid.stat"));
+                notifystat(unpack_file("$conf{spool}/jstat/$jid.stat"), 1);
                 next;
             }
             # been a while... check to see if it's alive
@@ -1700,7 +1784,7 @@ sub fmodtime {
 }
 
 sub notifystat {
-	my ($stat) = @_;
+	my ($stat, $from_jstat) = @_;
 
     confess("stat is required\n") if (!$stat);
 
@@ -1709,15 +1793,26 @@ sub notifystat {
             # tell the client that the job is done
             replymsg($io_wait{$stat->{id}}->{zid},"$stat->{id}:stat",$stat);
         } else {
-            if ( ! -s "$conf{spool}/jstat/$stat->{id}.stat") {
-	            xlog("debug", "Declaring alternative status for $stat->{id}, this may not be correct!");
+            # it's not a request to notify that came from the file
+            # and yet, the file is there, with, presumably, valid status info
+            # so which do we report?   
+
+            # I assume, report what's in the file....ie: it was there first
+            # this can (rarely) happen if you kill a job after it completes successfully, for example
+
+            # TODO: the safer thing is to report the "worst case" ... ie: if either is an error, report error
+            # and if both agree ... then don't log anything here... not a problem
+
+            if ( ! $from_jstat && -s "$conf{spool}/jstat/$stat->{id}.stat") {
+                # log the problem for inspection
+	            xlog("error", "Got alternative status for $stat->{id}, this may not be correct!");
+                # save the new status as an error file to inspect later
                 burp("$conf{spool}/jstat/$stat->{id}.stat-err", packfile($stat));
             }
         }
     }
 
     # already dack'ed
-
     if ( -e "$conf{spool}/jstat/$stat->{id}.dack" ) {
 	    xlog("debug", "Not notifying status for $stat->{id}, dack already set");
         exec_clean($stat->{id});
@@ -1850,7 +1945,7 @@ sub xlog {
 
 # wait for STDERR and STDOUT from a command
 sub waitio {
-    my ($host, $port, $jobid) = @_;
+    my ($host, $port, $jobid, $opt) = @_;
     my @resp;
     my $stat;
     my $err;
@@ -1860,7 +1955,8 @@ sub waitio {
 
     my $stat_time;
     $|=1;
-    my $needio = 2;
+    my $needio = !$opt->{err}+!$opt->{out};
+    my $start_wait=time();
     while ((!defined $stat) || $needio) {
         my $got = 0;
         # wait up to 5 seconds for output
@@ -1898,15 +1994,26 @@ sub waitio {
                     $needio = 0;
                 }
                 # what does the client do with the times?
+            } else {
+                xlog("error", "Job $jobid, got message ($jid, $type, $cmd) in response to xio");
             }
         } else {
-            xlog("error", "Job $jobid, got unknown message in response to xio");
+            xlog("error", "Job $jobid, got message ($key) in response to xio");
         }
-        }}],$conf{retry_secs}*2);
+        }}],$conf{retry_secs}*2*1000);
 
         if (!$got) {
             # if you didn't get anything, ask again
             $sock = _sendcmd($host, $port, 'xio', $jobid);
+            if (time()>$start_wait+$conf{retry_secs}*10) {
+                # been a while...ask head node if this job is dead?
+                my %info = waitmsg($conf{master}, $conf{master_port}, 'jinfo', $jobid);
+                if ($info{status} =~ /\d/) {
+                    $stat=$info{status};
+                    $err=$info{error};
+                    $needio = 0;
+                }
+            }
         }
     }
     return ($stat, $err, $diderr);
@@ -2104,10 +2211,15 @@ Execution Options:
 
     -noio           disable io-processing, but wait for completion
     -nowait         no io and don't wait, just start the command
-    -e|rr FILE      write stderr directly to FILE, no spool
-    -o|ut FILE      write stdout directly to FILE, no spool
+    -e|rr FILE      write stderr directly to FILE, no spool *
+    -o|ut FILE      write stdout directly to FILE, no spool *
 
-If the command contains shell metacharacters, it's prefixed with "bash -c".
+All options can be abbreviated to uniqueness.
+
+* You can append error & output with -oa, -ea or -out-append -err-append, 
+or both with -oea, or --out-err-append.
+
+If the command contains shell metacharacters, it's wrapped in a bash script
 EOF
 
 	$u .= <<'EOF' if $make;
@@ -2119,9 +2231,13 @@ Make Semantics:
 	#o:file    Output file, removed the command line before executing
 	< file     Input file, left in the command line
 	> file     Output file, left in the command line
+    %!>file    Output, but don't set as a dependency
 
 For Example:
 	grun "gzip %i:x.foo #o>x.foo.gz"
+
+If a command fails under Make Semantics, the output file(s) will be 
+set to FILE.failed.
 
 EOF
 
@@ -2785,11 +2901,7 @@ sub zmq_safe_term() {
 }
 
 sub zmq_fork_undef() {
-    # kill access to any forked sockets
-    $router=undef;
-    %ZMQS=();
-    $context=undef;
-    # close all duped file descriptors
+   # close all duped file descriptors
     opendir(D,"/proc/$$/fd");
     while(my $fd = readdir(D)) {
         if ($fd > 2 && (POSIX::lseek($fd, 0, POSIX::SEEK_CUR) == -1)) {
@@ -2799,6 +2911,10 @@ sub zmq_fork_undef() {
         }
     }
     closedir(D);
+    # kill access to any forked sockets
+    $router=undef;
+    %ZMQS=();
+    $context=undef;
 }
 
 
@@ -2886,12 +3002,22 @@ sub execute_job {
     if (!open(PF, ">$pfile")) {
         xlog($err="Can't create $pfile: $!");
     }
-    my $tfile = "$conf{spool}/jstat/$opts->{id}.stat";
+    my $bfile = "$conf{spool}/jstat/$opts->{id}";
+    my $tfile = "$bfile.stat";
+    my $ifile = "$bfile.job";
+
+    $opts->{uid}=$uid;
+    $opts->{gid}=$gid;
+
+    # job info, saved
+    burp($ifile, packfile($opts));
+    chown($uid,0,$ifile);
 
     if (!open(XOUT, ">", "$tfile")) {
         $err=$!;
         $ret=$?;
     }
+    close(XOUT);
     chown($uid,0,$tfile);
 
     if (!$err && !($pid=fork)) {
@@ -2899,21 +3025,19 @@ sub execute_job {
             $err = "Can't fork";
         } else {
             $0="GRUN:$opts->{id}";
-            # no accidental messages go out on this context
             zmq_fork_undef();
-            $context=zmq_init();
 
-# restore signal to default ... regular kill
+        # restore signal to default ... regular kill
             $SIG{INT} = undef;
             $SIG{TERM} = undef;
             $ENV{USER} = $opts->{user};
 
-# kill me with a negative number, all kids die too
-# kill my parent.... i stay alive, and my IO is still ready to go
+        # kill me with a negative number, all kids die too
+        # kill my parent.... i stay alive, and my IO is still ready to go
             my $pgid=POSIX::setsid();
             xlog("debug", "PGID set to $pgid\n");
 
-# copy in the umask & the environment
+        # copy in the umask & the environment
             umask $opts->{umask};
             for (keys(%{$opts->{env}})) {
                 $ENV{$_}=$opts->{env}->{$_};
@@ -2926,7 +3050,9 @@ sub execute_job {
             $ENV{"_GRUN"} = $opts->{id};
             $ENV{"SGE_TASK_ID"} = $opts->{id} if (!$ENV{SGE_TASK_ID});
 
-            my $shfile = "$conf{spool}/jstat/$opts->{id}.sh";
+            my ($err, $ret);
+
+            my $shfile = "$bfile.sh";
             if (!open(SHFILE, ">", $shfile)) {
                 $err=$!;
                 $ret=$?;
@@ -2934,9 +3060,9 @@ sub execute_job {
             chown($uid,0,$shfile);
 
             my $hard_factor = defined($opts->{hard_factor}) ? $opts->{hard_factor} : $conf{hard_factor};
-            if ($hard_factor) {eval{
-                # todo... other limits
-                print SHFILE "ulimit -m " . ($opts->{memory} * $conf{hard_factor})/1000 . "\n" 
+            if ($hard_factor && $opts->{memory}) {eval{
+                # add 4mb for o/s stuff to load
+                print SHFILE "ulimit -v " . (4000+int(($opts->{memory} * $conf{hard_factor}))) . "\n" 
                     if $opts->{memory};
             }}
 
@@ -2952,15 +3078,7 @@ sub execute_job {
             print SHFILE join(" ", @cmd), "\n";
             close SHFILE;
 
-            @cmd = ("bash", $shfile);
-
             xlog("debug", "Wrote $shfile\n") if $opts->{trace};
-
-            if ($@) {
-                $ret = 103;
-                $err = "Error setting hard limits: $@\n";
-            }
-
 
             if (!$err) {
                 xlog("debug", "Setting uid to $uid, gid to $gid.\n") if $opts->{trace};
@@ -2987,133 +3105,11 @@ sub execute_job {
 
             xlog("debug", "About to launch (@cmd)\n") if $opts->{trace};
 
-            open(OLDERR, ">&STDERR");
-            open(OLDOUT, ">&STDOUT");
-
-            close(STDERR);
-            close(STDOUT);
-
-            my ($out_pid, $err_pid);
-
-            $SIG{INT} =  $SIG{TERM} = sub {
-                kill 2, $out_pid;
-                kill 2, $err_pid;
-            };
-
             if (!$err) {
-                my $ok=1;	
-                eval {
-                    if ($opts->{out}) {
-                        $ok&&=open(STDOUT, ">$opts->{out}");
-                        if ($opts->{out} eq $opts->{err}) {
-                            $ok&&=open(STDERR, ">&STDOUT");
-                        }
-                    }
-                    if ($opts->{err} && !(($opts->{out} eq $opts->{err}))) {
-                            $ok&&=open(STDERR, ">$opts->{err}");
-                    }
-                    if ($opts->{io}) {
-                       my $confarg = "-C $conf{config}";                # same config!
-                       my $streamarg = "-X";                            # grun streamer
-                       $streamarg .= " -I" if $opts->{int};             # interactive mode
-                       if (!$opts->{out}) {
-                            my $cmd="/usr/bin/perl $GRUN_PATH $confarg $streamarg $conf{bind}:$conf{port} $opts->{id}:out";
-                            $out_pid=open(STDOUT, "|$cmd");
-                            $ok&&=$out_pid;
-                        }
-                        if (!$opts->{err}) {
-                            my $cmd="/usr/bin/perl $GRUN_PATH $confarg $streamarg $conf{bind}:$conf{port} $opts->{id}:err";
-                            $err_pid=open(STDERR, "|$cmd");
-                            $ok&&=$err_pid;
-                        }
-                    } else {
-    # save disk and time, i never want i/o
-                        if (!$opts->{err}) {
-                            $ok&&=open(STDERR, ">/dev/null");
-                        }
-                        if (!$opts->{out}) {
-                            $ok&&=open(STDOUT, ">/dev/null");
-                        }
-                    }
-                };
-                if ($@ || !$ok) {
-                    close(STDERR);
-                    close(STDOUT);
-                    open(STDERR, ">&OLDERR");
-                    open(STDOUT, ">&OLDOUT");
-                    if ($@) {
-                        $err=$@;
-                        $ret=109;
-                    } else {
-                        $err="Error opening i/o files: $!";
-                        $ret=109;
-                    }
-                    xlog("error", "$ret: $err\n");
-                }	
-            }
-
-            if (!$err) {
-
-                my $code = -1;
-                my $start = Time::HiRes::time();
-                eval {
-                    $code = system(@cmd);
-                    $0="GRUN:$opts->{id}:$code";
-                };
-                my $elapsed = Time::HiRes::time() - $start;
-
-                open(SAVERR, ">&STDERR");
-                open(SAVOUT, ">&STDOUT");
-
-                open(STDERR, ">&OLDERR");
-                open(STDOUT, ">&OLDOUT");
-
-                xlog("debug", "Job $opts->{id} original exit code is $code");
-
-                $code = ($code == -1) ? $code : ($code & 127) ? $code & 127 : ($code >> 8);
-
-                xlog("debug", "Done running job $opts->{id}, code $code as user $uid") if $opts->{trace};
-
-                my ($utime, $stime,
-                 $maxrss, $ixrss, $idrss, $isrss, $minflt, $majflt, $nswap,
-                 $inblock, $oublock, $msgsnd, $msgrcv,
-                 $nsignals, $nvcsw, $nivcsw);
-
-                eval {
-                    ($utime, $stime,
-                     $maxrss, $ixrss, $idrss, $isrss, $minflt, $majflt, $nswap,
-                     $inblock, $oublock, $msgsnd, $msgrcv,
-                     $nsignals, $nvcsw, $nivcsw) = getrusage(RUSAGE_CHILDREN);
-                };
-
-                xlog("debug", "Really done with job $opts->{id} (@cmd = $@)\n") if $opts->{trace};
-
-                # $msgsnd, $msgrcv, $nsignals not used in Linux....
-
-                my $out = {
-                    id=>$opts->{id},
-                    status=>$code,
-                    start_time=>$start,
-                    utime=>$utime,
-                    stime=>$stime,
-                    rtime=>$elapsed,
-                    pid=>$$,
-                    maxrss=>$maxrss,
-                    minflt=>$minflt,
-                    majflt=>$majflt,
-                    nswap=>$nswap,
-                    inblock=>$inblock,
-                    oublock=>$oublock,
-                    nvcsw=>$nvcsw,
-                    nivcsw=>$nivcsw
-                };
-
-                xlog("debug", "Writing output job $opts->{id}\n") if $opts->{trace};
-                print XOUT packfile($out);
-                close XOUT;
-                xlog("debug", "Job $opts->{id} exit code $code\n") if $opts->{trace};
-                send_status_for_job($out);
-                exit $code;
+                my $confarg = "-C $conf{config}";                # same config!
+                # this frees all ram... yay, finally
+                exec("$GRUN_PATH $confarg -Y $bfile");
+                $err = "Can't exec: $!";
             } else {
                 my $out = {
                     id=>$opts->{id},
@@ -3125,11 +3121,7 @@ sub execute_job {
                 print XOUT packfile($out);
                 close XOUT;
                 exit $ret;
-            }
-# special exit code 101 means couldn't run the command
-            close STDOUT; 
-            close STDERR; 
-            exit(0);
+            } 
         }
     }
 
@@ -3200,6 +3192,7 @@ sub exec_clean {
         unlink("$conf{spool}/jstat/$jid.stat");
         unlink("$conf{spool}/jstat/$jid.stat-err");
         unlink("$conf{spool}/jstat/$jid.sh");
+        unlink("$conf{spool}/jstat/$jid.job");
         unlink("$conf{spool}/jstat/$jid.dack");
         unlink("$conf{spool}/jstat/$jid.dumped");
     }
@@ -3213,6 +3206,8 @@ sub stream_sigh {
     close STDIN;
     close STDOUT;
     close STDERR;
+    # don't exit... you still need to send the "quit" signal
+#    exit(-1);
 }
 
 sub do_stream {
@@ -3414,6 +3409,9 @@ sub archive_job {
 
     xlog("debug", "Unlinking $conf{spool}/jobs/$jid:$ip.run, $conf{spool}/jobs/$jid.ip, $conf{spool}/jobs/$jid");
 
+    if (!$ip) {
+        $ip = slurp("$conf{spool}/jobs/$jid.ip");
+    }
     unlink("$conf{spool}/jobs/$jid:$ip.run");
     unlink("$conf{spool}/jobs/$jid.ip");
     unlink("$conf{spool}/jobs/$jid");
@@ -3451,5 +3449,166 @@ sub showmem {
         $h->{$_}=${$h->{$_}} if ref($h->{$_}) eq 'REF';
     }
     return pretty_encode($h);
+}
+
+sub do_execute {
+    # shift off the -Y
+	shift @ARGV;
+    my ($bfile) = @ARGV;
+
+    my $opts = unpack_file("$bfile.job");
+    my $uid = $opts->{uid};
+
+    my $code = -1;
+    my $start = Time::HiRes::time();
+
+    my $shfile = "$bfile.sh";
+
+    my @cmd = ("bash", $shfile);
+
+    open(OLDERR, ">&STDERR");
+    open(OLDOUT, ">&STDOUT");
+
+    close(STDERR);
+    close(STDOUT);
+
+    my ($out_pid, $err_pid);
+
+    $SIG{INT} =  $SIG{TERM} = sub {
+        kill 2, $out_pid;
+        kill 2, $err_pid;
+    };
+
+    my ($err, $ret);
+
+    my $ok=1;	
+    eval {
+        if ($opts->{out}) {
+            if ($opts->{out_a}) {
+               $ok&&=open(STDOUT, ">>$opts->{out}");
+            } else {
+               $ok&&=open(STDOUT, ">$opts->{out}");
+            }
+            if ($opts->{out} eq $opts->{err}) {
+                $ok&&=open(STDERR, ">&STDOUT");
+            }
+        }
+        if ($opts->{err} && !(($opts->{out} eq $opts->{err}))) {
+                if ($opts->{err_a}) {
+                    $ok&&=open(STDERR, ">>$opts->{err}");
+                } else {
+                    $ok&&=open(STDERR, ">$opts->{err}");
+                }
+        }
+        if ($opts->{io}) {
+           my $confarg = "-C $conf{config}";                # same config!
+           my $streamarg = "-X";                            # grun streamer
+           $streamarg .= " -I" if $opts->{int};             # interactive mode
+           if (!$opts->{out}) {
+                my $cmd="/usr/bin/perl $GRUN_PATH $confarg $streamarg $conf{bind}:$conf{port} $opts->{id}:out";
+                $out_pid=open(STDOUT, "|$cmd");
+                $ok&&=$out_pid;
+            }
+            if (!$opts->{err}) {
+                my $cmd="/usr/bin/perl $GRUN_PATH $confarg $streamarg $conf{bind}:$conf{port} $opts->{id}:err";
+                $err_pid=open(STDERR, "|$cmd");
+                $ok&&=$err_pid;
+            }
+        } else {
+# save disk and time, i never want i/o
+            if (!$opts->{err}) {
+                $ok&&=open(STDERR, ">/dev/null");
+            }
+            if (!$opts->{out}) {
+                $ok&&=open(STDOUT, ">/dev/null");
+            }
+        }
+    };
+
+    if ($@ || !$ok) {
+        close(STDERR);
+        close(STDOUT);
+        open(STDERR, ">&OLDERR");
+        open(STDOUT, ">&OLDOUT");
+        if ($@) {
+            $err=$@;
+            $ret=109;
+        } else {
+            $err="Error opening i/o files: $!";
+            $ret=109;
+        }
+        xlog("error", "$ret: $err\n");
+    }	
+
+    my $elapsed=0;
+
+    if (!$err) {
+        eval {
+            $code = system(@cmd);
+            $0="GRUN:$opts->{id}:$code";
+        };
+         $elapsed = Time::HiRes::time() - $start;
+    } else {
+        $code = $ret ? $ret : -1;
+    }
+
+    open(SAVERR, ">&STDERR");
+    open(SAVOUT, ">&STDOUT");
+
+    open(STDERR, ">&OLDERR");
+    open(STDOUT, ">&OLDOUT");
+
+    xlog("debug", "Job $opts->{id} original exit code is $code");
+
+    $code = ($code == -1) ? $code : ($code & 127) ? $code & 127 : ($code >> 8);
+
+    xlog("debug", "Done running job $opts->{id}, code $code as user $uid") if $opts->{trace};
+
+    my ($utime, $stime,
+     $maxrss, $ixrss, $idrss, $isrss, $minflt, $majflt, $nswap,
+     $inblock, $oublock, $msgsnd, $msgrcv,
+     $nsignals, $nvcsw, $nivcsw);
+
+    eval {
+        ($utime, $stime,
+         $maxrss, $ixrss, $idrss, $isrss, $minflt, $majflt, $nswap,
+         $inblock, $oublock, $msgsnd, $msgrcv,
+         $nsignals, $nvcsw, $nivcsw) = getrusage(RUSAGE_CHILDREN);
+    };
+
+    xlog("debug", "Really done with job $opts->{id} (@cmd = $@)\n") if $opts->{trace};
+
+    # $msgsnd, $msgrcv, $nsignals not used in Linux....
+
+    my $out = {
+        id=>$opts->{id},
+        status=>$code,
+        start_time=>$start,
+        utime=>$utime,
+        stime=>$stime,
+        rtime=>$elapsed,
+        pid=>$$,
+        maxrss=>$maxrss,
+        minflt=>$minflt,
+        majflt=>$majflt,
+        nswap=>$nswap,
+        inblock=>$inblock,
+        oublock=>$oublock,
+        nvcsw=>$nvcsw,
+        nivcsw=>$nivcsw
+    };
+
+    $out->{error} = $err if $code && $err;
+
+    xlog("debug", "Writing output job $opts->{id}\n") if $opts->{trace};
+    print XOUT packfile($out);
+    close XOUT;
+    xlog("debug", "Job $opts->{id} exit code $code\n") if $opts->{trace};
+    send_status_for_job($out);
+    exit $code;
+# special exit code 101 means couldn't run the command
+    close STDOUT; 
+    close STDERR; 
+    exit(0);
 }
 
