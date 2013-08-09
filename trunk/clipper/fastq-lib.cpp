@@ -157,18 +157,24 @@ bool poorqual(int n, int l, const char *s, const char *q) {
         quals[n].ns += ns;
         int xmean = sum/l;
         if (quals[n].cnt < 20000) {
-                // not enough data? use heuristic
-                return ((xmean-33) < 20) || (ns != 0);
+            // mean qual < 18 = junk
+            return ((xmean-33) < 18) || (ns > 1);
         }
         // enough data? use stdev
         int pmean = quals[n].sum / quals[n].cnt;                                // mean q
         double pdev = stdev(quals[n].cnt, quals[n].sum, quals[n].ssq);          // dev q
-        int serr = max(2,pdev/sqrt(l));                                         // stderr for length l
-        if (xmean < (pmean - serr)) {                                           // off by 1 stdev?
-                return 1;                                                       // ditch it
+        int serr = min(pmean/2,max(1,pdev/sqrt(l)));                                         // stderr for length l
+        // mean qual < min(18,peman-serr*3) = junk/skip it
+        // cap low qual, because adapters often are low qual
+        // but you still need to calculate something, in case we're doing ion/pacbio
+        int thr = min((33+18), (pmean - serr * 3));
+        if (xmean < thr) {
+//           fprintf(stderr, "POORQ xmean:%d, pmean:%d, pdev:%f, sqrt(l):%f, serr:%d, thr: %d, %s",xmean,pmean,pdev,sqrt(l),serr,thr,s);
+            return 1;                                                       // ditch it
         }
         if (ns > (1+(l*quals[n].ns / quals[n].cnt))) {                          // 1 more n than average?
-                return 1;                                                       // ditch it
+//           fprintf(stderr, "POORQ: ns:%d, thr: %d\n",ns,(int)(1+(l*quals[n].ns / quals[n].cnt)));
+            return 1;                                                       // ditch it
         }
         return 0;
 }
