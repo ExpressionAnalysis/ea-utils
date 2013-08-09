@@ -38,6 +38,8 @@ THE SOFTWARE.
 #include <sys/stat.h>
 #include <search.h>
 #include <limits.h>
+#include <stdint.h>
+#include <stddef.h>
 
 #if defined(__APPLE__)
 	#define getopt(a,b,c) getopt_long(a,b,c,NULL,NULL)
