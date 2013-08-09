@@ -950,13 +950,14 @@ int main (int argc, char **argv) {
 		}
 	}
 
+    bool io_ok=1;
     for (b=0;b<=bcnt;++b) {
         for (i=0;i<f_n;++i) {
             if (bc[b].fout[i]) {
                 if (bc[b].gzout[i]) {
-                    pclose(bc[b].fout[i]);
+                    io_ok = io_ok && !pclose(bc[b].fout[i]);
                 } else {
-                    fclose(bc[b].fout[i]);
+                    io_ok = io_ok && !fclose(bc[b].fout[i]);
                 }
             }
         }
@@ -965,6 +966,9 @@ int main (int argc, char **argv) {
 
     if (poor_distance > 0)
         fprintf(stderr, "Skipped because of distance < %d : %d\n", distance, poor_distance);
+
+    if (!io_ok)
+        fprintf(stderr, "Returning error because of i/o error during file close\n");
 
 	int j;
 	printf("Id\tCount\tFile(s)\n");
@@ -979,6 +983,10 @@ int main (int argc, char **argv) {
 		printf("\n");
 	}
 	printf("total\t%d\n", tot);
+
+    if (!io_ok)
+        return 3;
+
 	return 0;
 }
 
