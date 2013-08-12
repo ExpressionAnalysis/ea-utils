@@ -2,7 +2,8 @@
 # $Id$
 
 CC=g++
-PREFIX?=/opt
+PREFIX?=/usr
+BINDIR?=$(PREFIX)/bin
 CFLAGS?=-O3 -I. 
 CPPFLAGS?=-O3 -I.
 # for debugging:
@@ -21,12 +22,12 @@ all: $(BIN)
 debug: 
 	CPPFLAGS=-g ${MAKE} $(MFLAGS) varcall
 
-install: $(BIN) $(PREFIX)/bin/fastq-clipper $(PREFIX)/bin/fastq-mcf $(PREFIX)/bin/fastq-multx $(PREFIX)/bin/fastq-join $(PREFIX)/bin/fastq-stats
+install: $(BIN) $(BINDIR)/fastq-clipper $(BINDIR)/fastq-mcf $(BINDIR)/fastq-multx $(BINDIR)/fastq-join $(BINDIR)/fastq-stats $(BINDIR)/sam-stats $(BINDIR)/varcall
 
-$(PREFIX)/bin:
-	mkdir -p $(PREFIX)/bin
+$(BINDIR):
+	mkdir -p $(BINDIR)
 
-$(PREFIX)/bin/%: % $(PREFIX)/bin
+$(BINDIR)/%: % $(BINDIR)
 	cp $< $@
 
 dist: getrel $(PKG).${VER}-${REL}.tar.gz
