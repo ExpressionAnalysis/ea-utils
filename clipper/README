@@ -54,6 +54,10 @@ Example:
 
 PREFIX=/usr make install
 
-Or
+OR to a subdir:
+
+BINDIR=/usr/bin/ea-utils make install
+
+Or with other options:
 
 CC=g++ PREFIX=/usr/local make install
