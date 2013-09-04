@@ -31,7 +31,7 @@ See "void usage" below for usage.
 
 #include "fastq-lib.h"
 
-#define VERSION "1.03"
+#define VERSION "1.04"
 #define SVNREV atoi(strchr("$LastChangedRevision$", ':')+1)
 
 #define MAX_ADAPTER_NUM 1000
@@ -46,6 +46,7 @@ See "void usage" below for usage.
 #define B_N     4
 #define B_CNT   5
 #define MAXWARN 10
+#define MAX_PHRED 100
 
 struct ad {
 	char *id;  int nid;  size_t naid; 
@@ -80,8 +81,19 @@ const char *cmd_align_se = "bowtie -S %i -f %1";
 const char *cmd_align_pe = "bowtie -S %i -1 %1 -2 %2";
 
 // quality filter args
-int qf_mean=0, qf_max_ns=-1, qf_xgt_num=0, qf_xgt_min=0;
-int qf2_mean=0, qf2_max_ns=-1, qf2_xgt_num=0, qf2_xgt_min=0;
+int qf_mean=0, qf_max_ns=-1, qf_xgt_num=0, qf_xgt_min=0, qf_max_n_pct=0;
+int qf2_mean=0, qf2_max_ns=-1, qf2_xgt_num=0, qf2_xgt_min=0, qf2_max_n_pct=0;
+
+// qual adjust
+class adjustment {
+public:
+    int pos;
+    int adj;
+    adjustment() {pos=adj=0;}
+};
+std::vector<adjustment> cycle_adjust;
+int phred_adjust[MAX_PHRED];
+bool have_phred_adjust=false;
 
 // phred used
 char phred = 0;
@@ -229,6 +241,8 @@ int main (int argc, char **argv) {
        {"max-ns", 1, 0, 0},
        {"qual-gt", 1, 0, 0},
        {"min-len", 1, 0, 'l'},
+       {"cycle-adjust", 1, 0, 0},
+       {"phred-adjust", 1, 0, 0},
        {"mate-qual-mean", 1, 0, 0},
        {"mate-max-ns", 1, 0, 0},
        {"mate-qual-gt", 1, 0, 0},
@@ -236,6 +250,8 @@ int main (int argc, char **argv) {
        {"homopolymer-pct", 1, 0, 0},
        {0, 0, 0, 0}
     };
+
+    meminit(phred_adjust);
 
     int option_index = 0;
     while (	(c = getopt_long(argc, argv, "-nf0uUVHSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:D:",long_options,&option_index)) != -1) {
@@ -264,10 +280,38 @@ int main (int argc, char **argv) {
                         }
                         qf2_xgt_num=atoi(optarg);
                         qf2_xgt_min=atoi(strchr(optarg, ',')+1);
+                    } else if(!strcmp(oname, "cycle-adjust")) {
+                        if (!strchr(optarg, ',')) {
+                            fprintf(stderr, "Error, %s requires CYC,ADJ as argument\n", oname);
+                            exit(1);
+                        }
+                        adjustment a;
+                        a.pos=atoi(optarg);
+                        a.adj=atoi(strchr(optarg, ',')+1);
+                        cycle_adjust.push_back(a);
+                    } else if(!strcmp(oname, "phred-adjust")) {
+                        if (!strchr(optarg, ',')) {
+                            fprintf(stderr, "Error, %s requires CYC,ADJ as argument\n", oname);
+                            exit(1);
+                        }
+                        int phred=atoi(optarg);
+                        int adj=atoi(strchr(optarg, ',')+1);
+                        assert(phred<MAX_PHRED && phred >= 0);
+                        if (adj)
+                            have_phred_adjust=true;
+                        phred_adjust[phred]=adj;
                     } else if(!strcmp(oname, "max-ns")) {
-                        qf_max_ns=atoi(optarg);
+                        if (strchr(optarg,'%')) {
+                            qf_max_n_pct=atoi(optarg);
+                        } else {
+                            qf_max_ns=atoi(optarg);
+                        }
                     } else if(!strcmp(oname, "mate-max-ns")) {
-                        qf2_max_ns=atoi(optarg);
+                        if (strchr(optarg,'%')) {
+                            qf2_max_n_pct=atoi(optarg);
+                        } else {
+                            qf2_max_ns=atoi(optarg);
+                        }
                     } else if(!strcmp(oname, "mate-min-len")) {
                         qf2_min_len=atoi(optarg);
                     }
@@ -370,8 +414,15 @@ int main (int argc, char **argv) {
 	bool gzout[MAX_FILES]; meminit(gzout);
     inbuffer fin[MAX_FILES];
 
+    fprintf(stderr,"i_n:%d, ifil[0]:%s\n",i_n, ifil[0]);
+
 	for (i=0;i<i_n;++i) {
-        fin[i].fin=gzopen(ifil[i], "r", &fin[i].gz);
+	    if ((i_n==1) && !strcmp(ifil[0], "-")) {
+            fin[i].fin=stdin;
+            fin[i].gz=0;
+        } else {
+            fin[i].fin=gzopen(ifil[i], "r", &fin[i].gz);
+        }
 	}
 
 	struct ad ad[MAX_ADAPTER_NUM+1];
@@ -905,7 +956,7 @@ int main (int argc, char **argv) {
 		// chomp
 
 		int dotrim[MAX_FILES][2];
-		bool skip = 0;							// skip whole record?
+		int skip = 0;							// skip whole record?
 		int hompol_seq=0;
 		int hompol_cnt=0;
 		int f;	
@@ -915,6 +966,26 @@ int main (int argc, char **argv) {
 			if (avgns[f] < 11)  
 				// reads of avg length < 11 ? barcode lane, skip it
 				continue;
+
+
+            if (have_phred_adjust) {
+                for (i=0;i<fq[f].qual.n;++i) {
+                   if (phred_adjust[fq[f].qual.s[i]-phred]) {
+                        fq[f].qual.s[i]+=phred_adjust[fq[f].qual.s[i]-phred];
+                   } 
+                }
+            }
+
+            for (i=0;i<cycle_adjust.size();++i) {
+                if (abs(cycle_adjust[i].pos) < fq[f].qual.n) {
+                    if (cycle_adjust[i].pos>0) {
+                        fq[f].qual.s[cycle_adjust[i].pos-1]+=cycle_adjust[i].adj;
+                    } else {
+                        fq[f].qual.s[fq[f].qual.n+cycle_adjust[i].pos]+=cycle_adjust[i].adj;
+                    }
+                }
+            }
+
 
 			if (rmns) {
 				for (i=dotrim[f][0];i<(fq[f].seq.n);++i) {
@@ -1101,15 +1172,16 @@ int main (int argc, char **argv) {
 		if (!skip) {
 			int f;
 			for (f=0;f<o_n;++f) {
+                if (dotrim[f][1] >= strlen(fq[f].seq.s)) {
+					if (debug) fprintf(stderr,"Trimmed full sequence.\n", dotrim[f][1]);
+                    skip=1;
+                    continue;
+                }
 				if (dotrim[f][1] > 0) {
 					if (debug) fprintf(stderr,"trimming %d from end\n", dotrim[f][1]);
 					fq[f].seq.s[fq[f].seq.n -=dotrim[f][1]]='\0';
 					fq[f].qual.s[fq[f].qual.n-=dotrim[f][1]]='\0';
 				}
-                if (dotrim[f][1] >= strlen(fq[f].seq.s)) {
-					if (debug) fprintf(stderr,"Trimmed full sequence.\n", dotrim[f][1]);
-                    continue;
-                }
 				if (dotrim[f][0] > 0) {
 					if (debug) fprintf(stderr,"trimming %d from begin\n", dotrim[f][0]);
 					fq[f].seq.n -= dotrim[f][0];
@@ -1309,10 +1381,14 @@ void usage(FILE *f, const char *msg) {
 "    -S       Save all discarded reads to '.skip' files\n"
 "    -d       Output lots of random debugging stuff\n"
 "\n"
+"Quality adjustment options:\n"
+"    --cycle-adjust    CYC,AMT     Adjust cycle CYC (negative = offset from end) by amount AMT\n"
+"    --phred-adjust    SCORE,AMT   Adjust score SCORE by amount AMT\n"
+"\n"
 "Filtering options*:\n"
 "    --[mate-]qual-mean  NUM       Minimum mean quality score\n"
 "    --[mate-]qual-gt    NUM,THR   At least NUM quals > THR\n" 
-"    --[mate-]max-ns     NUM       Maxmium N-calls in a read\n"
+"    --[mate-]max-ns     NUM       Maxmium N-calls in a read (can be a %%)\n"
 "    --[mate-]min-len    NUM       Minimum remaining length (same as -l)\n"
 "    --hompolymer-pct    PCT       Homopolymer filter percent (95)\n"
 "\n"
@@ -1420,20 +1496,26 @@ int meanqwin(const char *q, int qn, int i, int w) {
 }
 
 bool evalqual(struct fq &fq, int file_num) {
-    int t_mean, t_max_ns, t_xgt_num, t_xgt_min;
+    int t_mean, t_max_ns, t_xgt_num, t_xgt_min, t_max_n_pct;
 
     if (file_num <= 0) {
         // applies to file 1
         t_mean=qf_mean;
         t_max_ns=qf_max_ns;
+        t_max_n_pct=qf_max_n_pct;
         t_xgt_num=qf_xgt_num;
         t_xgt_min=qf_xgt_min;
     } else {
         // applies to file 2 or greater, only if they are set
         t_mean=qf2_mean > 0 ? qf2_mean : qf_mean;
         t_max_ns=qf_max_ns > -1 ? qf2_max_ns : qf_max_ns;
+        t_max_n_pct=qf_max_n_pct > -1 ? qf2_max_n_pct : qf_max_n_pct;
         t_xgt_num=qf_xgt_num > 0 ? qf2_xgt_num : qf_xgt_num;
         t_xgt_min=qf_xgt_min > 0 ? qf2_xgt_min : qf_xgt_min;
+    }
+
+    if (t_max_n_pct>0) {
+        t_max_ns=max(t_max_ns,(fq.qual.n*100)/t_max_n_pct);
     }
 
     if (t_mean > 0) {
@@ -1456,6 +1538,7 @@ bool evalqual(struct fq &fq, int file_num) {
             return false;
         }
     }
+
     if (t_xgt_num > 0) {
         int t = 0;
         int i;
@@ -1478,5 +1561,12 @@ void valid_arg(char opt, const char *arg) {
     }
 }
 
+bool  arg_int_pair(const char *optarg, int &a, int&b) {
+    if (!strchr(optarg, ',')) {
+        return false;
+    }
+    a=atoi(optarg);
+    b=atoi(strchr(optarg, ',')+1);
+}
 
 /* vim: set noai ts=4 sw=4: */
