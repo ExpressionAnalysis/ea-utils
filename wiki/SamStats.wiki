@@ -13,6 +13,8 @@ Version: 1.32
 
 Produces lots of easily digested statistics for the files listed
 
+See: http://code.google.com/p/ea-utils/wiki/SamStatsDetails
+
 Options (default in parens):
 
 -D             Keep track of multiple alignments (slower!)
