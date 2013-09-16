@@ -4,7 +4,7 @@
 
 Tool for computing statistics from (possibly compressed) SAM or BAM files.
 
-See: http://code.google.com/p/ea-utils/wiki/SamStatsDetails
+See SamStatsDetails for more info on the output fields.
 
 = Details =
 
