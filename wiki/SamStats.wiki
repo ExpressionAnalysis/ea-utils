@@ -4,6 +4,7 @@
 
 Tool for computing statistics from (possibly compressed) SAM or BAM files.
 
+See: http://code.google.com/p/ea-utils/wiki/SamStatsDetails
 
 = Details =
 
@@ -12,8 +13,6 @@ Usage: sam-stats [options] [file1] [file2...filen]
 Version: 1.32
 
 Produces lots of easily digested statistics for the files listed
-
-See: http://code.google.com/p/ea-utils/wiki/SamStatsDetails
 
 Options (default in parens):
 
