@@ -6,7 +6,7 @@ Tool for computing statistics from (possibly compressed) SAM or BAM files.
 
 See SamStatsDetails for more info on the output fields.
 
-= Details =
+= Usage =
 
 {{{
 Usage: sam-stats [options] [file1] [file2...filen]
