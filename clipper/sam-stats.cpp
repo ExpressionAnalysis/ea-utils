@@ -164,7 +164,7 @@ public:
 		covr.clear();
 	}
 	struct {
-		int n, mapn;		// # of entries, # of mapped entries, 
+		int n, mapn, mapzero;		// # of entries, # of mapped entries, 
 		int lenmin, lenmax; double lensum, lenssq;	// read length stats
 		double mapsum, mapssq;	// map quality sum/ssq 
 		double nmnz, nmsum;	// # of mismatched reads, sum of mismatch lengths 
@@ -661,60 +661,80 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 
 	++dat.n;
 
-	if (pos<=0) return;				// not mapped
+	if (bits & 0x04) return;       // bits say ... query was not mapped
 
-	++dat.mapn;
+	if (pos<=0) {
+	    ++dat.mapzero;             // quantify weird errors
+        return;				       // not mapped well enough to count
+    }
 
+	++dat.mapn;                    // mapped query
+
+    // TODO: build a histogram of read lengths using the integer bucket
+
+    // read length min/max
 	if (rlen > dat.lenmax) dat.lenmax = rlen;
 	if ((rlen < dat.lenmin) || dat.lenmin==0) dat.lenmin = rlen;
+
+    // read length sum/ssq
 	dat.lensum += rlen;
 	dat.lenssq += rlen*rlen;
 
+    // TODO: allow for alternate paired-end layouts besides Illumina's
+
+    // reverse stranded query
 	if (bits & 16) 
-	    if (bits & 0x40) 
-    		++dat.nrev;
+	    if (bits & 0x40)            // first read in the pair
+    		++dat.nrev;             // reverse
 		else
-            ++dat.nfor;
+            ++dat.nfor;             // second read? actually was a forward alignment
 	else
-	    if (bits & 0x40) 
-		    ++dat.nfor;
+	    if (bits & 0x40)            // first read in the pair
+		    ++dat.nfor;             
         else
 		    ++dat.nrev;
 
+    // mapping quality mean/stdev
 	dat.mapsum += mapq;
 	dat.mapssq += mapq*mapq;
+
+    // mapping quality histogram
     vmapq.push(mapq);
 
+    // TODO: NM histogram maybe?
+
+    // number of mismateches
 	if (nm > 0) {
         // nm is snp+ins+del... which is silly
-		dat.nmnz += 1;
-		dat.nmsum += nm-del-ins;
+		dat.nmnz += 1;                          // how many read are not perfect matches?
+		dat.nmsum += nm-del-ins;                // mismatch sum
 	}
-	dat.del+=del;
-	dat.ins+=ins;
+	dat.del+=del;                               // deletion sum
+	dat.ins+=ins;                               // insert sum
 
+    // if we know about the reference sequence
 	if (ref.length()) {
 		scoverage *sc = &(covr[ref]);
-		if (sc) {
-			sc->mapb+=rlen;
-            if (rnamode) {
+		if (sc) {                               // and we have ram for coverage
+			sc->mapb+=rlen;                     // total up mapped bases in that ref
+            if (rnamode) {                      // more detailed
                 int i;
 			    sc->mapr+=1;
-                for (i=0;i<rlen;++i) {
-                    sc->spos.Push(pos+i);       // position stats
+                for (i=0;i<rlen;++i) {          // walk along read
+                    sc->spos.Push(pos+i);       // per-position stats
                 }
-			    if (histnum > 0 && sc->reflen > 0) {
-                    for (i=0;i<rlen;++i) {
-				        int x = histnum * ((double)(pos+i) / sc->reflen);
-                        if (x < histnum) {
-                            sc->dist[x]+=1;
+			    if (histnum > 0 && sc->reflen > 0) {                                // if we're making a histogram
+                    for (i=0;i<rlen;++i) {                                          // walk along read
+				        int x = histnum * ((double)(pos+i) / sc->reflen);           // find the bucket this base is in
+                        if (x < histnum) {                                          
+                            sc->dist[x]+=1;                                         // add 1 to that bucket
                         } else {
                             // out of bounds.... what to do?
-                            sc->dist[histnum] += 1;
+                            sc->dist[histnum] += 1;                                 // out of bounds bases (fall off the edge) = extra bucket
                         }
                     }
                 }
-            } else if (histnum > 0 && sc->reflen > 0) {
+            } else if (histnum > 0 && sc->reflen > 0) {                             // lightweight... don't deal with each base, ok becauss CHRs are big
 				int x = histnum * ((double)pos / sc->reflen);
 				if (debug > 1) { 
 					warn("chr: %s, hn: %d, pos: %d, rl: %d, x: %x\n", ref.c_str(), histnum, pos, sc->reflen, x);
@@ -728,55 +748,80 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 			}
 		}
 	}
+    // total mapped bases += read length
 	dat.tmapb+=rlen;
 	if (nmate>0) {
+        // insert size histogram
 		visize.push_back(nmate);
 		dat.pe=1;
 	}
 
+    // mate reference chromosome is not the same as my own?
 	if (materef.size() && (materef != "=" && materef != "*" && materef != ref)) {
-//		printf("disc:%s\t%s\n",materef.c_str(), ref.c_str());
+        // this is a discordant read
 		dat.disc++;
 	} else {
+    // mate reference chromosome is far (>50kb) from my own?
 		if (abs(nmate) > 50000) {
+            // this is discordant-by position
 			dat.disc_pos++;
 		}
 	}
 
+    // walk along sequence, add qualities to overall min/max/mean/stdev 
 	int i, j;
 	for (i=0;i<seq.length();++i) {
 		if (qual[i]>dat.qualmax) dat.qualmax=qual[i];
 		if (qual[i]<dat.qualmin) dat.qualmin=qual[i];
 		dat.qualsum+=qual[i];
 		dat.qualssq+=qual[i]*qual[i];
+        // also count bases
 		++dat.basecnt[basemap[seq[i]]];
+        // total number of bases counted (this should be the same as tmapb???   get rid of it???)
 		++dat.nbase;
 	}
+
+    // TODO: we should be able to use the "non primary" bit field
+    //       need to test to see if this works for all aligners
+    //       then have a mode that only report stats for primary alignments... for example, and no need for this 
+    //       expensive, giant hash table
+
+    // duplicate tracking turned on?
 	if (trackdup) {
 		size_t p;
-        // illumina changed things
+        // illumina mode... check for a space in the name, and ignore stuff after it
 		if ((p = name.find_first_of(' '))!=string::npos) 
-				name.resize(p);
+			name.resize(p);
 
+        // count dups for that id
 		int x=++dups[name];
 
+        // keep track of max dups
 		if (x>dat.dupmax) 
 			dat.dupmax=x;
 
+        // fastq-output mode... 
         if (sefq) {
+            // if the data isn't paired end or if we're not sure yet
             if (!dat.pe || dat.mapn < 1000) {
+                // output a single end fq
                 fprintf(sefq,"@%s\n%s\n+\n%s\n",name.c_str(), seq.c_str(), qual);
             }
         }
+
+        // if we're outputting paired-end fastq's and if there's not a lot of dups
         if (pefq1 && x < 4 && (dat.pe || dat.mapn < 1000)) {
             fqent fq;
             google::sparse_hash_map<string,fqent>::iterator it=petab.find(name);
-            if (it ==  petab.end()) {
+            // find my mate?
+            if (it == petab.end()) {
+                // no, add me
                 fq.r=seq;
                 fq.q=qual;
-                fq.bits=bits;
+                fq.bits=bits&0x40;                  // mate flag
                 petab[name]=fq;
             } else if (it->second.bits != bits) {
+                // yes? remove me
                 fq=it->second;
                 fprintf(pefq1,"@%s 1\n%s\n+\n%s\n",name.c_str(), fq.r.c_str(), fq.q.c_str());
                 fprintf(pefq2,"@%s 2\n%s\n+\n%s\n",name.c_str(), seq.c_str(), qual);
@@ -848,7 +893,11 @@ bool sstats::parse_sam(FILE *f) {
 				del+=n;
 			p=sp+1;
 		}
-		if (d[S_CIG][0] == '*') d[S_POS] = (char *) (char *) (char *) (char *) (char *) (char *) (char *) (char *) (char *) "-1";
+
+        // force unmapped to position negative one
+		if (d[S_CIG][0] == '*') d[S_POS] = (char *) "-1";
+
+        // as-if it were a bam...
 		dostats(d[S_ID],strlen(d[S_READ]),atoi(d[S_BITS]),d[S_NMO],atoi(d[S_POS]),atoi(d[S_MAPQ]),d[S_MATEREF],atoi(d[S_MATE]),d[S_READ],d[S_QUAL],nm, ins, del);
 	}
 	return true;
