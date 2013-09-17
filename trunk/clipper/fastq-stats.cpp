@@ -363,7 +363,8 @@ int main( int argc, char**argv ) {
 	} //end reading all fastq reads
 
 	nreads--;
-	gzclose(file, isgz);
+
+	int inputReadError = gzclose(file, isgz);
 
 
 	if(gc) {
@@ -575,9 +576,12 @@ int main( int argc, char**argv ) {
 	double ACGT_total  = ACGTN_count[T_A] + ACGTN_count[T_C] + ACGTN_count[T_G] + ACGTN_count[T_T];
 	printf("%%N\t%.4f\n", ((double)(nbase-ACGT_total)/nbase*100));
 	printf("total bases\t%.0f\n",total_bases);
+    
+
+    // fail if input read failed....  even if we don't know why and reported all the stats
+    return inputReadError;
+
 } //end main method
-
-
 
 double quantile( const std::vector <int> & vec, double p ) {
 	int l = vec . size();
