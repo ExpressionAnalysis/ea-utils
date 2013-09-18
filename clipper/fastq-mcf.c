@@ -414,7 +414,7 @@ int main (int argc, char **argv) {
 	bool gzout[MAX_FILES]; meminit(gzout);
     inbuffer fin[MAX_FILES];
 
-    fprintf(stderr,"i_n:%d, ifil[0]:%s\n",i_n, ifil[0]);
+   // if (debug) fprintf(stderr,"i_n:%d, ifil[0]:%s\n",i_n, ifil[0]);
 
 	for (i=0;i<i_n;++i) {
 	    if ((i_n==1) && !strcmp(ifil[0], "-")) {
