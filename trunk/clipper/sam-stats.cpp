@@ -466,6 +466,10 @@ int main(int argc, char **argv) {
 			fprintf(o, "mapped reads\t%d\n", s.dat.mapn);
 		}
 
+        if (s.dat.mapzero > 0) {
+			fprintf(o, "skipped mappings\t%d\n", s.dat.mapzero);
+        }
+
 		fprintf(o, "mapped bases\t%.0f\n", s.dat.tmapb);
 		if (s.dat.pe) {
 			fprintf(o, "library\tpaired-end\n");
