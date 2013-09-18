@@ -56,6 +56,11 @@ while (<IN>) {
 	} elsif ($f[2] eq 'start_codon') {
 		#optional, output codon start/stop as "thick" region in bed
 		$sc{$id}->[0] = $f[3];
+	} elsif ($f[2] eq 'CDS') {
+		#optional, output codon start/stop as "thick" region in bed
+		push @{$cds{$id}}, \@f;
+		# save lowest start
+		$cdx{$id} = \@f if !$cdx{$id};
 	} elsif ($f[2] eq 'stop_codon') {
 		$sc{$id}->[1] = $f[4];
 	} elsif ($f[2] eq 'miRNA' ) {
