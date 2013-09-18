@@ -54,8 +54,9 @@ sub determine {
 	if (!$qual) {
 		die "Unknown file format\n";
 	}
-
+    my $rc = 1;
 	while($qual) {
+        ++$rc;
 		for (my $i =length($qual)/2; $i < length($qual); ++$i) {
 			if (ord(substr($qual,$i,1)) < 64) {
 				$dphred = 33;
@@ -67,9 +68,9 @@ sub determine {
 		last if ++$cnt >= $ssiz;	# got enough
 		if ($fmt eq 'fq') {
 			# fastq
-			scalar <>;		# id
-			scalar <>;		# read
-			scalar <>;		# comment
+			last if ! scalar <>;		# id
+			last if ! scalar <>;		# read
+			last if ! scalar <>;		# comment
 			$qual = <>;
 			chomp $qual;
 		} elsif ($fmt eq 'pileup') {
@@ -79,5 +80,7 @@ sub determine {
 			$qual = (split(/\t/, $_))[10];
 		}
 	}
+    if ($rc < 10) {
+		$dphred = 33;
+    }
 }
-

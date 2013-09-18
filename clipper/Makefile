@@ -16,13 +16,14 @@ VER := $(shell grep '%define ver' ${PKG}.spec | perl -ne 'print $$1 if / (\S+) *
 
 SRC=fastq-clipper.c fastq-mcf.c fastq-multx.c fastq-join.c fastq-stats.cpp gcModel.c
 BIN=fastq-mcf fastq-multx fastq-join fastq-stats fastq-clipper sam-stats varcall
+TOOLS=fastx-graph gtf2bed determine-phred randomFQ alc
 
 all: $(BIN)
 
 debug: 
 	CPPFLAGS=-g ${MAKE} $(MFLAGS) varcall
 
-install: $(BIN) $(BINDIR)/fastq-clipper $(BINDIR)/fastq-mcf $(BINDIR)/fastq-multx $(BINDIR)/fastq-join $(BINDIR)/fastq-stats $(BINDIR)/sam-stats $(BINDIR)/varcall
+install: $(BIN) $(BINDIR)/fastq-clipper $(BINDIR)/fastq-mcf $(BINDIR)/fastq-multx $(BINDIR)/fastq-join $(BINDIR)/fastq-stats $(BINDIR)/sam-stats $(BINDIR)/varcall $(BINDIR)/fastx-graph $(BINDIR)/determine-phred $(BINDIR)/randomFQ $(BINDIR)/alc
 
 $(BINDIR):
 	mkdir -p $(BINDIR)
@@ -43,7 +44,7 @@ getrel:
 $(PKG).spec: $(PKG).spex
 	perl -pe 's/%RELEASE%/${REL}/' $(PKG).spex > $(PKG).spec
 
-$(PKG).tar.gz: Makefile $(SRC) $(PKG).spec fastq-lib.cpp fastq-lib.h sam-stats.cpp fastq-stats.cpp gcModel.c gcModel.h varcall.cpp utils.h README CHANGES google sparsehash samtools/*.c
+$(PKG).tar.gz: Makefile $(TOOLS) $(SRC) $(PKG).spec fastq-lib.cpp fastq-lib.h sam-stats.cpp fastq-stats.cpp gcModel.c gcModel.h varcall.cpp utils.h README CHANGES google sparsehash samtools/*.c 
 	rm -rf $(PKG).${VER}-${REL}
 	mkdir $(PKG).${VER}-${REL}
 	mkdir $(PKG).${VER}-${REL}/tidx
