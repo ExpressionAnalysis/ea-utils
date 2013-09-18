@@ -1,0 +1,178 @@
+#!/usr/bin/perl
+
+# Copyright (c) 2011 Erik Aronesty (erik@q32.com)
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+# 
+# NOTE: Please let me know if you use it or like it, AKA: "Thank You Mask Man"
+
+use strict;
+use Getopt::Long;
+our $VERSION = 1.2;
+
+my %nl;
+my $w=200000;		# window size
+my $x=10;		# segment count
+my $only;
+GetOptions("only"=>\$only, "window=i"=>\$w, "segs=i"=>\$x);
+
+die usage() unless @ARGV;
+die usage() if $only && @ARGV > 1;
+$|=1;
+#$x-=1;
+my $tl=0;
+for my $f (@ARGV) {
+	my $s = -s $f;
+	my $gz = $f =~ /\.gz$/;
+	open (IN, ($gz ? "gunzip -c '$f'|" : $f)) || (warn("$f: $!\n"), next);
+	my $nl = 0;
+	my $gzratio = 1;
+	if ($gz) {
+		if ( $s > $w ) {
+            # todo, this can be done all-in-one stream, by buffering the read and gzipping in a loop
+            # it will be much faster!
+            my (@bz, @lz);
+            $x = 5;                     # 5 points
+            my $ss = $w/$x;
+            for (my $i=0; $i<$x; ++$i) {
+                my $o = int($ss * ($i+1));
+                $bz[$i]=`gunzip -c '$f' | head -$o | gzip -c | wc -c`;
+                if (abs($s-$bz[$i]) < ($ss+length($f))) {
+                    $nl=`gunzip -c '$f' | wc -l`;
+                    goto MAXXED;
+                } else {
+                    $lz[$i]=$s*$o/$bz[$i];
+                }
+#                warn("o: ", $o, ", lzi:", $lz[$i], ", bzi:", $bz[$i], "\n");
+            }
+
+            # simple linear model log(bytes)~lines
+            my ($xxs, $xys, $xs, $ys);
+            for (my $i=0; $i<$x; ++$i) {
+                $xs+=log($bz[$i]);
+                $ys+=$lz[$i];
+                $xxs+=log($bz[$i])*log($bz[$i]); 
+                $xys+=$lz[$i]*log($bz[$i]); 
+            }
+            my $slope = ($xys - $xs*$ys/$x) / ($xxs - $xs*$xs/$x);
+            my $intercept = ($ys - ($slope*$xs))/$x;
+#            warn("intercept: $intercept, slope: $slope, s: $s\n");
+# log size predictive of lines.....
+            $nl = $intercept + $slope * log($s);
+            MAXXED:
+		} else {
+            close(IN);
+            $nl = `gunzip -c '$f' | wc -l` + 0;
+        }
+	} else { 
+        my $rc = 0;
+        if ($s > ($w*2)) {
+            my $ss = $x == 1 ? $w : (($s-($w/$x))/($x-1));
+            my $d;
+#            warn("segments: $x, window: $w, ss:$ss\n");
+            my $tweight;
+            for (my $i=0;$i<$x;++$i) {
+                seek(IN, $i*$ss, 0) if $i > 0;
+                read(IN, $d, $w/$x);
+                #whole lines only, prevents overcounting
+                if ($i > 0) {
+                    # seek before current block, getting more accurate "long-first-lines"
+                    my $z;
+                    seek(IN, $i*$ss-1000, 0);
+                    read(IN, $z, 1000);
+                    $z=substr($z, rindex($z, "\n")+1);
+                    $d=$z.$d;
+                } else {
+                    #$d=substr($d, index($d, "\n")+1);               # remove first line
+                }
+                $d=substr($d, 0, rindex($d, "\n")+1);           # remove last line
+                $rc += length($d);
+                $nl += xlc($d);
+    #            printf STDERR "seek: %d, len: %d, xlc: %d, rc: %d, nl: %d\n", $i*$ss, length($d), xlc($d), $rc, $nl;
+            }
+        } else {
+            my $d;
+            read(IN, $d, $w);
+            $d=substr($d, 0, rindex($d, "\n")+1);               # remove last line
+            $rc += length($d); 
+            $nl += xlc($d);
+        }
+        $nl = int($rc > 0 ? $nl * $s / $rc : 0);
+    }
+	$tl += $nl;
+	print "$nl" if $only;
+	print "\n" if $only && -t STDOUT;
+	$nl{$f} = $nl if !$only;
+}
+
+if (!$only) {
+	my $m=length($tl)+1;
+	for my $f (@ARGV) {
+		printf "%*d %s\n", $m, $nl{$f}, $f;
+	}
+	printf "%*d %s\n", $m, $tl, "total" if @ARGV > 1;
+}
+
+sub xlc {
+	my $d = $_[0];
+	my $p=0;
+	my $c=0;
+	my $i=0;
+	while (($i=index($d, "\n", $p))>=0) {
+		++$c;
+		$p=$i+1;
+	}
+	return $p<length($d) ? $c+1 : $c;		# correct count
+}
+
+sub usage {<<EOF
+Usage: alc [-o] <file1> [<file2>] ...
+
+Approximate line counts for each file.  Attempts to be 
+somewhat compatible with "wc -l" by default.
+
+-o|--only            Output line count only for a single file.
+-w|--window <int>    Read <int> bytes from head, mid, and tail.
+-s|--segs <int>      Divide file & window into <int> segments.
+EOF
+};
+
+__END__
+
+=head1 NAME
+
+alc - Approximate line count
+
+=head1 DESCRIPTION
+
+Approximate line counts for each file.  Attempts to be
+somewhat compatible with "wc -l" by default.
+
+=head1 AUTHOR
+
+Erik Aronesty C<earonesty@cpan.org>
+
+=head1 LICENSE
+
+This program is free software; you can redistribute it and/or
+modify it under the same terms as Perl itself.
+
+See L<http://www.perl.com/perl/misc/Artistic.html>.
+
+=cut
