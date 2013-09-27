@@ -90,10 +90,15 @@ printf "contigs > 500\t%d\n", scalar @gt500;
 printf "bases in contigs > 500\t%d\n", $bgt500;
 
 my $mer21 = 0;
+my $pct21 = 0;
+
 for (values(%mer)) {$mer21+=1 if $_>1};
+for (values(%mer)) {$pct21+=$_ if $_>1};
 $mer21 = 100*$mer21/scalar(keys(%mer));
+$pct21 = 100*$pct21/$tl;
 printf "dup-mer-21\t%2.2f\n", $mer21;
 printf "dup-mer-cnt\t%d\n", $mers;
+printf "dup-pct-21\t%2.2f\n", $pct21;
 
 
 sub summ  {
