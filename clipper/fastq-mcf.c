@@ -81,7 +81,7 @@ const char *cmd_align_se = "bowtie -S %i -f %1";
 const char *cmd_align_pe = "bowtie -S %i -1 %1 -2 %2";
 
 // quality filter args
-int qf_mean=0, qf_max_ns=-1, qf_xgt_num=0, qf_xgt_min=0, qf_max_n_pct=0;
+int qf_mean=0, qf_max_ns=-1, qf_xgt_num=0, qf_xgt_min=0, qf_max_n_pct=-1;
 int qf2_mean=0, qf2_max_ns=-1, qf2_xgt_num=0, qf2_xgt_min=0, qf2_max_n_pct=0;
 
 // qual adjust
@@ -260,7 +260,7 @@ int main (int argc, char **argv) {
                 { 
                     const char *oname=long_options[option_index].name;
                     if(!strcmp(oname,        "qual-mean")) {
-                        qf_mean=atoi(optarg);
+                        qf_mean=qf2_mean=atoi(optarg);
                     } else if(!strcmp(oname, "mate-qual-mean")) {
                         qf2_mean=atoi(optarg);
                     } else if(!strcmp(oname, "homopolymer-pct")) {
@@ -271,8 +271,8 @@ int main (int argc, char **argv) {
                             fprintf(stderr, "Error, %s requires NUM,THR as argument\n", oname);
                             exit(1);
                         }
-                        qf_xgt_num=atoi(optarg);
-                        qf_xgt_min=atoi(strchr(optarg, ',')+1);
+                        qf_xgt_num=qf2_xgt_num=atoi(optarg);
+                        qf_xgt_min=qf2_xgt_min=atoi(strchr(optarg, ',')+1);
                     } else if(!strcmp(oname, "mate-qual-gt")) {
                         if (!strchr(optarg, ',')) { 
                             fprintf(stderr, "Error, %s requires NUM,THR as argument\n", oname);
@@ -303,9 +303,12 @@ int main (int argc, char **argv) {
                     } else if(!strcmp(oname, "max-ns")) {
                         if (strchr(optarg,'%')) {
                             qf_max_n_pct=atoi(optarg);
+                            qf2_max_n_pct=atoi(optarg);
                         } else {
                             qf_max_ns=atoi(optarg);
+                            qf2_max_ns=atoi(optarg);
                         }
+
                     } else if(!strcmp(oname, "mate-max-ns")) {
                         if (strchr(optarg,'%')) {
                             qf2_max_n_pct=atoi(optarg);
@@ -1173,17 +1176,17 @@ int main (int argc, char **argv) {
 			int f;
 			for (f=0;f<o_n;++f) {
                 if (dotrim[f][1] >= strlen(fq[f].seq.s)) {
-					if (debug) fprintf(stderr,"Trimmed full sequence.\n", dotrim[f][1]);
+					if (debug) fprintf(stderr,"trimmming full sequence from end (%d), %s", dotrim[f][1], fq[f].id.s);
                     skip=1;
                     continue;
                 }
 				if (dotrim[f][1] > 0) {
-					if (debug) fprintf(stderr,"trimming %d from end\n", dotrim[f][1]);
+					if (debug) fprintf(stderr,"trimming %d from end, %s", dotrim[f][1], fq[f].id.s);
 					fq[f].seq.s[fq[f].seq.n -=dotrim[f][1]]='\0';
 					fq[f].qual.s[fq[f].qual.n-=dotrim[f][1]]='\0';
 				}
 				if (dotrim[f][0] > 0) {
-					if (debug) fprintf(stderr,"trimming %d from begin\n", dotrim[f][0]);
+					if (debug) fprintf(stderr,"trimming %d from begin, %s", dotrim[f][0], fq[f].id.s);
 					fq[f].seq.n -= dotrim[f][0];
 					fq[f].qual.n -= dotrim[f][0];
                     if (fq[f].seq.n < 0) {
@@ -1202,7 +1205,7 @@ int main (int argc, char **argv) {
 					}
 				}
                 if (avgns[f]>=11 && !evalqual(fq[f],f)) {
-                    skip = 2;
+                    skip = 2;                       // 2==qual
                 }
 			}
 
@@ -1218,8 +1221,7 @@ int main (int argc, char **argv) {
                         }
                         lookup_it = dupset.find(fq[f].seq.s);
                         if (lookup_it != dupset.end()) {
-                            ++dupskip;
-                            skip=1;
+                            skip=1;                 // 1==dup
                         } else {
                             if (dupset.size() < dupmax) {
                                 dupset[fq[f].seq.s]=1;
@@ -1244,6 +1246,7 @@ int main (int argc, char **argv) {
             } else {
                 if (skipb) saveskip(fskip, i_n, fq);
                 if (skip==2) ++nfiltered;
+                if (skip==1) ++dupskip;
             }
 		} else {
 			if (skipb) saveskip(fskip, i_n, fq);
@@ -1498,6 +1501,7 @@ int meanqwin(const char *q, int qn, int i, int w) {
 bool evalqual(struct fq &fq, int file_num) {
     int t_mean, t_max_ns, t_xgt_num, t_xgt_min, t_max_n_pct;
 
+
     if (file_num <= 0) {
         // applies to file 1
         t_mean=qf_mean;
@@ -1514,7 +1518,7 @@ bool evalqual(struct fq &fq, int file_num) {
         t_xgt_min=qf_xgt_min > 0 ? qf2_xgt_min : qf_xgt_min;
     }
 
-    if (t_max_n_pct>0) {
+    if (t_max_n_pct>=0) {
         t_max_ns=max(t_max_ns,(fq.qual.n*100)/t_max_n_pct);
     }
 
@@ -1534,6 +1538,9 @@ bool evalqual(struct fq &fq, int file_num) {
         for (i=0;i<=fq.seq.n;++i) {
             t+=(fq.seq.s[i]=='N');
         }
+
+//        if (debug > 2) fprintf(stderr,"maxn: max:%d,t:%d,i:%d,id:%s", t_max_ns, t, i, fq.id.s);
+
         if (t > t_max_ns) {
             return false;
         }
