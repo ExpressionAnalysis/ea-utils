@@ -257,7 +257,7 @@ int main (int argc, char **argv) {
     meminit(phred_adjust);
 
     int option_index = 0;
-    while (	(c = getopt_long(argc, argv, "-nf0uMUVHSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:D:",long_options,&option_index)) != -1) {
+    while (	(c = getopt_long(argc, argv, "-nf0uXUVHSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:D:",long_options,&option_index)) != -1) {
 		switch (c) {
 			case '\0':
                 { 
@@ -343,7 +343,7 @@ int main (int argc, char **argv) {
 			case 'u': ilv3=1; break;
 			case 'U': ilv3=0; break;
 			case 'H': hompol_filter=1; break;
-			case 'M': lowcom_filter=1; break;
+			case 'X': lowcom_filter=1; break;
 			case 'k': skewpct = atof(optarg); break;
 			case 'q': qthr = atoi(optarg); valid_arg(c,optarg); break;
 			case 'Q': qspec = optarg; break;
@@ -591,6 +591,9 @@ int main (int argc, char **argv) {
 	int qcnt[MAX_FILES][2]; meminit(qcnt);
 	char qmin=127, qmax=0;
 	int nsampcnt = 0;
+    double stat_lowcom_total;
+    long stat_lowcom_cnt;
+
 	for (i=0;i<i_n;++i) {
 
 		struct stat st;
@@ -1206,6 +1209,8 @@ int main (int argc, char **argv) {
             int lowcom_max = lowcom_pct * lowcom_cnt;
             if (debug>0) printf("%s: lowcom cnt:%d, max:%d, seq:%d\n", fq[0].id.s, lowcom_cnt, lowcom_max, lowcom_seq);
             if (lowcom_seq>=lowcom_max) lowcom_skip = skip = true;
+            stat_lowcom_total+=1/((double)lowcom_seq/(double)lowcom_cnt);
+            stat_lowcom_cnt+=1;
         }
 
 
@@ -1317,6 +1322,8 @@ int main (int argc, char **argv) {
 	fprintf(fstat, "Filtered on hompolymer: %d\n", ntoohompol);
     if (ntoolowcom)
 	fprintf(fstat, "Filtered on low complexity: %d\n", ntoolowcom);
+    if (stat_lowcom_total > 0)
+	fprintf(fstat, "Mean complexity: %2.2f\n", (stat_lowcom_total/(double)stat_lowcom_cnt));
 
 	int f;
 	if (i_n == 1) {
@@ -1415,7 +1422,7 @@ void usage(FILE *f, const char *msg) {
 "    -q N     quality threshold causing base removal (10)\n"
 "    -w N     window-size for quality trimming (1)\n"
 "    -H       remove >95%% homopolymer reads (no)\n"
-"    -M       remove low complexity reads (no)\n"
+"    -X       remove low complexity reads (no)\n"
 //"    -F FIL  remove sequences that align to FIL\n"
 "    -0       Set all default parameters to zero/do nothing\n"
 "    -U|u     Force disable/enable Illumina PF filtering (auto)\n"
