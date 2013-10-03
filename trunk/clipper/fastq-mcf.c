@@ -591,8 +591,8 @@ int main (int argc, char **argv) {
 	int qcnt[MAX_FILES][2]; meminit(qcnt);
 	char qmin=127, qmax=0;
 	int nsampcnt = 0;
-    double stat_lowcom_total;
-    long stat_lowcom_cnt;
+    double stat_lowcom_total=0, stat_lowcom_ssq=0, stat_lowcom_b4_total=0, stat_lowcom_b4_ssq=0;
+    long stat_lowcom_cnt=0, stat_lowcom_b4_cnt=0;
 
 	for (i=0;i<i_n;++i) {
 
@@ -1209,8 +1209,14 @@ int main (int argc, char **argv) {
             int lowcom_max = lowcom_pct * lowcom_cnt;
             if (debug>0) printf("%s: lowcom cnt:%d, max:%d, seq:%d\n", fq[0].id.s, lowcom_cnt, lowcom_max, lowcom_seq);
             if (lowcom_seq>=lowcom_max) lowcom_skip = skip = true;
-            stat_lowcom_total+=1/((double)lowcom_seq/(double)lowcom_cnt);
-            stat_lowcom_cnt+=1;
+            if (!lowcom_skip) { 
+                stat_lowcom_total+=((double)lowcom_seq/(double)lowcom_cnt);
+                stat_lowcom_ssq+=pow(((double)lowcom_seq/(double)lowcom_cnt),2);
+                stat_lowcom_cnt+=1;
+            }
+            stat_lowcom_b4_total+=((double)lowcom_seq/(double)lowcom_cnt);
+            stat_lowcom_b4_ssq+=pow(((double)lowcom_seq/(double)lowcom_cnt),2);
+            stat_lowcom_b4_cnt+=1;
         }
 
 
@@ -1322,8 +1328,12 @@ int main (int argc, char **argv) {
 	fprintf(fstat, "Filtered on hompolymer: %d\n", ntoohompol);
     if (ntoolowcom)
 	fprintf(fstat, "Filtered on low complexity: %d\n", ntoolowcom);
-    if (stat_lowcom_total > 0)
-	fprintf(fstat, "Mean complexity: %2.2f\n", (stat_lowcom_total/(double)stat_lowcom_cnt));
+    if (stat_lowcom_b4_total > 0) {
+    	fprintf(fstat, "Mean lowcom score: %2.2f(%2.2f), %2.2f(%2.2f) after\n", 
+                100*(stat_lowcom_b4_total/(double)stat_lowcom_b4_cnt), 100*stdev(stat_lowcom_b4_cnt,stat_lowcom_b4_total,stat_lowcom_b4_ssq), 
+                100*(stat_lowcom_total/(double)stat_lowcom_cnt), 100*stdev(stat_lowcom_cnt,stat_lowcom_total,stat_lowcom_ssq)
+        );
+    }
 
 	int f;
 	if (i_n == 1) {
