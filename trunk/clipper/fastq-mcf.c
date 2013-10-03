@@ -219,7 +219,9 @@ int main (int argc, char **argv) {
 	int dupskip = 0;
     bool noexec = 0;
     bool hompol_filter = 0;
+    bool lowcom_filter = 0;
     float hompol_pct = .92;
+    float lowcom_pct = .90;
 
     dupset.set_deleted_key("<>");
 
@@ -248,13 +250,14 @@ int main (int argc, char **argv) {
        {"mate-qual-gt", 1, 0, 0},
        {"mate-min-len", 1, 0, 0},
        {"homopolymer-pct", 1, 0, 0},
+       {"lowcomplex-pct", 1, 0, 0},
        {0, 0, 0, 0}
     };
 
     meminit(phred_adjust);
 
     int option_index = 0;
-    while (	(c = getopt_long(argc, argv, "-nf0uUVHSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:D:",long_options,&option_index)) != -1) {
+    while (	(c = getopt_long(argc, argv, "-nf0uMUVHSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:D:",long_options,&option_index)) != -1) {
 		switch (c) {
 			case '\0':
                 { 
@@ -266,6 +269,9 @@ int main (int argc, char **argv) {
                     } else if(!strcmp(oname, "homopolymer-pct")) {
                         hompol_pct=atof(optarg)/100.0;
                         hompol_filter=1;
+                    } else if(!strcmp(oname, "lowcomplex-pct")) {
+                        lowcom_pct=atof(optarg)/100.0;
+                        lowcom_filter=1;
                     } else if(!strcmp(oname, "qual-gt")) {
                         if (!strchr(optarg, ',')) {
                             fprintf(stderr, "Error, %s requires NUM,THR as argument\n", oname);
@@ -337,6 +343,7 @@ int main (int argc, char **argv) {
 			case 'u': ilv3=1; break;
 			case 'U': ilv3=0; break;
 			case 'H': hompol_filter=1; break;
+			case 'M': lowcom_filter=1; break;
 			case 'k': skewpct = atof(optarg); break;
 			case 'q': qthr = atoi(optarg); valid_arg(c,optarg); break;
 			case 'Q': qspec = optarg; break;
@@ -903,6 +910,7 @@ int main (int argc, char **argv) {
 	int nok=0;
 	int ntooshort=0;
 	int ntoohompol=0;
+	int ntoolowcom=0;
 	int nfiltered=0;
 	// total per read
 	int ntrim[MAX_FILES]; meminit(ntrim);
@@ -962,6 +970,8 @@ int main (int argc, char **argv) {
 		int skip = 0;							// skip whole record?
 		int hompol_seq=0;
 		int hompol_cnt=0;
+		int lowcom_seq=0;
+		int lowcom_cnt=0;
 		int f;	
 		for (f=0;f<i_n;++f) {
 			dotrim[f][0] = sktrim[f][0];					// default, trim to detected skew levels
@@ -1015,6 +1025,25 @@ int main (int argc, char **argv) {
                         ++hompol_seq;
                     }
                     ++hompol_cnt;
+                }
+            }
+
+            if (lowcom_filter) {
+                char p; int h = 0;
+                for (i = dotrim[f][0]+1;i<fq[f].seq.n;++i) {
+                    // N's always match everything
+                    if (fq[f].seq.s[i] == 'N' || (fq[f].seq.s[i] == fq[f].seq.s[i-1])) {
+                        ++lowcom_seq;
+                    } else if (i >= dotrim[f][0]+3) {
+                        if (fq[f].seq.s[i] == fq[f].seq.s[i-2] && fq[f].seq.s[i-1] == fq[f].seq.s[i-3]) {
+                            ++lowcom_seq;
+                        }
+                    } else if (i >= dotrim[f][0]+3) {
+                        if (fq[f].seq.s[i] == fq[f].seq.s[i-3] && fq[f].seq.s[i-1] == fq[f].seq.s[i-4] && fq[f].seq.s[i-3] == fq[f].seq.s[i-5]) {
+                            ++lowcom_seq;
+                        }
+                    } 
+                    ++lowcom_cnt;
                 }
             }
 
@@ -1172,6 +1201,14 @@ int main (int argc, char **argv) {
             if (hompol_seq>=hompol_max) hompol_skip = skip = true;
         }
 
+        int lowcom_skip=0;
+        if (!hompol_skip && lowcom_filter) {
+            int lowcom_max = lowcom_pct * lowcom_cnt;
+            if (debug>0) printf("%s: lowcom cnt:%d, max:%d, seq:%d\n", fq[0].id.s, lowcom_cnt, lowcom_max, lowcom_seq);
+            if (lowcom_seq>=lowcom_max) lowcom_skip = skip = true;
+        }
+
+
 		if (!skip) {
 			int f;
 			for (f=0;f<o_n;++f) {
@@ -1252,6 +1289,8 @@ int main (int argc, char **argv) {
 			if (skipb) saveskip(fskip, i_n, fq);
             if (hompol_skip) {
     			++ntoohompol;
+            } else if (lowcom_skip) {
+    			++ntoolowcom;
             } else {
     			++ntooshort;
             }
@@ -1276,6 +1315,8 @@ int main (int argc, char **argv) {
 	fprintf(fstat, "Filtered on duplicates: %d\n", dupskip);
     if (ntoohompol)
 	fprintf(fstat, "Filtered on hompolymer: %d\n", ntoohompol);
+    if (ntoolowcom)
+	fprintf(fstat, "Filtered on low complexity: %d\n", ntoolowcom);
 
 	int f;
 	if (i_n == 1) {
@@ -1374,6 +1415,7 @@ void usage(FILE *f, const char *msg) {
 "    -q N     quality threshold causing base removal (10)\n"
 "    -w N     window-size for quality trimming (1)\n"
 "    -H       remove >95%% homopolymer reads (no)\n"
+"    -M       remove low complexity reads (no)\n"
 //"    -F FIL  remove sequences that align to FIL\n"
 "    -0       Set all default parameters to zero/do nothing\n"
 "    -U|u     Force disable/enable Illumina PF filtering (auto)\n"
@@ -1393,7 +1435,8 @@ void usage(FILE *f, const char *msg) {
 "    --[mate-]qual-gt    NUM,THR   At least NUM quals > THR\n" 
 "    --[mate-]max-ns     NUM       Maxmium N-calls in a read (can be a %%)\n"
 "    --[mate-]min-len    NUM       Minimum remaining length (same as -l)\n"
-"    --hompolymer-pct    PCT       Homopolymer filter percent (95)\n"
+"    --homopolymer-pct   PCT       Homopolymer filter percent (95)\n"
+"    --lowcomplex-pct    PCT       Complexity filter percent (95)\n"
 "\n"
 "If mate- prefix is used, then applies to second non-barcode read only\n"
 /*
@@ -1445,6 +1488,9 @@ void usage(FILE *f, const char *msg) {
 "4.5GB RAM on 100m DNA reads - be careful. Great for RNA assembly.\n"
 "\n"
 "*Quality filters are evaluated after clipping/trimming\n"
+"\n"
+"Homopolymer filtering is a subset of low-complexity, but will not\n"
+"be separately tracked unless both are turned on.\n"
 	,VERSION, SVNREV);
 }
 
