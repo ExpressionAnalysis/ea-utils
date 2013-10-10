@@ -109,3 +109,16 @@ Adapter file format is fasta.  You can set it to /dev/null, and pass "-f" to do 
  * It won't trim the "insides" of a paired-end read.   It also will no longer attempt to quality filter a barcode read.   No override for these, but I can't think of a reason to.
 
  * The -x percentage can be a confusing parameter.   it causes the *entire* cycle to be removed from *all* reads.... even ones without N's... if more than, say, 20% of that cycle is N's.
+
+== Cleaning multiple files ==
+
+Using process substitution, you can clean multiple fastq's in one pass.  This is useful for combining multiple MiSeq runs, or multiple lanes for example:
+
+{{{
+fastq-mcf \
+  -o cleaned.R1.fq.gz \
+  -o cleaned.R2.fq.gz \
+  adapters.fa \
+  <(gunzip -c uncleaned.lane1.R1.fq.gz uncleaned.lane2.R1.fq.gz;) \
+  <(gunzip -c uncleaned.lane1.R2.fq.gz uncleaned.lane2.R2.fq.gz;)
+}}}
