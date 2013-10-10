@@ -112,7 +112,7 @@ Adapter file format is fasta.  You can set it to /dev/null, and pass "-f" to do 
 
 == Cleaning multiple files ==
 
-Using process substitution, you can clean multiple fastq's in one pass.  This is useful for combining multiple MiSeq runs, or multiple lanes for example:
+Using process substitution, or named pipes, you can clean multiple fastq's in one pass.  This is useful for combining multiple MiSeq runs, or multiple lanes for example:
 
 {{{
 fastq-mcf \
@@ -122,3 +122,5 @@ fastq-mcf \
   <(gunzip -c uncleaned.lane1.R1.fq.gz uncleaned.lane2.R1.fq.gz;) \
   <(gunzip -c uncleaned.lane1.R2.fq.gz uncleaned.lane2.R2.fq.gz;)
 }}}
+
+(Many bioinformatic tools are not "stream friendly",  and some may require the "buffer" command to work.   But fastq-mcf does its own buffering internally.)
