@@ -35,6 +35,7 @@ use Fcntl qw(F_GETFL F_SETFL O_NONBLOCK);
 use Safe;
 use Cwd qw(abs_path cwd);
 use List::Util qw(min max);
+use File::Basename qw(dirname);
 
 sub pretty_encode;
 
@@ -76,6 +77,8 @@ $def{pid_file} = "/var/run/grun.pid";		# pid file
 $def{log_file} = "/var/log/grun.log";		# pid file
 $def{hostname} = $ENV{HOSTNAME} ? $ENV{HOSTNAME} : $ENV{COMPUTERNAME} ? $ENV{COMPUTERNAME} : `hostname`;
 $def{log_types} = "note error warn";	# log all
+$def{nfs_sync} = 1;                     # enable nfs sync support
+
 chomp $def{hostname};
 
 sub debugging;
@@ -308,6 +311,9 @@ if ($daemon) {
 
 my $make;
 my $log_to_stderr = 0;
+my %sync_after;
+my %sync_before;
+my %sync_already;
 
 sub grun_client {
     my %jobs;
@@ -389,6 +395,9 @@ sub grun_client {
         }
     }
 
+    # force exec in "same as current dir"
+    $opt{cwd} = cwd;
+
     if ($make) {
         # %i:input %o:output
         my (@i, @o);
@@ -416,7 +425,10 @@ sub grun_client {
 
         my $need=0;
         for my $i (@i) {
+            syncfile($i);
+            add_syncfilebefore($i);
             for my $o (@o) {
+                syncfile($o);
                 if (! (-s $o) || (fmodtime($i) > fmodtime($o))) {
                     warn "# need $o\n" if $opt{noexec} || $verbose;
                     $need=1;
@@ -427,9 +439,19 @@ sub grun_client {
             warn "Skipping: @cmd\n";
             exit 0;
         }
-
+        for (@o) {
+            add_syncfileafter($_);
+        }
         warn "+@cmd\n" if $opt{noexec} || $verbose;
-
+    } else {
+        for (@cmd) {
+            if (m{([^\s,:]+)/([^\s,:]+)}) {
+                add_syncfile_after($_);
+                add_syncfile_before($_);
+            }
+        }
+        add_syncdir_after($opt{cwd});
+        add_syncdir_before($opt{cwd});
     }
 
     if ($ARGV[0] =~ /^-/) {
@@ -481,6 +503,8 @@ sub grun_client {
             if ($@) {
                 die "Can't run $conf{auto_profile}: $@\n";
             }
+        } else {
+            die "Can't find $conf{auto_profile}: $!\n";
         }
     }
 
@@ -516,8 +540,6 @@ sub grun_client {
         delete $opt{io};
     }
 
-    # force exec in "same as current dir"
-    $opt{cwd} = cwd;
 
     # copy env
     if ($env eq '*' || ($conf{env} && ($conf{env}->[0] eq '*')) ) {
@@ -603,7 +625,7 @@ sub grun_client {
     $opt{hard_factor} = $conf{hard_factor};
     $opt{frompid} = $$;
     $opt{guid} = $opt{jobx} ? $opt{jobx} : create_guid();
-
+    $opt{syncdirs} = [keys(%sync_before)];
     %info = waitmsg($conf{master}, $conf{master_port}, 'run', \%opt);
 
     if (!%info) {
@@ -711,6 +733,7 @@ sub grun_client {
             $stat = $stat>>8;
             $stat = -1 if !$stat;
         }
+        syncafter();
         if ($err) {
             print STDERR "[$host] $err", "\n";
             $stat = -1 if !$stat;				# unknown error if undefined
@@ -727,6 +750,54 @@ sub grun_client {
         print STDOUT "Job_ID: $info{jid} \n" if !$verbose;
     }
 }
+
+### nfs sync support
+
+sub syncdirs {
+    for (@_) {
+        syncdir($_);
+    }
+}
+
+sub syncafter {
+    %sync_already = ();
+    return unless $conf{nfs_sync};
+    syncdirs(keys(%sync_after));
+}
+
+sub add_syncdir_after {
+    my ($d) = @_;
+    return unless $conf{nfs_sync};
+    $sync_after{abs_path($d)}=1;
+}
+
+sub add_syncdir_before {
+    my ($d) = @_;
+    return unless $conf{nfs_sync};
+    $sync_before{abs_path($d)}=1;
+}
+
+sub add_syncfile_after {
+    my ($f) = @_;
+    return unless $conf{nfs_sync};
+    add_syncdir_after(-d $f ? $f : dirname($f));
+}
+
+sub syncfile {
+    my ($f) = @_;
+    return unless $conf{nfs_sync};
+    syncdir(-d $f ? $f : dirname($f));
+}
+
+# this refreshes the lookupcasche, which is an issue when running scripts back to back on multiple nodes using NFS
+sub syncdir {
+    my ($d) = @_;
+    my $tmp;
+    return if $sync_already{$d};
+    opendir($tmp,$d);
+    closedir($tmp);
+}
+
 
 sub readsocks {
     my $did;
@@ -1867,7 +1938,11 @@ sub readconf {
 			$@='';
 		} elsif ( ! ($conf{$_} =~ s/^\{(.*)\}$/eval($1)/gei) ) {
 			# evaluate simple inline vars at configure-time
-			$conf{$_} =~ s/\$([\w-]+)/$conf{lc($1)}?$conf{lc($1)}:$1/gei;
+			if ( $conf{$_} =~ m/\$([\w-]+)\{/) {
+                xlog("error", "Error, rule has a hash variable, which requires braces\n");
+            } else {
+    			$conf{$_} =~ s/\$([\w-]+)/$conf{lc($1)}?$conf{lc($1)}:$1/gei;
+            }
 		}
 		if ($_=~ /^param-(.*)/) {
 			my $nm=$1;
@@ -3570,6 +3645,9 @@ sub do_execute {
     }	
 
     my $elapsed=0;
+
+    # deal with nfs sync, if needed
+    syncdirs(@{$opts->{syncdirs}}) if $opts->{syncdirs};
 
     if (!$err) {
         eval {
