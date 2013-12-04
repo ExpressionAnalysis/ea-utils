@@ -41,7 +41,7 @@
 
 #include "fastq-lib.h"
 
-const char * VERSION = "1.37";
+const char * VERSION = "1.38";
 
 #define SVNREV atoi(strchr("$LastChangedRevision$", ':')+1)
 
@@ -395,7 +395,12 @@ int main(int argc, char **argv) {
 				continue;
 			}
 		}
-		if (needpclose) pclose(f); else fclose(f);
+        int ret;
+		if (needpclose) ret=pclose(f); else ret=fclose(f);
+        if (ret!=0) {
+            warn("Error closing '%s': %s\n", in, strerror(errno));
+            continue;
+        } 
 
         if (fq_out) {
             if(sefq && s.dat.pe) {
@@ -838,7 +843,10 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 // parse a sam file... maybe let samtools do this, and then handle stats in "bam mode"... faster for sure
 bool sstats::parse_sam(FILE *f) {
 	line l; meminit(l);
+    int lineno=0;
+    int warnings=0;
 	while (read_line(f, l)>0)  {
+        ++lineno;
 		char *sp;
 		if (l.s[0]=='@') {
 			if (!strncmp(l.s,"@SQ\t",4)) {
@@ -878,7 +886,11 @@ bool sstats::parse_sam(FILE *f) {
 
 		if (!d[S_BITS] || !isdigit(d[S_BITS][0]) 
 		 || !d[S_POS]  || !isdigit(d[S_POS][0])
-		   ) { 
+		   ) {
+            if (warnings < 5) {
+                warn("Line %d, missing bits/position information\n", lineno);
+                ++warnings;
+            }
 			// invalid sam
 			return false;
 		}
@@ -921,7 +933,8 @@ bool sstats::parse_bam(const char *in) {
         }
     }
 	bam1_t *al=bam_init1();
-    while ( samread(fp, al) > 0 ) {
+    int ret=0;
+    while ( (ret=samread(fp, al)) > 0 ) {
         uint32_t *cig = bam1_cigar(al);
         char *name = bam1_qname(al);
         int len = al->core.l_qseq;
@@ -955,7 +968,7 @@ bool sstats::parse_bam(const char *in) {
         // now do stats
 		dostats(name,len,al->core.flag,al->core.tid>=0?fp->header->target_name[al->core.tid]:"",al->core.pos+1,al->core.qual, al->core.mtid>=0?fp->header->target_name[al->core.mtid]:"", al->core.isize, seq, qual, nm, ins, del);
 	}
-	return true;
+	return ret==0;
 }
 
 void usage(FILE *f) {
