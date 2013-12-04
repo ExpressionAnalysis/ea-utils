@@ -968,7 +968,7 @@ bool sstats::parse_bam(const char *in) {
         // now do stats
 		dostats(name,len,al->core.flag,al->core.tid>=0?fp->header->target_name[al->core.tid]:"",al->core.pos+1,al->core.qual, al->core.mtid>=0?fp->header->target_name[al->core.mtid]:"", al->core.isize, seq, qual, nm, ins, del);
 	}
-	return ret==0;
+	return ret==-1;
 }
 
 void usage(FILE *f) {
