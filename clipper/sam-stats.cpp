@@ -385,13 +385,13 @@ int main(int argc, char **argv) {
 			// (could be an uncompressed bam... but can't magic in 1 char)
 			if (!s.parse_sam(f)) {
 				if (needpclose) pclose(f); else fclose(f);
-				warn("Invalid sam file %s\n", in);
+				warn("Invalid or corrupt sam file %s\n", in);
 				continue;
 			}
 		} else {
 			if (!s.parse_bam(in)) {
 				if (needpclose) pclose(f); else fclose(f);
-				warn("Invalid bam file %s\n", in);
+				warn("Invalid or corrupt bam file %s\n", in);
 				continue;
 			}
 		}
@@ -968,7 +968,16 @@ bool sstats::parse_bam(const char *in) {
         // now do stats
 		dostats(name,len,al->core.flag,al->core.tid>=0?fp->header->target_name[al->core.tid]:"",al->core.pos+1,al->core.qual, al->core.mtid>=0?fp->header->target_name[al->core.mtid]:"", al->core.isize, seq, qual, nm, ins, del);
 	}
-	return ret==-1;
+    if (ret < -2) {
+            // no stats .. corrupt file
+            return false;
+    }
+    if (ret < -1) {
+        ++errs;
+        // truncated file, output stats, but return error code
+        return true;
+    }
+	return true;
 }
 
 void usage(FILE *f) {
