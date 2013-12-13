@@ -100,3 +100,6 @@ fastq-stats: fastq-stats.cpp fastq-lib.cpp gcModel.c
 bam-filter:  bam-filter.cpp 
 	$(CC) $(CFLAGS) fastq-lib.cpp -o $@  $< -lbamtools 
 
+clean:
+	rm -f *.o $(BIN)
+	cd samtools && make clean
