@@ -75,6 +75,7 @@ extern int optind;
 int histnum=30;
 bool isbwa=false;
 int rnamode = 0;
+bool allow_no_reads = false;
 
 // from http://programerror.com/2009/10/iterative-calculation-of-lies-er-stats/
 class cRunningStats
@@ -222,7 +223,7 @@ int main(int argc, char **argv) {
     int long_index=0;
     const char *prefix;
 
-    while ( (c = getopt_long(argc, argv, "?BArR:Ddx:MhS:", long_options, &long_index)) != -1) {
+    while ( (c = getopt_long(argc, argv, "?BzArR:Ddx:MhS:", long_options, &long_index)) != -1) {
                 switch (c) {
                 case 'd': ++debug; break;                                       // increment debug level
                 case 'D': ++trackdup; break;
@@ -234,6 +235,7 @@ int main(int argc, char **argv) {
                 case 'S': histnum=atoi(optarg); break;
                 case 'x': ext=optarg; break;
                 case 'M': newonly=1; break;
+                case 'z': allow_no_reads = true; break;
                 case 'o': fq_out=1; trackdup=1; break;                     // output suff
                 case 'h': usage(stdout); return 0;
                 case '?':
@@ -419,7 +421,7 @@ int main(int argc, char **argv) {
 		sort(s.visize.begin(), s.visize.end());
 
 		int phred = s.dat.qualmin < 64 ? 33 : 64;
-		if (!s.dat.n) {
+		if (!s.dat.n && ! allow_no_reads) {
 			warn("No reads in %s\n", in);
 			continue;
 		}
@@ -998,6 +1000,7 @@ void usage(FILE *f) {
 "-x FIL         File extension for handling multiple files (stats)\n"
 "-M             Only overwrite if newer (requires -x, or multiple files)\n"
 "-B             Input is bam, don't bother looking at magic\n"
+"-z             Don't fail when zero entries in sam\n"
 "\n"
 "OUTPUT:\n"
 "\n"
