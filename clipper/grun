@@ -171,6 +171,7 @@ if ($qinfo) {
 		die "Command $cmd cannot be run on multiple hosts";
 	}
 
+    my $ok=0;
 	for my $d (@dest) {
 		my ($host, $port) = @$d;
 
@@ -206,20 +207,24 @@ if ($qinfo) {
 		} elsif ((!samehost($host,$conf{hostname}) || (!$ENV{_GRUN} && (!$conf{services}->{queue} || $cmd !~ /^stat|jobs|hist$/)))) {
             # this could get ugly, if called a lot, may want to make more efficient
             warn ("waitmsg($host, $port, 'xcmd', $cmd, @arg, @{[%opt]})\n") if $opt{debug};
-			my ($res) = waitmsg($host, $port, "xcmd", $cmd, @arg, %opt);
-			print $res;
+			my ($ret) = waitmsg($host, $port, "xcmd", $cmd, @arg, %opt);
+			print $ret;
+            $ok=1 if $ret;
 		} else {
             warn ("using local queue status, host $host is $conf{bind}/$conf{hostip}, name is $conf{hostname} \n") if $opt{debug};
+            my $ret;
 			if ($cmd eq 'stat') {
-				print shownodes(@arg);
+				$ret = shownodes(@arg);
 			} elsif ($cmd eq 'jobs') {
-				print showjobs(@arg);
+			    $ret = showjobs(@arg);
 			} elsif ($cmd eq 'hist') {
-				print showhist(@arg);
+				$ret = showhist(@arg);
 			}	
+            print $ret;
+            $ok=1 if $ret;
 		}
 	}
-	exit 0;
+    exit($ok ? 0 : 1);
 }
 
 my $gpid;						# daemon pid
@@ -426,7 +431,7 @@ sub grun_client {
         my $need=0;
         for my $i (@i) {
             syncfile($i);
-            add_syncfilebefore($i);
+            add_syncfile_before($i);
             for my $o (@o) {
                 syncfile($o);
                 if (! (-s $o) || (fmodtime($i) > fmodtime($o))) {
@@ -440,7 +445,7 @@ sub grun_client {
             exit 0;
         }
         for (@o) {
-            add_syncfileafter($_);
+            add_syncfile_after($_);
         }
         warn "+@cmd\n" if $opt{noexec} || $verbose;
     } else {
@@ -777,6 +782,12 @@ sub add_syncdir_before {
     $sync_before{abs_path($d)}=1;
 }
 
+sub add_syncfile_before {
+    my ($f) = @_;
+    return unless $conf{nfs_sync};
+    add_syncdir_before(-d $f ? $f : dirname($f));
+}
+
 sub add_syncfile_after {
     my ($f) = @_;
     return unless $conf{nfs_sync};
@@ -961,6 +972,7 @@ sub process_message {
 		return ();
 	} elsif ($cmd eq 'jedit') {
 		my ($jid, %ed) = @args;
+        my $fname;
 		if (!$jid || !%ed) {
 			xlog("error", "Invalid edit request (@args)");
 			return "Invalid edit request (@args)\n";
@@ -970,19 +982,23 @@ sub process_message {
 				return "Job $jid not found during jedit";
 			} else {
 				my $job_ip = slurp("$conf{spool}/jobs/$jid.ip");
-# tell client to send an 'xedit' to the running node
-# needed only for certain edits....think about this
-                return "Job $jid is running on $job_ip\n";
+                # tell client to send an 'xedit' to the running node
+                # needed only for certain edits....think about this
+                $fname = "$conf{spool}/jobs/$jid:$job_ip.run";
+                # for now we allow edit-in-place.... for no effect in some cases, but not others
 			}
 		} else {
-			my $ref = unpack_file("$conf{spool}/jobs/$jid");
-			for my $key (keys(%ed)) {
-				$ref->{$key} = $ed{$key};
-			}
-			burp("$conf{spool}/jobs/$jid.jedit", packfile($ref));
-			rename("$conf{spool}/jobs/$jid.jedit", "$conf{spool}/jobs/$jid");
-			return "Job $jid edited\n";
+            $fname = "$conf{spool}/jobs/$jid";
         }
+       
+        # assert($fname) 
+        my $ref = unpack_file($fname);
+        for my $key (keys(%ed)) {
+            $ref->{$key} = $ed{$key};
+        }
+        burp("$conf{spool}/jobs/$jid.jedit", packfile($ref));
+        rename("$conf{spool}/jobs/$jid.jedit", $fname);
+        return "Job $jid edited\n";
     } elsif ($cmd eq 'jwait') {
         my ($job) = @args;
  
