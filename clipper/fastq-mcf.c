@@ -95,6 +95,8 @@ std::vector<adjustment> cycle_adjust;
 int phred_adjust[MAX_PHRED];
 bool have_phred_adjust=false;
 
+std::string arg2cmdstr(int argc, char** argv);
+
 // phred used
 char phred = 0;
 
@@ -419,6 +421,8 @@ int main (int argc, char **argv) {
 	if (noclip) {
 		fstat = stdout;
 	}
+
+	fprintf(fstat, "Command Line: %s\n", arg2cmdstr(argc, argv).c_str());
 
 	FILE *fout[MAX_FILES]; meminit(fout);
 	bool gzout[MAX_FILES]; meminit(gzout);
@@ -1638,5 +1642,42 @@ bool  arg_int_pair(const char *optarg, int &a, int&b) {
     a=atoi(optarg);
     b=atoi(strchr(optarg, ',')+1);
 }
+
+char *arg2cmd(int argc, char** argv) {
+    char *buf=NULL;
+    int n = 0;
+    int k, i;
+    for (i=1; i <argc;++i) {
+        int k=strlen(argv[i]);
+        buf=( char *)realloc(buf,n+k+4);
+        char *p=buf+n;
+        char endq=0;
+        // this is a poor mans quoting, which is good enough for anything that's not rediculous
+        if (strchr(argv[i], ' ')) {
+            if (!strchr(argv[i], '\'')) {
+                *p++='\'';
+                endq='\'';
+            } else {
+                *p++='\"';
+                endq='\"';
+            }
+        }
+        memcpy(p, argv[i], k);
+        p+=k;
+        if (i < (argc-1)) *p++=' ';
+        if (endq) *p++=endq;
+        *p='\0';
+        n = p-buf;
+    }
+    return buf;
+}
+
+std::string arg2cmdstr(int argc, char **argv) {
+    char *tmp=arg2cmd(argc, argv);
+    std::string ret=tmp;
+    free(tmp);
+    return ret;
+}
+
 
 /* vim: set noai ts=4 sw=4: */
