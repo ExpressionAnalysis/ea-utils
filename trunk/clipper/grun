@@ -332,7 +332,7 @@ sub grun_client {
 
     Getopt::Long::Configure qw(require_order no_ignore_case passthrough);
 
-    GetOptions(\%opt, "file=s", "int|I", "memory|m=i", "hosts|h=s", "cpus|c=i", "io!", "wait!", "err_a|err-append|ea=s", "err|e=s", "out|o=s", "out_a|out-append|oa=s", "ouer|out-err|oe=s", "ouer_a|out-err-append|oea=s", "jobx|jobid|j=s", "verbose", "make|M", "debug|D", "env|E=s", "alert=s", "param|p=s@", "wait-exists|W");
+    GetOptions(\%opt, "file=s", "int|I", "memory|m=i", "hosts|h=s", "cpus|c=f", "io!", "wait!", "err_a|err-append|ea=s", "err|e=s", "out|o=s", "out_a|out-append|oa=s", "ouer|out-err|oe=s", "ouer_a|out-err-append|oea=s", "jobx|jobid|j=s", "verbose", "make|M", "debug|D", "env|E=s", "alert=s", "param|p=s@", "wait-exists|W");
 
     if ((!!$opt{out} + !!$opt{out_a} + !!$opt{ouer} + !!$opt{ouer_a})>1) {
         $config=undef;
