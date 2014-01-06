@@ -301,6 +301,9 @@ if ($editjob) {
 	exit $ex;
 }
 
+
+
+
 my ($router, $read_set, $write_set, $quit, %pid_jobs, %j_wait, %io_wait, %start_wait);	# daemon globals
 my %ZMQS;                   # hash of open sockets
 my %nodes;                  # hash of registered nodes
@@ -402,6 +405,9 @@ sub grun_client {
 
     # force exec in "same as current dir"
     $opt{cwd} = cwd;
+    if (!$opt{cwd}) {
+        die "Can't get current working directory, not executing unanchored remote command.\n";
+    }
 
     if ($make) {
         # %i:input %o:output
@@ -809,15 +815,21 @@ sub syncdir {
     closedir($tmp);
 }
 
-
 sub readsocks {
     my $did;
     # identity & data received
     my $cnt;
+
+    if (!$router) {
+        xlog("debug", "Readsocks called with no router: " . Carp::longmess() );
+        return;
+    }
+
     while (my $id= zmq_recvmsg($router,ZMQ_NOBLOCK)) {
         ++$cnt;
         $did=1;
         $id = zmq_msg_data($id);
+
         if (zmq_getsockopt($router,ZMQ_RCVMORE)) {
 #            print "getting sep\n";
             my $sep  = zmq_recvmsg($router);
@@ -843,6 +855,23 @@ sub readsocks {
         }
     }
     return $did;
+}
+
+sub jhiststat {
+    my ($jid) = @_;
+    my $jhistfile=jhistpath($jid);
+    if (-e $jhistfile) {
+        # job is toast... but maybe some streams are waiting
+        my $job=unpack_file($jhistfile);
+        delete $job->{env};
+        $job->{host}="n/a" if !$job->{host} && !defined $job->{status};
+        $job->{ip}=host2ip($job->{host}) if !$job->{ip} && ! defined $job->{status};
+        # needs ip!
+        $job->{ip}="n/a" if defined $job->{status} && ! $job->{ip};
+        $job->{hostname}=$job->{host};
+        return $job;
+    } 
+    return undef;
 }
 
 sub replymsg {
@@ -1284,20 +1313,12 @@ sub process_message {
         }
 		if (! -e "$conf{spool}/jobs/$jid") {
 			if (! -e "$conf{spool}/jobs/$jid.ip") {
-                my $jhistfile=jhistpath($jid);
-			    if (! -e $jhistfile) {
+                my $jhist=jhiststat($jid);
+			    if (! $jhist) {
 				    xlog("error", "Job '$jid' does not exist from $ip") if $jid;
     				return (error=>"Job '$jid' does not exist during jinfo.");
                 } else {
-                    # job is toast... but maybe some streams are waiting
-                    my $job=unpack_file($jhistfile);
-                    delete $job->{env};
-                    $job->{host}="n/a" if !$job->{host} && !defined $job->{status};
-                    $job->{ip}=host2ip($job->{host}) if !$job->{ip} && ! defined $job->{status};
-                    # needs ip!
-                    $job->{ip}="n/a" if defined $job->{status} && ! $job->{ip};
-                    $job->{hostname}=$job->{host};
-                    return(%$job);
+                    return(%$jhist);
                 }
 			} else {
 				my $job_ip = slurp("$conf{spool}/jobs/$jid.ip");
@@ -1307,8 +1328,13 @@ sub process_message {
 				} else {
 # route to correct node
                     if (!$nodes{$job_ip}) {
-                        xlog("error", "Job $jid is linked to $job_ip which is not responding");
-                        return (warn=>"Job $jid is linked to $job_ip which is not responding");
+                        my $jhist=jhiststat($jid);
+                        if (!$jhist) {
+                            xlog("error", "Job $jid is linked to $job_ip which is not responding");
+                            return (warn=>"Job $jid is linked to $job_ip which is not responding");
+                        } else {
+                            return(%$jhist);
+                        }
                     } else {
                         return (jid=>$jid, ip=>$job_ip, port=>$nodes{$job_ip}->{port}, hostname=>$nodes{$job_ip}->{hostname});
                     }
@@ -2172,7 +2198,7 @@ sub recvmsg {
         $msg = zmq_recvmsg($sock);
         if ($msg) {
             my $buf = zmq_msg_data($msg);
-            xlog("debug", "Client got response: $buf") if $conf{trace};
+            xlog("debug", "Client $$ got response: $buf") if $conf{trace};
             if ($buf) {
                 return unpackcmd($buf);
             }
@@ -2963,17 +2989,17 @@ sub startdaemon {
 			++$conf{loop_num};
 			eval {$did|=readsocks()};
 			last if $quit;
-			xlog("error", "Daemon readsocks exception: $@") if $@;
+			xlog("error", "Daemon $$ readsocks exception: $@") if $@;
 
 			# theoretically these could be in separate threads, or forked off
 			if ( $conf{services}->{queue} ) {
 				eval {$did|=schedule()};
-				xlog("error", "Daemon schedule exception: $@") if $@;
+				xlog("error", "Daemon $$ schedule exception: $@") if $@;
 			}
 
 			if ( $conf{services}->{exec} ) {
 				eval {$did|=srvexec()};
-				xlog("error", "Daemon srvexec exception: $@") if $@;
+				xlog("error", "Daemon $$ srvexec exception: $@") if $@;
 			};
 
             if (!$did) {
@@ -3231,15 +3257,26 @@ sub execute_job {
                 exec("$GRUN_PATH $confarg -Y $bfile");
                 $err = "Can't exec: $!";
             } else {
-                my $out = {
-                    id=>$opts->{id},
-                    status=>$ret,
-                    error=>$err,
+                eval {
+                    # save output
+
+                    # immediate reply if possible
+                    xlog("debug", "Error before launch: $ret \"$err\" (@cmd)\n") if $opts->{trace};
+                    my $out = {
+                        id=>$opts->{id},
+                        status=>$ret,
+                        error=>$err,
+                        dumped=>1,
+                    };
+                    print XOUT packfile($out);
+                    close XOUT;
+                    $context=zmq_init();
+                    send_status_for_job($out);
+                    printf STDERR "$err\n";	
                 };
-                send_status_for_job($out);
-                printf STDERR "$err\n";	
-                print XOUT packfile($out);
-                close XOUT;
+                if ($@) {
+                    xlog("error", "Error reporting error : $@\n");
+                }
                 exit $ret;
             } 
         }
@@ -3253,6 +3290,7 @@ sub execute_job {
             id=>$opts->{id},
             status=>$ret,
             error=>$err,
+            dumped=>1,
         };
         # not in a fork... don't need a new conneciton here...but whatever for now
         send_status_for_job($out);
