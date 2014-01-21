@@ -93,6 +93,7 @@ public:
 };
 std::vector<adjustment> cycle_adjust;
 int phred_adjust[MAX_PHRED];
+int phred_adjust_max=0;
 bool have_phred_adjust=false;
 
 std::string arg2cmdstr(int argc, char** argv);
@@ -247,6 +248,7 @@ int main (int argc, char **argv) {
        {"min-len", 1, 0, 'l'},
        {"cycle-adjust", 1, 0, 0},
        {"phred-adjust", 1, 0, 0},
+       {"phred-adjust-max", 1, 0, 0},
        {"mate-qual-mean", 1, 0, 0},
        {"mate-max-ns", 1, 0, 0},
        {"mate-qual-gt", 1, 0, 0},
@@ -297,6 +299,8 @@ int main (int argc, char **argv) {
                         a.pos=atoi(optarg);
                         a.adj=atoi(strchr(optarg, ',')+1);
                         cycle_adjust.push_back(a);
+                    } else if(!strcmp(oname, "phred-adjust-max")) {
+                        phred_adjust_max=atoi(optarg);
                     } else if(!strcmp(oname, "phred-adjust")) {
                         if (!strchr(optarg, ',')) {
                             fprintf(stderr, "Error, %s requires CYC,ADJ as argument\n", oname);
@@ -996,6 +1000,15 @@ int main (int argc, char **argv) {
                 }
             }
 
+            if (phred_adjust_max) {
+                for (i=0;i<fq[f].qual.n;++i) {
+                   if ((fq[f].qual.s[i]-phred)>phred_adjust_max) {
+                        fq[f].qual.s[i]=phred_adjust_max+phred;
+                   } 
+                }
+            }
+
+
             for (i=0;i<cycle_adjust.size();++i) {
                 if (abs(cycle_adjust[i].pos) < fq[f].qual.n) {
                     if (cycle_adjust[i].pos>0) {
@@ -1448,8 +1461,9 @@ void usage(FILE *f, const char *msg) {
 "    -d       Output lots of random debugging stuff\n"
 "\n"
 "Quality adjustment options:\n"
-"    --cycle-adjust    CYC,AMT     Adjust cycle CYC (negative = offset from end) by amount AMT\n"
-"    --phred-adjust    SCORE,AMT   Adjust score SCORE by amount AMT\n"
+"    --cycle-adjust      CYC,AMT   Adjust cycle CYC (negative = offset from end) by amount AMT\n"
+"    --phred-adjust      SCORE,AMT Adjust score SCORE by amount AMT\n"
+"    --phred-adjust-max  SCORE     Adjust scores > SCORE to SCOTE\n"
 "\n"
 "Filtering options*:\n"
 "    --[mate-]qual-mean  NUM       Minimum mean quality score\n"
