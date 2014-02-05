@@ -28,6 +28,9 @@ See "void usage" below for usage.
 
 */
 
+#define VERSION "1.01"
+#define SVNREV atoi(strchr("$LastChangedRevision$", ':')+1)
+
 void usage(FILE *f);
 int debug=0;
 
@@ -50,7 +53,7 @@ int main (int argc, char **argv) {
     bool norevcomp = false;
     bool allow_ex = false;
 
-	while (	(c = getopt (argc, argv, "-dRnbeo:t:v:m:p:r:x")) != -1) {
+	while (	(c = getopt (argc, argv, "-dRnbeo:t:v:m:p:r:xV")) != -1) {
 		switch (c) {
 		case '\1':
 			if (!in[0]) 
@@ -71,6 +74,7 @@ int main (int argc, char **argv) {
 			  break;
 		case 'r': orep = optarg; break;
 		case 't': threads = atoi(optarg); break;
+        case 'V': printf("Version: %s.%d\n", VERSION, SVNREV); return 0; break;
 		case 'm': mino = atoi(optarg); break;
 		case 'x': allow_ex = true; break;
 		case 'p': pctdiff = atoi(optarg); break;
@@ -385,6 +389,7 @@ int main (int argc, char **argv) {
 	printf("Total joined: %d\n", joincnt);
 	printf("Average join len: %.2f\n", (double) tlen / (double) joincnt);
 	printf("Stdev join len: %.2f\n", dev);
+    printf("Version: %s.%d\n", VERSION, SVNREV);
 
 	return 0;
 }
