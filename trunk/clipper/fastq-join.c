@@ -404,6 +404,7 @@ void usage(FILE *f) {
 "-m N       N-minimum overlap (6)\n"
 "-r FIL     Verbose stitch length report\n"
 "-R         No reverse complement\n"
+"-x         Allow insert < read length\n"
 "\n"
 "Output: \n"
 "\n"
