@@ -48,8 +48,9 @@ int main (int argc, char **argv) {
 	bool omode = false;	
 	char *bfil = NULL;
     bool norevcomp = false;
+    bool allow_ex = false;
 
-	while (	(c = getopt (argc, argv, "-dRnbeo:t:v:m:p:r:")) != -1) {
+	while (	(c = getopt (argc, argv, "-dRnbeo:t:v:m:p:r:x")) != -1) {
 		switch (c) {
 		case '\1':
 			if (!in[0]) 
@@ -71,6 +72,7 @@ int main (int argc, char **argv) {
 		case 'r': orep = optarg; break;
 		case 't': threads = atoi(optarg); break;
 		case 'm': mino = atoi(optarg); break;
+		case 'x': allow_ex = true; break;
 		case 'p': pctdiff = atoi(optarg); break;
 		case 'R': norevcomp = true; break;
 		case 'd': debug = 1; break;
@@ -229,17 +231,86 @@ int main (int argc, char **argv) {
 			}
 		}
 
+        int hasex=0;
+        if (allow_ex && besto<maxo) {
+            if (fq[0].seq.n > rc.seq.n) {
+                int mind = (pctdiff * maxo) / 100;
+                for (i=0; i < fq[0].seq.n-maxo; ++i ) {
+                    int d;
+                    d=hd(fq[0].seq.s+fq[0].seq.n-rc.seq.n-i-1, rc.seq.s, maxo);
+                    if (debug) fprintf(stderr, "hd: %d, %d\n", -i, d);
+                    if (d <= mind) {
+                        // squared-distance over length, probably can be proven better (like pearson's)
+                        int score = (1000*(d*d+1))/maxo;
+                        if (score < bestscore) {
+                            bestscore=score;
+                            // negative overlap!
+                            hasex=-i;
+                            besto=maxo;
+                        }
+                    }
+                }
+            } else if (fq[0].seq.n < rc.seq.n) {
+                int mind = (pctdiff * maxo) / 100;
+                for (i=0; i < rc.seq.n-maxo; ++i ) {
+                    int d;
+                    d=hd(fq[0].seq.s, rc.seq.s+i, maxo);
+                    if (debug) fprintf(stderr, "hd: %d, %d\n", -i, d);
+                    if (d <= mind) {
+                        // squared-distance over length, probably can be proven better (like pearson's)
+                        int score = (1000*(d*d+1))/maxo;
+                        if (score < bestscore) {
+                            bestscore=score;
+                            // negative overlap!
+                            hasex=-i;
+                            besto=maxo;
+                        }
+                    }
+                }
+            }
+        }
+
 		if (debug) {
-			fprintf(stderr, "best: %d %d\n", besto, bestscore);
+			fprintf(stderr, "best: %d %d\n", besto-hasex, bestscore);
 		}
 
 		FILE *fmate = NULL;
+        int olen = besto-hasex;
+
 		if (besto > 0) {
 			++joincnt;
-			tlen+=besto;
-			tlensq+=besto*besto;
-			int l=besto/2;			// discard from left
-			int r=besto-(besto/2);			// discard from right
+
+            int l=besto/2;                  // discard from left
+            int r=besto-(besto/2);                  // discard from right
+
+			tlen+=olen;
+			tlensq+=olen*olen;
+
+            char *sav_fqs=NULL, *sav_rcs;
+            char *sav_fqq, *sav_rcq;
+
+            if (hasex) {
+                sav_fqs=fq[0].seq.s;
+                sav_fqq=fq[0].qual.s;
+                sav_rcs=rc.seq.s;
+                sav_rcq=rc.qual.s;
+                if (fq[0].seq.n < rc.seq.n) {
+                    rc.seq.s=rc.seq.s-hasex;
+                    rc.qual.s=rc.qual.s-hasex;
+                    rc.seq.n=maxo;
+                    rc.qual.n=maxo;
+                } else {
+                    // fprintf(stderr, "rc negative overlap: %s %d\n", rc.seq.s, hasex);
+                    fq[0].seq.s=fq[0].seq.s+fq[0].seq.n-maxo+hasex-1;
+                    fq[0].qual.s=fq[0].qual.s+fq[0].seq.n-maxo+hasex-1;
+                    fq[0].seq.n=maxo;
+                    fq[0].qual.n=maxo;
+                    // fprintf(stderr, "negative overlap: %s -> %s, %d\n", fq[0].seq.s, rc.seq.s, maxo);
+                }
+                // ok now pretend everythings normal, 100% overlap
+		        //if (debug) 
+            }
+
 			FILE *f=fout[2];
 
 			if (verify) {
@@ -265,6 +336,7 @@ int main (int argc, char **argv) {
 					}
 				}
 			}
+
 			fwrite(fq[0].seq.s,1,fq[0].seq.n-l,f);
 			fputs(rc.seq.s+r,f);
 			fputc('\n',f);
@@ -273,6 +345,13 @@ int main (int argc, char **argv) {
 			fputs(rc.qual.s+r,f);
 			fputc('\n',f);
 			fmate=fout[4];
+
+            if (sav_fqs) {
+                fq[0].seq.s=sav_fqs;
+                fq[0].qual.s=sav_fqq;
+                rc.seq.s=sav_rcs;
+                rc.qual.s=sav_rcq;
+            }
 
 			if (frep) {
 				fprintf(frep, "%d\n", besto);
