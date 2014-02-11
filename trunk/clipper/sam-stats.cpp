@@ -610,9 +610,11 @@ int main(int argc, char **argv) {
                             double skew = -v.spos.Skewness();
                             // if there's some coverage
                             if (v.mapr > 0) {
-                                vcovr.push_back(covr);              // look at varition
-                                vcovrvar.push_back(cv);             // look at varition
-                                vskew.push_back(skew);              // and skew
+                                if (v.mapr > 10) {
+                                    vcovr.push_back(covr);              // look at varition
+                                    vcovrvar.push_back(cv);             // look at varition
+                                    vskew.push_back(skew);              // and skew
+                                }
                                 if (rnao) {                         // "rna mode"  = more detailed output of coverage and skewness of coverage
         						    fprintf(rnao,"%s\t%d\t%ld\t%.2f\t%.4f\t%.4f\t%s\n", vit->c_str(), v.reflen, v.mapr, covr, skew, cv, sig.c_str());
                                 }
