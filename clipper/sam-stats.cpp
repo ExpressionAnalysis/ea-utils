@@ -611,6 +611,7 @@ int main(int argc, char **argv) {
                             // if there's some coverage
                             if (v.mapr > 0) {
                                 if (v.mapr > 10) {
+                                    // summary stats
                                     vcovr.push_back(covr);              // look at varition
                                     vcovrvar.push_back(cv);             // look at varition
                                     vskew.push_back(skew);              // and skew
