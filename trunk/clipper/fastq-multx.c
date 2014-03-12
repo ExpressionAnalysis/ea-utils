@@ -30,6 +30,8 @@ See "void usage" below for usage.
 
 #define MAX_BARCODE_NUM 6000
 #define MAX_GROUP_NUM 500
+// factor to divide max by
+#define THFIXFACTOR 20
 #define endstr(e) (e=='e'?"end":e=='b'?"start":"n/a")
 
 const char * VERSION = "1.02";
@@ -407,17 +409,18 @@ int main (int argc, char **argv) {
 
 		if (debug) fprintf(stderr,"scnt: %d, ecnt, %d, end: %c\n", scnt, ecnt, end);
 
+		thresh/=threshfactor;
+		if (bestdual) 
+		    thresh/=5;
+
 		// since this is a known good set, use a very low threshold, just to catch them all
         fprintf(stderr, "Using Barcode Group: %s on File: %s (%s), Threshold %2.2f%%\n", 
-        grs[gindex].id, in[i], endstr(end), 100.0 * (float) ((float)thresh/15)/sampcnt);
-
-		thresh/=threshfactor;
+        grs[gindex].id, in[i], endstr(end), 100.0 * (float) ((float)thresh/THFIXFACTOR)/sampcnt);
 
 		if (bestdual) {
 			dend = dscnt >= decnt ? 'b' : 'e';
 			fprintf(stderr, "Dual index on File: %s (%s)\n", in[dbesti], endstr(dend));
 			dual=true;
-			thresh/=5;
 			for (b=0;b<bgcnt;++b) {
 				// trim down a bit, but later should trim down to "both-match"
 				if (bcg[b].gptr->i == gindex) {
@@ -432,7 +435,7 @@ int main (int argc, char **argv) {
         for (b=0;b<bgcnt;++b) {
 			if (bcg[b].gptr->i == gindex) {
 				int cnt = (end == 'e' ? (bcg[b].ecnt[i]+bcg[b].escnt[i]) : ( bcg[b].bcnt[i] + bcg[b].bscnt[i] ));
-				if (cnt > thresh/15) {
+				if (cnt > thresh/THFIXFACTOR) {
 					// count exceeds threshold... use it
 					bc[bcnt]=bcg[b].b;
 					if ((end == 'e' && (bcg[b].escnt[i] < 1.2*bcg[b].ecnt[i])) ||
