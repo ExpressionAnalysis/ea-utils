@@ -111,12 +111,13 @@ int main (int argc, char **argv) {
 	const char *group = NULL;
     bool usefile1 = false;
     int phred = 33;
+    double threshfactor = 1;
 
 	int i;
 	bool omode = false;	
 	char *bfil = NULL;
-	while (	(c = getopt (argc, argv, "-Dzxnbeov:m:B:g:L:l:G:q:d:")) != -1) {
-		switch (c) {
+	while (	(c = getopt (argc, argv, "-Dzxnbeov:m:B:g:L:l:G:q:d:t:")) != -1) {
+		switch (c) t:{
 		case '\1': 
                        	if (omode) {
 				if (f_oarg<5)
@@ -152,6 +153,7 @@ int main (int argc, char **argv) {
 		case 'B': bfil = optarg; list = NULL; break;
 		case 'x': trim = false; break;
 		case 'n': noexec = true; break;
+		case 't': threshfactor = atof(optarg); break;
 		case 'm': mismatch = atoi(optarg); break;
 		case 'd': distance = atoi(optarg); break;
 		case 'q': quality = atoi(optarg); break;
@@ -333,13 +335,16 @@ int main (int argc, char **argv) {
 				if (hcnt > fmax[i])
 					fmax[i]=hcnt;
 
-				if (debug > 2) fprintf(stderr,"file-sum %d %d, bestsum %d\n", i, fsum[i], bestcnt);
-
 				if (fsum[i] > bestcnt)  {
+                    if (debug > 1) 
+                        fprintf(stderr,"file %d(%s), bcg: %s, file-sum: %d, bestsum: %d\n", i, in[i], bcg[b].gptr->id, fsum[i], bestcnt);
+
 					bestcnt=fsum[i];
 					besti=i;
 					bestdual=(bcg[b].b.dual!=NULL);
 				}
+
+                fprintf(stderr,"dual %d(%s), bcg: %s, file-sum: %d, bestsum: %d\n", i, in[i], bcg[b].gptr->id, dfsum[i], dbestcnt);
 
 				if (bcg[b].b.dual) {
 					// highest count
@@ -347,10 +352,9 @@ int main (int argc, char **argv) {
 					dfsum[i]+=dcnt;
 					if (dcnt > dfmax[i])
 						dfmax[i]=dcnt;
-					if (debug > 1)
-						fprintf(stderr,"dual-file-counts: i:%d,c:%d,b:%d,e:%d,x:%d\n", i,b,bcg[b].dbcnt[i],bcg[b].decnt[i],dcnt);
 					if (dfsum[i] > dbestcnt)  {
-						if (debug > 2) fprintf(stderr,"dual file-sum %d %d\n", i, dfsum[i]);
+                        if (debug > 1) 
+                            fprintf(stderr,"dual %d(%s), bcg: %s, file-sum: %d, bestsum: %d\n", i, in[i], bcg[b].gptr->id, dfsum[i], dbestcnt);
 						dbestcnt=dfsum[i];
 						dbesti=i;
 					}
@@ -406,6 +410,8 @@ int main (int argc, char **argv) {
 		// since this is a known good set, use a very low threshold, just to catch them all
         fprintf(stderr, "Using Barcode Group: %s on File: %s (%s), Threshold %2.2f%%\n", 
         grs[gindex].id, in[i], endstr(end), 100.0 * (float) ((float)thresh/15)/sampcnt);
+
+		thresh/=threshfactor;
 
 		if (bestdual) {
 			dend = dscnt >= decnt ? 'b' : 'e';
@@ -705,6 +711,7 @@ int main (int argc, char **argv) {
             int ocnt = bcnt;
             // this should allow up to a 300 plex
             int thresh = max(1,tcount/1000);
+            thresh /= threshfactor;
             bcnt=0;
             if (debug)
                 fprintf(stderr, "dual resample threshold: %d out of %d\n", thresh, tcount);
@@ -1064,6 +1071,7 @@ void usage(FILE *f) {
 "-B BCFIL    Use barcodes from the specified file, don't run a determination step\n"
 "-b          Force beginning of line (5') for barcode matching\n"
 "-e          Force end of line (3') for batcode matching\n"
+"-t NUM      Divide threshold for auto-determine by factor NUM (1), > 1 = more sensitive\n"
 "-G NAME     Use group(s) matching NAME only\n"
 "-x          Don't trim barcodes off before writing out destination\n"
 "-n          Don't execute, just print likely barcode list\n"
