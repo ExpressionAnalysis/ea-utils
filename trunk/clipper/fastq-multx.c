@@ -346,7 +346,8 @@ int main (int argc, char **argv) {
 					bestdual=(bcg[b].b.dual!=NULL);
 				}
 
-                fprintf(stderr,"dual %d(%s), bcg: %s, file-sum: %d, bestsum: %d\n", i, in[i], bcg[b].gptr->id, dfsum[i], dbestcnt);
+                if (debug > 1) 
+                    fprintf(stderr,"dual %d(%s), bcg: %s, file-sum: %d, bestsum: %d\n", i, in[i], bcg[b].gptr->id, dfsum[i], dbestcnt);
 
 				if (bcg[b].b.dual) {
 					// highest count
