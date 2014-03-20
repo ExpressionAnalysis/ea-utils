@@ -60,6 +60,7 @@ $def{port} = 5184;				# listen/connect port
 $def{bind} = '0.0.0.0';				# listen addr
 $def{env} = ['PATH'];			# list of environment vars to copy from submit through to exec
 $def{default_memory} = 1000 * 1000;        # default job memory
+$def{default_priority} = 20;        # default job priority (20 = always run)
 $def{ping_secs} = 30;				# how often to tell about load/mem/stats
 $def{remove_secs} = '$ping_secs * 1000';	# don't even try kickstarting if the node is this old
 $def{idle_load} = .3;				# how often to tell about load/mem/stats
@@ -332,7 +333,7 @@ sub grun_client {
 
     Getopt::Long::Configure qw(require_order no_ignore_case passthrough);
 
-    GetOptions(\%opt, "file=s", "int|I", "memory|m=i", "hosts|h=s", "cpus|c=f", "io!", "wait!", "err_a|err-append|ea=s", "err|e=s", "out|o=s", "out_a|out-append|oa=s", "ouer|out-err|oe=s", "ouer_a|out-err-append|oea=s", "jobx|jobid|j=s", "verbose", "make|M", "debug|D", "env|E=s", "alert=s", "param|p=s@", "wait-exists|W");
+    GetOptions(\%opt, "file=s", "int|I", "memory|m=i", "hosts|h=s", "cpus|c=f", "io!", "wait!", "err_a|err-append|ea=s", "err|e=s", "out|o=s", "out_a|out-append|oa=s", "ouer|out-err|oe=s", "ouer_a|out-err-append|oea=s", "jobx|jobid|j=s", "verbose", "make|M", "debug|D", "env|E=s", "alert=s", "param|p=s@", "wait-exists|W", "priority|r=i");
 
     if ((!!$opt{out} + !!$opt{out_a} + !!$opt{ouer} + !!$opt{ouer_a})>1) {
         $config=undef;
@@ -500,6 +501,7 @@ sub grun_client {
                 $opt{memory}=$prof->{memory} if $prof->{memory} && !$opt{memory};
                 $opt{cpus}=$prof->{cpus} if $prof->{cpus} && !$opt{cpus};
                 $opt{hosts}=$prof->{hosts} if $prof->{hosts} && !$opt{hosts};
+                $opt{priority}=$prof->{priority} if $prof->{priority} && !$opt{priority};
 
                 for ((@metrics,@labels)) {
                     # as if the user entered it
@@ -530,6 +532,7 @@ sub grun_client {
         }
     }
     $opt{param} = \%param;
+    $opt{priority} =  $conf{default_priority} if ! $opt{priority};
 
     # convert memory to kB
     if ($opt{memory}) {
@@ -1132,6 +1135,11 @@ sub process_message {
 				xlog("trace", "Still alive $jid from $ip") if $trace;
 				touch("$conf{spool}/jobs/$jid:$ip.run")
 					if -e "$conf{spool}/jobs/$jid:$ip.run";
+                if ( ! -e "$conf{spool}/jobs/$jid.ok" ) {
+                    # jexok didn't come through, but should have
+	                xlog("error", "Writing $jid.ok, from jrun signal, may need to restart exec node");
+                    burp("$conf{spool}/jobs/$jid.ok","jrun");
+                }
     			return();                           # no dacks for jrun
 			} elsif (defined $opts{status}) {
 # job is done
@@ -1188,14 +1196,14 @@ sub process_message {
 			}
 		}
 	} elsif ($cmd eq 'jexok') {
-        my ($jid) = @_;
-        if ( -e "$conf{spool}/jobs/$jid:$ip.run" ) {
-            touch("$conf{spool}/jobs/$jid:$ip.run");
-        }
+        my ($jex) = @args;
+        my $jid = $jex->{id};
+	    xlog("debug", "Writing $jid.ok") if $trace;
+        touch("$conf{spool}/jobs/$jid:$ip.run");
+        burp("$conf{spool}/jobs/$jid.ok",packfile($jex));
 	} elsif ($cmd eq 'xexec') {
 		my ($opts) = @args;
         execute_job($opts);
-        return ('jexok', $opts->{id});
 	} elsif ($cmd eq 'xclean') {
 # cleanup iowait stuff.. i got everything
 		my ($jid) = @args;
@@ -1467,10 +1475,12 @@ sub schedule {
         }
    }
 
+    my $tcpu;
 	for my $n (values %nodes) {
 		if (defined $n->{a_cpus}) {
 			$n->{a_cpus} = $n->{a_memory} = 0;
 		}
+        $tcpu+=$n->{cpus};
 	}
 
 	# pass 1 : deduct resources for running jobs
@@ -1495,10 +1505,15 @@ sub schedule {
     }
 
     my $jcnt=0;
-    for my $jid (@D) {
-        next unless ($jid =~ /\.run$/);
-
-        my $job=read_job($jid);
+    my $jcpu=0;
+    my $jnee=0;
+    for my $jrun (@D) {
+        ++$jnee unless ($jrun =~ /\.ip$/);
+        next unless ($jrun =~ /\.run$/);
+        --$jnee;
+        
+        my $job=read_job($jrun);
+        my $job_ip=$1 if $jrun=~/\:(\S+)\.run$/;
 
 		# this should be config, min requirements
 		$job->{cpus} = 1 if $job->{cpus} == 0;
@@ -1508,15 +1523,23 @@ sub schedule {
 		}
 
 		# job is running, make sure it's resources are somewhat locked
-		($jid) = $jid =~ m/^(\d+)/;
+		my ($jid) = $jrun =~ m/^(\d+)/;
+
+		# check to see whether job was ever started
+		if ($conf{loop_num}>5 && (fmodtime($job->{file}) < (time()-$conf{ping_secs})) && ! -e "$conf{spool}/jobs/$jid.ok") {
+			rename("$conf{spool}/jobs/$jrun","$conf{spool}/jobs/$jid");
+			delete $nodes{$job_ip};
+			xlog("error", "No execution confirm.  Deregister $job_ip as bad, put job $jid back in the queue");
+        }
 		# check to see whether job has expired
 		if ($conf{loop_num}>5 && $conf{expire_secs} && (fmodtime($job->{file}) < (time()-$conf{expire_secs}))) {
             $did=1;
 			selfcmd('jstat', {pid=>-1, id=>$jid, status => $STATUS_ORPHAN, error=>"Orphaned job (" . (time()-fmodtime($job->{file})) . "s)"});
 		} else {
-			my $job_ip = slurp("$conf{spool}/jobs/$jid.ip");
+			$job_ip = slurp("$conf{spool}/jobs/$jid.ip") unless $job_ip;
 			if ($job_ip =~ /\d/ && $nodes{$job_ip} && $nodes{$job_ip}->{ip}) {
                 ++$jcnt;
+		        $jcpu+=$job->{cpus};
 				$nodes{$job_ip}->{a_cpus} += $job->{cpus};
 				$nodes{$job_ip}->{a_memory} += $job->{memory};
 				for (@metrics) {
@@ -1530,13 +1553,19 @@ sub schedule {
     my @nlist = values %nodes;
 	# no attempt here to prioritize jobs, just match and go
 	my $cnt=0;
+    my $full = ($jcpu/$tcpu);
+
     for my $jid (@D) {
-		next if ($jid =~ /\.ip$/);
-        next if ($jid =~ /\.run$/);
+		next unless ($jid =~ /^\d+$/o);
 
 		my $job = read_job($jid);
 
 		next if $job->{state} eq 'hold';
+
+		$job->{priority} = $conf{default_priority} if !$job->{priority};
+        next if ($job->{priority} < 20) && ($job->{priority}/5 < (sqrt(rand())*$full));
+
+        $full+=($job->{priority}*$job->{cpus})/($tcpu*5);
 
 		# this should be config, min requirements
 		$job->{cpus} = 1 if $job->{cpus} == 0;
@@ -1559,7 +1588,7 @@ sub schedule {
 
 		for (my $i = 0; $i < @nlist; ++$i) {
             my $n = $nlist[$i];
-
+            
 			# jobs need enough memory, cpu availability and disk space... that's it
 			if (!$n->{ip}) {
 				xlog("error", "Node has no ip! " . packdump($n));
@@ -1879,7 +1908,7 @@ sub srvexec {
                 notifystat({id=>$jid, jrun=>1});
                 touch("$conf{spool}/jpids/$jid") if -e "$conf{spool}/jpids/$jid";
             } else {
-                notifystat({id=>$jid, status=>$STATUS_ORPHAN, error=>"Unknown $jid exit code, really bad!"});
+                notifystat({id=>$jid, status=>$STATUS_ORPHAN, error=>"Unknown $jid exit code, really bad!", dumped=>1});
             }
 		}
 		closedir D;
@@ -2296,9 +2325,17 @@ sub burp
 {
         my ($f, $dat) = @_;
         my $h = new IO::File;
-        open ($h, ">$f");
-        print $h $dat;
-        close $h;
+        do {
+            eval {
+                open ($h, ">$f.tmp") || die "$f: $!";
+                print $h $dat;
+                close $h;
+                rename("$f.tmp", $f) || die "$f: $!";
+            };
+            if ($@) {   
+                xlog("error",$!);
+            }
+        } while ($@);
 }
 
 sub usage {
@@ -2455,14 +2492,17 @@ sub showhist {
 
     {
             local @ARGV = @_;
-            GetOptions(\%opt, "count|c=i", "user=s","job=i","resubmit","fmt|F=s","long","grep|g=s","dump");
+            GetOptions(\%opt, "count|c=i", "user=s","job=i@","resubmit","fmt|F=s","long","grep|g=s","dump");
             @_=@ARGV;
     }
 
 	if ($_[0] =~ /[a-z]/ && !$opt{user}) {
 		$opt{user} = $_[0]
-	} elsif ($_[0] =~ /^\d+$/) {
-            $opt{job} = $_[0]
+	} else {
+        while ($_[0] =~ /^\d+$/) {
+            push @{$opt{job}}, $_[0];
+            shift;
+        }
     }
 
     my $r;              # the result
@@ -2472,14 +2512,15 @@ sub showhist {
 
     my @J;
 	if ($opt{job}) {
-		my $f = (jhistpath($opt{job}));
-		$J[0]=unpack_file($f);
-
-		my ($jid) = $f =~ /\/(.+)$/;
-		$J[0]->{jid}=$jid;
-
-		my $mtime = (stat($f))[9];
-		$J[0]->{mtime}=$mtime;
+        for (@{$opt{job}}) {
+            my $f = (jhistpath($_));
+            my $t=unpack_file($f);
+            my ($jid) = $f =~ /\/(.+)$/;
+            $t->{jid}=$jid;
+            my $mtime = (stat($f))[9];
+            $t->{mtime}=$mtime;
+            push @J, $t;
+        }
 	} else {
         my $k = 5;
         my @mx = ((-1) x $k);
@@ -2655,6 +2696,7 @@ sub showjobs {
         opendir(D,"$conf{spool}/jobs");
         while(my $jid=readdir(D)) {
 		next if $jid =~ /\.ip$/;
+		next if $jid =~ /\.ok$/;
         my $f = "$conf{spool}/jobs/$jid";
         next unless -f $f;
         my $job = unpack_file($f);
@@ -2684,6 +2726,7 @@ sub showjobs {
 			$job->{stat} = $stat;
 			$job->{cpus} = 1 if ! $job->{cpus};
 			$job->{memory} = $conf{default_memory} if ! $job->{memory};
+			$job->{priority} = $conf{default_priority} if ! $job->{priority};
 			$job->{cmd} = join(' ', @cmd);
 			if ($opt{long}) {
                 $r .= "----------\n";
@@ -3145,9 +3188,15 @@ sub execute_job {
     }
 
     my $pfile = "$conf{spool}/jpids/$opts->{id}";
-    if (!open(PF, ">$pfile")) {
-        xlog($err="Can't create $pfile: $!");
+
+    if (-e $pfile) {
+        xlog($err="Job file $pfile already exists, not executing.");
+    } else {
+        if (!open(PF, ">$pfile")) {
+            xlog($err="Can't create $pfile: $!");
+        }
     }
+
     my $bfile = "$conf{spool}/jstat/$opts->{id}";
     my $tfile = "$bfile.stat";
     my $ifile = "$bfile.job";
@@ -3307,6 +3356,9 @@ sub execute_job {
     $opts->{pid} = $pid;
     print PF packfile($opts);
     close PF;
+
+    # ok we've officially either a) started this job or b) notified of failure at this point....
+    sendcmd_nowait($conf{master}, $conf{port}, 'jexok', { map { $_ => $opts->{$_} } qw/id pid uid gid/ });
 }
 
 sub send_status_for_job {
@@ -3572,6 +3624,7 @@ sub archive_job {
     }
     unlink("$conf{spool}/jobs/$jid:$ip.run");
     unlink("$conf{spool}/jobs/$jid.ip");
+    unlink("$conf{spool}/jobs/$jid.ok");
     unlink("$conf{spool}/jobs/$jid");
     if ($job->{guid}) {
 # can't query by guid anymore, except maybe in a history database
