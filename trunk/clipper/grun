@@ -1002,6 +1002,22 @@ sub process_message {
 			return "Error: invalid node registration info";	
 		}
 		return ();
+	} elsif ($cmd eq 'xedit') {
+		my ($jid, $ed) = @args;
+        if ($ed->{state} =~ /hold|resu/) {
+            my $job = unpack_file("$conf{spool}/jpids/$jid");
+
+            if ($job && $job->{pid}) {
+                my ($sig, $stat);
+                if ($ed->{state} eq 'hold') {
+                    $sig=-19; $stat="susp";
+                } else {
+                    $sig=-18; $stat="";
+                }
+                kill($sig, $job->{pid});
+                sendcmd($conf{master},$conf{master_port}, 'jedit', $job->{id}, state=>$stat);
+            }
+        }
 	} elsif ($cmd eq 'jedit') {
 		my ($jid, %ed) = @args;
         my $fname;
@@ -1014,9 +1030,14 @@ sub process_message {
 				return "Job $jid not found during jedit";
 			} else {
 				my $job_ip = slurp("$conf{spool}/jobs/$jid.ip");
-                # tell client to send an 'xedit' to the running node
-                # needed only for certain edits....think about this
+                # send an 'xedit' to the running node
+                # needed only for certain edits....think about this!
                 $fname = "$conf{spool}/jobs/$jid:$job_ip.run";
+                if ($ed{state} =~ /hold|resu/) {
+                    if ($nodes{$job_ip}) {
+                        sendcmd_nowait($job_ip, $nodes{$job_ip}->{port}, 'xedit', $jid, \%ed);
+                    }
+                }
                 # for now we allow edit-in-place.... for no effect in some cases, but not others
 			}
 		} else {
@@ -1867,8 +1888,6 @@ sub srvexec {
 		}
 	}
 
-
-    # wait for pids
     while ((my $kid = waitpid(-1, WNOHANG))>1) {
         $did=1;	
         child_exit($kid, $?);
@@ -1887,6 +1906,8 @@ sub srvexec {
         $did=1;	
 		opendir(D,"$conf{spool}/jpids") or die "Can't open jpids\n";
 
+        my $mjob;
+        my $oksusp;
 		while(my $jid = readdir(D)) {
 			next unless $jid =~ /^\d/;
             next unless fmodtime("$conf{spool}/jpids/$jid") < time()-$conf{ping_secs};
@@ -1902,6 +1923,23 @@ sub srvexec {
 
             next unless $pid =~ /^\d+$/;
 
+            if ($conf{node}->{avail} < -($conf{node}->{cpus}/2)) {
+                if (!$mjob && ($job->{priority} < $mjob->{priority})) {
+                    $mjob = $job;
+                }
+                ++$oksusp;
+            }
+
+            if ($conf{node}->{avail} > 0) {
+                if ( -e "$conf{spool}/jstat/$job->{id}.held" ) {
+                    kill(-18, $pid);
+	                xlog("note", "Resuming $job->{id}, because node is available");
+	                sendcmd($conf{master},$conf{master_port}, 'jedit', $mjob->{id}, state=>'');
+                    unlink("$conf{spool}/jstat/$job->{id}.held");
+                }
+            }
+
+    # wait for pids
             my $alive = kill(0, $pid);
             if ($alive) {
                 $io_wait{$jid}->{time}=time() if ($io_wait{$jid});
@@ -1912,6 +1950,14 @@ sub srvexec {
             }
 		}
 		closedir D;
+
+        if ($mjob && $oksusp > 1) {
+            kill(-19, $mjob->{pid});
+            touch("$conf{spool}/jstat/$mjob->{id}.held");
+	        xlog("note", "Suspending $mjob->{id}, because node is busy");
+	        sendcmd($conf{master},$conf{master_port}, 'jedit', $mjob->{id}, state=>'susp');
+        }
+        
 		$conf{lastpidtime} = time();
 	}
 }
@@ -2714,7 +2760,10 @@ sub showjobs {
                 # ip file is created at start
                 # run file is updated regularly to prevent orphans
 			    $job->{start} = (stat("$conf{spool}/jobs/$jid.ip"))[9];
-			}
+			    $stat .= ' (S)' if $job->{state} eq 'susp';
+			} else {
+			    $stat = '(S)' if $job->{state} eq 'susp';
+            }
 			# trim for display
             my @cmd = @{$job->{cmd}};
 			for (@cmd) {
@@ -3400,6 +3449,7 @@ sub exec_clean {
         # nobody asked for the job info, so don't keep it around after exec node knows about it
         unlink("$conf{spool}/jpids/$jid");
         unlink("$conf{spool}/jstat/$jid.stat");
+        unlink("$conf{spool}/jstat/$jid.held");
         unlink("$conf{spool}/jstat/$jid.stat-err");
         unlink("$conf{spool}/jstat/$jid.sh");
         unlink("$conf{spool}/jstat/$jid.job");
