@@ -20,7 +20,7 @@ Options (default in parens):
 -M             Only overwrite if newer (requires -x, or multiple files)
 -A             Report all chr sigs, even if there are more than 1000
 -R FIL         RNA-Seq stats output (coverage, 3' bias, etc)
--B             Input is bam, don't bother looking at magic
+-B             Input is bam, dont bother looking at magic
 -x FIL         File extension for multiple files (stats)
 -b INT         Number of reads to sample for per-base stats (1M)
 -S INT         Size of ascii-signature (30)
