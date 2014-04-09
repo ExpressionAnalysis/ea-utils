@@ -165,7 +165,7 @@ public:
 		covr.clear();
 	}
 	struct {
-		int n, mapn, mapzero;		// # of entries, # of mapped entries, 
+		int n, mapn, secondary, mapzero;		// # of entries, # of mapped entries, 
 		int lenmin, lenmax; double lensum, lenssq;	// read length stats
 		double mapsum, mapssq;	// map quality sum/ssq 
 		double nmnz, nmsum;	// # of mismatched reads, sum of mismatch lengths 
@@ -426,6 +426,9 @@ int main(int argc, char **argv) {
 			continue;
 		}
 		fprintf(o, "reads\t%d\n", s.dat.n);
+        if (s.dat.secondary > 0) {
+    		fprintf(o, "secondary\t%d\n", s.dat.secondary);
+        }
 		fprintf(o, "version\t%s.%d\n", VERSION, SVNREV);
 
 		// mapped reads is the number of reads that mapped at least once (either mated or not)
@@ -708,6 +711,9 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
         else
 		    ++dat.nrev;
 
+	if (bits & 256) 
+        ++dat.secondary;            // secondary alignment
+
     // mapping quality mean/stdev
 	dat.mapsum += mapq;
 	dat.mapssq += mapq*mapq;
@@ -884,7 +890,7 @@ bool sstats::parse_sam(FILE *f) {
 		int i;
 		// get # mismatches
 		for (i=S_TAG;i<n;++i){
-			if (d[i] && !strncmp(d[i],"NM:i:",5)) {
+			if (d[i] && !strncasecmp(d[i],"NM:i:",5)) {
 				nm=atoi(&d[i][5]);
 			}
 		}
