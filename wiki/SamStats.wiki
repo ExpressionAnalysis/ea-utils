@@ -24,6 +24,7 @@ Options (default in parens):
 -x FIL         File extension for multiple files (stats)
 -b INT         Number of reads to sample for per-base stats (1M)
 -S INT         Size of ascii-signature (30)
+-z             Don't fail when zero entries in sam
 
 OUTPUT:
 
@@ -41,6 +42,7 @@ Complete Stats:
   mapped bases      : total of the lengths of the aligned reads
   forward           : number of forward-aligned reads
   reverse           : number of reverse-aligned reads
+  secondary         : # of entries with 256-bit set
   snp rate          : mismatched bases / total bases
   ins rate          : insert bases / total bases
   del rate          : deleted bases / total bases
@@ -48,7 +50,7 @@ Complete Stats:
   len <STATS>       : read length stats, ignored if fixed-length
   mapq <STATS>      : stats for mapping qualities
   insert <STATS>    : stats for insert sizes
-  %<CHR>           : percentage of mapped bases per chr, followed by a signature
+  %<CHR>            : percentage of mapped bases per chr, followed by a signature
 
 Subsampled stats (1M reads max):
   base qual <STATS> : stats for base qualities
