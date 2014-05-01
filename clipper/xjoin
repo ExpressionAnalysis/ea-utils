@@ -1,0 +1,546 @@
+#!/usr/bin/perl
+
+use strict;
+use File::Temp;
+use Getopt::Long;
+
+Getopt::Long::Configure qw(pass_through no_ignore_case);
+
+$SIG{INT} = \&sigint;
+$SIG{TERM} = \&sigterm;
+
+my @argv = @ARGV;
+# key1, key2, delimiter, keep 
+my ($q, $k1, $k2) = ('', 1, 1);
+my ($d, $fp, $overwrite, $keep, $presort, $make, $n, $header, $prefix, $multi, $dup, $debug, $uniq);
+my ($hf1, $hf2);
+my $kalt;
+
+# these apply to the whole shebang
+Getopt::Long::Configure qw(permute);
+my @PERMUTE_OPTIONS = ("x"=>\$multi, "debug|D"=>\$debug, "K"=>\$keep, "x"=>\$multi,  "m"=>\$make, "o"=>\$overwrite);
+GetOptions(@PERMUTE_OPTIONS) || die usage();
+
+# these apply to a file
+Getopt::Long::Configure qw(require_order);
+my @ORDERED_OPTIONS = ("k=i"=>\$kalt, "1=i"=>\$k1, "2=i"=>\$k2, "q=s"=>\$q, "d=s"=>\$d, "f"=>\$fp, "s:i"=>\$presort, "p"=>\$prefix, "n"=>\$n, "h:i"=>\$header, "u:i"=>\$uniq, "r=i"=>\$dup);
+
+GetOptions(@ORDERED_OPTIONS) || die usage();
+my $op = shift @ARGV;
+$op=~s/^://;
+
+Getopt::Long::Configure qw(no_pass_through);
+GetOptions(@ORDERED_OPTIONS) || die usage();
+my $f1 = shift @ARGV;
+my $f2 = shift @ARGV;
+
+# remaining options, arguments are stored!
+my @fx = @ARGV;
+
+$k1=$k2=$kalt if ($kalt);
+
+# if file number is not set, then operate on both input files
+$header = 3     if defined($header) && $header==0;
+$uniq = 3       if defined($uniq) && $uniq==0;
+$header = 0     if defined($header) && $header==-1;
+
+# invert the option
+# defined? sort the other,   defined and zero?  sort both (3-0 = 3)
+my $dosort = 3-(0+(defined $presort ? ($presort==0?3:0) : 0));
+
+my $of1=$f1;
+my $of2=$f2;
+
+die "Option -k doesn't make sense with -s or multifile" if (!$dosort && !@fx && !$multi) && $keep;
+die usage() unless $op =~ /^inn?e?r?|exc?l?u?d?e?|xle?f?t?|out?e?r?$|xri?g?h?t?|lef?t?|rig?h?t?/;
+die usage() if !$f2;
+$op = substr($op, 0, 2);
+
+my @tmps;
+my $tmerg;
+if (@fx) {
+    $tmerg = "$f2.tmerg";
+	open(OUT, ">$tmerg") || die "Can't create $f2.tmerg\n";
+} else {
+	*OUT=*STDOUT;
+}
+
+if ($multi && $f1 =~ /\.tmerg$/) {
+	push @tmps, $f1;
+}
+
+my $sortop;
+$sortop .= "-t '$d'" if $d;
+$sortop .= '-n' if $n;
+
+my ($f1hashead, $f2hashead);
+
+($f1, $hf1, $f1hashead) = preproc_file($f1, $k1, $header == 3 || $header == 1, $dosort == 3 || $dosort == 1);
+($f2, $hf2, $f2hashead) = preproc_file($f2, $k2, $header == 3 || $header == 2, $dosort == 3 || $dosort == 2);
+
+warn "# f1:$f1, f2: $f2\n" if $debug;
+
+$d = "\t" if !defined $d;
+
+open(I1, $f1) || die "$f1: $!\n";
+open(I2, $f2) || die "$f2: $!\n";
+
+my (@B1, @B2, $l);
+
+# buffer in
+push @B1, scalar <I1>;
+push @B2, scalar <I2>;
+
+# create "undef" rows for outer/left joins
+# left side is an empty array, with room for the key field
+my $l=$B1[0]; chomp $l;
+my @udt1 = split(/$d/, $l);
+grep {$_=""} @udt1;
+
+# right side is all delimiter
+$l=$B2[0]; chomp $l;
+my @t = split(/$d/, $l);
+splice @t, $k2, 1;                   # don't replicate key field
+my $ud2 = $d x ((scalar @t) - 1);    # undef line 2
+
+if ($f1hashead) {
+    # when you sort, the header gets stripped
+    warn "# discard row 1 file 1\n" if $debug;
+    $hf1=$B1[0]; chomp $hf1;
+    @B1=();
+}
+if ($f2hashead) {
+    # when you sort, the header gets stripped
+    $hf2=$B2[0]; chomp $hf2;
+    warn "# discard row 1 file 2\n" if $debug;
+    @B2=();
+}
+
+if ($debug) {
+    my $nm = $ud2 =~ s/$d/$d/g;
+    warn "# UD2: --$nm delims--\n";
+}
+
+$k1 -= 1;
+$k2 -= 1;
+
+my $outhead = 1;
+$outhead=0 if $op eq 'ex';
+$outhead=1 if $tmerg;
+
+if ($outhead && $header && ($hf1 || $hf2)) {
+    # header line handline
+
+    # header on one side?   mock up the other
+    if ($header==1) {
+        $hf2=$ud2;
+    } elsif ($header == 2) {
+        my $ud1 = join "\t", @udt1;
+        $hf1=$ud1;
+    }
+
+    # pull out key field from header when pasting
+    if ($op !~ /^xl|xr|ex$/) {
+        my @t = split(/$d/, $hf2);
+        splice @t, $k2, 1;
+        $hf2 = join $d, @t;
+    }
+
+    if ($prefix) {
+        # paste only
+        if ($op =~ /^ex|xr|xl/) {
+            die "Option -p makes no sense for 'ex', 'xr' or 'xl'" . ($op eq 'ex' ? ", maybe you mean -f" : "") . "\n";
+        }
+            
+        my $p1 = $f1;
+        my $p2 = $f2;
+
+        # remove path and file extension
+        $p1 =~ s/.*\///;
+        $p2 =~ s/.*\///;
+        $p1 =~ s/\..*$//;
+        $p2 =~ s/\..*$//;
+
+        if (!$multi) {
+            my $cnt=0;
+            if ($op !~ /^ex|xr|xl/) {
+                $hf1 = join $d, map {s/^/$p1\// if $cnt++ != $k1; $_;} split(/$d/, $hf1);
+            }
+        }
+        if ($op !~ /^ex|xr|xl/) {
+            $hf2 = join $d, map {s/^/$p2\//; $_;} split(/$d/, $hf2);
+        }
+    }
+
+    # exclusive?  no header for other file
+    $hf2="" if ($op =~ /^xl$/);
+    $hf1="" if ($op =~ /^xr|ex$/);
+
+    # tab if needed
+    $hf2="\t" . $hf2 if $hf2&&$hf1;
+
+    my $h = "$hf1$hf2\n";
+    if ($fp) {
+        $h="$d$h";
+    }
+    print OUT $h;
+}
+
+if ($fp && !($op eq 'ex')) {
+    die "Option -f only makes sense with ex\n";
+}
+
+my ($l1, $l2, $v1, $v2, @t, $cnt);
+my ($pv1, $pv2, $pl1, $pl2);   # previous values
+my ($fp1);                     # file prefix 1
+
+while(1) {
+    ++$cnt;
+    if (! defined $l1) {
+        $l1 = @B1 ? shift @B1 : <I1>;
+
+        if ($multi && $fp && defined $l1) {
+            $l1 =~ s/^([^$d]+)$d//;
+            $fp1=$1;
+        } else {
+            $fp1=$f1;
+        }
+
+        # left join or inner... stop if run out of left file
+        last if ! defined $l1 && ( $op eq 'in' || $op eq 'xl' || $op eq 'le' );
+
+        if (defined $l1) {
+            chomp $l1;
+            # remove quote chars... this is DUMB... use quoted delim parser Regex::Common
+            @t = split(/$d/, $l1);
+            if ($q) {
+                grep s/^$q(.*)$q$/$1/, @t;
+            }
+            # key field for file 1
+            $v1 = $t[$k1];
+        } else {
+            $v1 = undef;
+        }
+    }
+    if (! defined $l2) {
+        # inner join or right join... stop if run out of right file
+        $l2 = @B2 ? shift @B2 : <I2>;
+        last if ! defined $l2 && ( $op eq 'in' || $op eq 'xr' || $op eq 'ri' );
+        if (defined $l2) {
+            chomp $l2;
+            # remove quote chars... this is DUMB... use quoted delim parser Regex::Common
+            @t = split(/$d/, $l2);
+            if ($q) {
+                grep s/^$q(.*)$q$/$1/, @t;
+            }
+            # key field for file 2
+            $v2 = $t[$k2];
+            if ($op !~ /^ex|xr|xl/) {
+                splice @t, $k2, 1;          # don't replicate key field
+                $l2 = join $d, @t;
+            }
+        } else {
+            $v2 = undef;
+        }
+    }
+
+    # both empty?  done.
+    last if ! defined $l2 && ! defined $l1;
+
+    # numeric sort?
+    my $c = $n ? ($v1 <=> $v2) : ($v1 cmp $v2);
+
+    # undef is always "less than"
+    $c = 1  if ! defined $l1 && defined $l2;
+    $c = -1 if ! defined $l2 && defined $l1;
+
+    # debug process
+    warn "# $v1<=>$v2 : $c\n" if $debug;
+
+    # comparison was equal
+    if ($c == 0) {
+        if ($op eq 'in' || $op eq 'ou' || $op eq 'le' || $op eq 'ri') {
+            # output the rows
+            print OUT $l1, "\t", $l2, "\n";
+        }
+        $pl1=$l1;
+        $pv1=$v1;
+        $pl2=$l2;
+        $pv2=$v2;
+        undef $l1 unless $dup == 2;	 # 1st can contain dups
+        undef $l2 unless $dup == 1;  # 2nd can contain dups
+        next;
+    }
+
+    if ($c > 0) {	# v1 > v2
+        if ($pv1 eq $v2) {
+            if ($uniq==2||$uniq==3) {
+                # skip dup row always
+                undef $l2;
+                next;
+            } else {
+                if ($op eq 'ou' || $op eq 'le' || $op eq 'ri') {
+                    print OUT $pl1, "\t", $l2, "\n";
+                    undef $l2;
+                    next;
+                }
+            }
+        }
+ 
+        if (($uniq==2||$uniq==3) && ($pv2 eq $v2)) { 
+                # no dups in file 2
+        } else {
+            if ($op eq 'ou' || $op eq 'ri') {
+                $udt1[$k1]=$v2;
+                my $ud1 = join "\t", @udt1;
+                print OUT $ud1, "\t", $l2, "\n";
+            }
+            if ($op eq 'ex' || $op eq 'xr') {
+                print OUT ($fp ? "$f2\t" : '') . $l2 . "\n" if defined $l2;
+            }
+        }
+        $pl2=$l2;
+        $pv2=$v2;
+        undef $l2;	# read f2 next
+    }
+    if ($c < 0) {   # v1 < v2
+        # prev would have matched
+        if ($pv2 eq $v1) {
+            if ($uniq==1||$uniq==3) {
+                # skip dup row always
+                undef $l1;
+                next;
+            } else {
+                if ($op eq 'ou' || $op eq 'le' || $op eq 'ri') {
+                    # print pasted dup row
+                    print OUT $l1, "\t", $pl2, "\n";
+                    undef $l1;
+                    next;
+                }
+            }
+        }
+        
+        if (($uniq==1||$uniq==1) && ($pv1 eq $v1)) { 
+            # no dups in file 1
+        } else {
+            if ($op eq 'ou' || $op eq 'le') {
+                print OUT $l1, "\t", $ud2, "\n";
+            }
+            if ($op eq 'ex' || $op eq 'xl') {
+                print OUT ($fp ? "$fp1\t" : '') . $l1 . "\n" if defined $l1;
+            }
+        }
+        $pl1=$l1;
+        $pv1=$v1;
+        undef $l1;      # read f2 next
+    }
+}
+
+if (@fx) {
+	@argv = grep !/^$of1$/, @argv;
+	@argv = grep !/^$of2$/, @argv;
+
+
+    @ARGV = @argv;
+
+    my $pk1=$k1+1;
+
+    $k1=1;
+    $presort=undef;
+
+    # simulate the options processing WITHOUT those files
+    Getopt::Long::Configure qw(pass_through);
+    GetOptions(@PERMUTE_OPTIONS);
+    GetOptions(@ORDERED_OPTIONS);
+    shift @ARGV;            # strip op
+    GetOptions(@ORDERED_OPTIONS);
+
+    my $of3 = shift @ARGV;
+
+
+    GetOptions(@ORDERED_OPTIONS);
+
+    my @addop;
+    if ($k1 == $pk1 & $presort eq undef) {
+        push @addop, "-s=1";
+    }
+
+    if ($of3 =~ /^:(.*)/) {
+        my $nop=$1;
+        $of3 = shift @ARGV;
+        for (my $i=0;$i<@argv;++$i) {
+            # remove :nop
+            if ($argv[$i] eq ":$nop") {
+                splice @argv, $i, 1;
+                last;
+            }
+        }
+        for (my $i=0;$i<@argv;++$i) {
+            if ($argv[$i] eq $op) {
+                splice @argv, $i, 1, $nop;
+                last;
+            }
+        }
+    }
+
+    unshift @argv, @addop;
+
+    my $nox=0;
+    for (my $i=0;$i<@argv;++$i) {
+        if ($argv[$i] eq $of3) {
+            splice @argv, $i, 1, ($tmerg, $of3);
+            last;
+        }
+        if ($argv[$i] eq "-x") {
+            $nox=1;
+        }
+    }
+
+    unshift @argv, "-x" unless $nox;
+
+    warn "# + $0 @argv\n" if $debug;
+    cleanup();
+	exec($0, @argv);
+}
+
+sub sigint {
+	$SIG{INT} = undef;
+	cleanup();
+	kill 2, $$;
+}
+
+sub sigterm {
+    $SIG{TERM} = undef;
+    cleanup();
+    kill 15, $$;
+}
+
+END {
+	cleanup();
+}
+
+sub cleanup  {
+	if (!$keep) {
+        warn "# cleanup @tmps\n" if $debug;
+		for (@tmps) {
+			unlink $_;
+		}
+	}
+}
+
+sub preproc_file {
+    my ($file, $key, $dohead, $dosort) = @_;
+
+    die "Won't overwrite $file.sorted\n" if !$make && -e "$file.sorted" && !$overwrite && $dosort;
+
+    my $head;
+
+    my $of="cat '$file'";
+    # todo... use tee, fifo to handle stream input
+    if ($dohead) {
+        $of.="|tail -n +2";
+        if ($dosort) {
+            $head=`head -n 1 '$file'`;
+        }
+        chomp $head;
+    }
+
+    if (!$make || (stat("$file.sorted"))[9] <= (stat($file))[9]) {
+        $of.="|sort $sortop -k $key,$key" if ($dosort);
+        if ($dosort) {
+            warn("# + $of > '$file.sorted'\n") if $debug;
+            system("$of > '$file.sorted'\n") && exit (1);
+            push @tmps, "$file.sorted";
+        }
+    }
+
+    my $has_head=$dohead;
+    if ($dosort) {
+        $file="$file.sorted";
+        $has_head = 0;
+    }
+
+    return ($file, $head, $has_head);
+}
+
+sub usage {
+<<EOF
+Usage: xjoin [options] [:]<operator> <f1> <f2> [...*]
+
+Joins file 1 and file 2 by the first column, suitable
+for arbitratily large files (disk-based sort).
+
+Operator is one of:
+
+# Pasted ops, combines rows:
+
+  in[ner]   return rows in common
+  le[ft]    return rows in common, left joined
+  ri[ght]   return rows in common, right joined
+  ou[ter]   return all rows, outer joined
+
+# Exclusive (not pasted) ops, only return rows from 1 file:
+
+  ex[clude] return only those rows with nothing in common (see -f)
+  xl[eft]   return left file rows that are not in right file
+  xr[ight]  return right file rows that are not in left file
+  
+Common options:
+
+  -1,-2=N     per file, column number to join on (def 1)
+  -k=N        set the key column to N (for both files)
+  -d    STR   column delimiter (def tab)
+  -q    STR   quote char (def none)
+  -h    [N]   files have headers (optionally, N is the file number)
+  -u    [N]   files may contain duplicate entries, only output first match
+  -s    [N]   files are already sorted, don't sort first
+  -n          numeric sort key columns
+  -p          prefix headers with filename/
+  -f          prefix rows with the input file name (op:ex only)
+
+Debugging options:
+  -D          debug mode
+  -K          keep sorted files (named file.sorted)
+  -o          always overwrite temp files if present (see -k)
+  -m          use make-semantics with sorted files (see -k)
+
+Options -1,-2, -s, -r, -h are optionally file specific.  They can be 
+called with a number.  1 refers to the left file, 2 refers to the right, 
+3 (or a missing number) refers to both, -1 means "turn this option off".
+
+Multi file operation:
+
+More than 2 files will result in multiple pairwise calls to 
+xjoin.  The use of the file-specific options can be confusing.
+
+The base, common case... where all the option stay the same, will 
+not change in future versions.
+
+Multi mode operation:
+
+It's possible to merge two with an inner join, then merge with a left
+join, by sticking a colon-prefixed operator in the file list.   You 
+can also change the options at that time.
+
+EXAMPLE1 (common operation):
+
+    xjoin in file1 file2 file3
+
+EXAMPLE2 (sort is assumed for 3rd file, but not the first 2):
+
+    xjoin in file1 file2 -s file3
+
+EXAMPLE3 (inner join with headers on column 1, then inner join the result using column 3)
+    xjoin in -h test1.txt test2.txt -k 3 test3.txt
+
+EXAMPLE4 (inner join header on first 2, then outer join, no header on first file)
+    xjoin in -h test1.txt test2.txt -h 2 :ou test3.txt
+
+TODO: Restructure the options using a custom parser that allows positional
+options.... perl's GetOpt isn't flexible enough to capture overriding on
+multiple file merges.
+
+EOF
+}
+
+
