@@ -128,6 +128,20 @@ FILE *gzopen(const char *f, const char *m, bool*isgz) {
             h = popen(tmp, m);
             *isgz=1;
             free(tmp);
+        } else if (!strcmp(ext,".dsrc")||!strcmp(ext,".dz")) {
+            char *tmp=(char *)malloc(strlen(f)+100);
+            if (strchr(m,'w')) {
+                    strcpy(tmp, "dsrc c -t1 -s '");
+                    strcat(tmp, f);
+                    strcat(tmp, "'");
+            } else {
+                    strcpy(tmp, "dsrc d -t1 -s '");
+                    strcat(tmp, f);
+                    strcat(tmp, "'");
+            }
+            h = popen(tmp, m);
+            *isgz=1;
+            free(tmp);
         } else {
                 h = fopen(f, m);
                 *isgz=0;
