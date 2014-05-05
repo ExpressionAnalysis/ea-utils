@@ -131,10 +131,12 @@ FILE *gzopen(const char *f, const char *m, bool*isgz) {
         } else if (!strcmp(ext,".dsrc")||!strcmp(ext,".dz")) {
             char *tmp=(char *)malloc(strlen(f)+100);
             if (strchr(m,'w')) {
-                    strcpy(tmp, "dsrc c -t1 -s '");
+                    // default 2x better compression and 3x better speed
+                    strcpy(tmp, "dsrc c -m1 -t1 -s '");
                     strcat(tmp, f);
                     strcat(tmp, "'");
             } else {
+                    // 3x better speed
                     strcpy(tmp, "dsrc d -t1 -s '");
                     strcat(tmp, f);
                     strcat(tmp, "'");
