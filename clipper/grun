@@ -46,6 +46,7 @@ our $VERSION = "0.9.$REVISION";				# 0.10 wil be feature lock, after sql impl.  
 my $STATUS_NEVERRUN=199;
 my $STATUS_ORPHAN=-8;
 my $STATUS_UNKNOWN=-9;
+my $STATUS_EXECERR=-10;
 my $PPID=$$;
 my $WIN32 = ($^O =~ /Win32/);
 my $TIMEFMT = 'command:%C\ncpu-real:%E\ncpu-user:%U\ncpu-sys:%S\nmem-max:%M\nmem-avg:%t\nctx-wait:%w\nfs-in:%I\nfs-out:%O';
@@ -94,7 +95,7 @@ my $context = zmq_init();
 
 my @ORIG_ARGV= @ARGV;
 
-GetOptions("daemon"=>\$daemon, "CONF:s"=>\$config, "trace"=>\$def{trace}, "query"=>\$qinfo, "V"=>\$ver) ||
+GetOptions("daemon"=>\$daemon, "CONF:s"=>\$config, "trace"=>\$def{trace}, "query"=>\$qinfo, "V"=>\$ver, "help"=>\$help) ||
 	die usage();
 
 (print "grun $VERSION\n") && exit(0) if $ver;
@@ -144,6 +145,7 @@ if ($conf{debug_memory}) {
 }
 
 my $gjobid = slurp("$conf{spool}/nextid");
+my $log_to_stderr = 0;
 
 if ($qinfo) {
 # this is the code for grun -q
@@ -153,6 +155,7 @@ if ($qinfo) {
 	GetOptions(\%opt, "silent", "inplace", "hosts=s", "debug") || die usage();
 	my $cmd = shift @ARGV;
 	die usage() if !$cmd;
+    $log_to_stderr = 1 if $opt{debug};
 
 	my @arg = @ARGV;
 	$cmd =~ s/^-//;
@@ -212,7 +215,7 @@ if ($qinfo) {
 			print $ret;
             $ok=1 if $ret;
 		} else {
-            warn ("using local queue status, host $host is $conf{bind}/$conf{hostip}, name is $conf{hostname} \n") if $opt{debug};
+            warn ("Using local queue status, host $host is $conf{bind}/$conf{hostip}, name is $conf{hostname} \n") if $opt{debug};
             my $ret;
 			if ($cmd eq 'stat') {
 				$ret = shownodes(@arg);
@@ -319,7 +322,6 @@ if ($daemon) {
 # client mode
 
 my $make;
-my $log_to_stderr = 0;
 my %sync_after;
 my %sync_before;
 my %sync_already;
@@ -532,7 +534,9 @@ sub grun_client {
         }
     }
     $opt{param} = \%param;
-    $opt{priority} =  $conf{default_priority} if ! $opt{priority};
+
+    $opt{priority} = $ENV{GRUN_PRIORITY}+0 if !$opt{priority} && $ENV{GRUN_PRIORITY} >= 1;
+    $opt{priority} = $conf{default_priority} if !$opt{priority};
 
     # convert memory to kB
     if ($opt{memory}) {
@@ -1250,7 +1254,7 @@ sub process_message {
 		my $job = unpack_file("$conf{spool}/jpids/$jid");
         xlog("debug", "Found job $jid with pid $job->{pid}\n");;
 		if ((my $pid = $job->{pid}) > 1) {
-			$sig = 2 if !$sig;
+            $sig = 2 if $sig !~ /^\d+$/;                # force sig to 2 if not a number
 # kill the whole shebang
 			my $ok = kill(-$sig, $pid);
 			xlog("note", "Kill ($sig) job $jid (pgrp:$pid), return: $ok");
@@ -1272,6 +1276,7 @@ sub process_message {
 	} elsif ($cmd eq 'xio') {
         my ($jid) = @args;
         my $ready = 0;
+        my $known = 0;
         if ($io_wait{$jid} && $io_wait{$jid}->{streams}) {
             # definitely not dumped
             $ready = 1;
@@ -1279,6 +1284,7 @@ sub process_message {
                 replymsg($_, "ready");
             }
             delete $io_wait{$jid}->{streams};
+            $known = 1;
         }
 
         # set wait flag, if i/o wasn't dumped
@@ -1300,7 +1306,8 @@ sub process_message {
                 xlog("debug", "Creating io_wait hash entry for $jid, (E:$end_time, $stat)") unless $io_wait{$jid}->{zid} eq $zid;
                 $io_wait{$jid}->{type} = 'io';
                 $io_wait{$jid}->{zid} = $zid;
-                $io_wait{$jid}->{time} = time();        # toss this entry if it gets old
+                $io_wait{$jid}->{time} = time();        # toss this entry if it gets oldi
+                $known = 1;
             }
         }
 
@@ -1311,8 +1318,14 @@ sub process_message {
             xlog("debug", "Returning $jid:stat for $jid");
             return("$jid:stat", $stat);
         }
-
-        return ();                      # wait forever
+        if (!$known) {
+            # unknown... no iowait, no stat
+            xlog("debug", "Returning $jid:unk for $jid, no io_wait set");
+            return("$jid:unk");
+        } else {
+            # iowait ready
+            return()
+        }
 	} elsif ($cmd eq 'xstat') {
 		my ($jid) = @args;
 
@@ -1972,7 +1985,7 @@ sub fmodtime {
 }
 
 sub notifystat {
-	my ($stat, $from_jstat) = @_;
+	my ($stat, $from_jstat, $nowait) = @_;
 
     confess("stat is required\n") if (!$stat);
 
@@ -2011,7 +2024,11 @@ sub notifystat {
 
     # tell main queue about the status change
     $stat->{replyport}=$conf{port};
-	sendcmd($conf{master},$conf{master_port}, 'jstat', $stat);
+    if ($nowait) {
+    	sendcmd_nowait($conf{master},$conf{master_port}, 'jstat', $stat);
+    } else {
+    	sendcmd($conf{master},$conf{master_port}, 'jstat', $stat);
+    }
 }
 
 # unpack a very simple configuration-style file
@@ -2149,6 +2166,7 @@ sub waitio {
     $|=1;
     my $needio = !$opt->{err}+!$opt->{out};
     my $start_wait=time();
+    my $unk;
     while ((!defined $stat) || $needio) {
         my $got = 0;
         # wait up to 5 seconds for output
@@ -2186,6 +2204,9 @@ sub waitio {
                     $needio = 0;
                 }
                 # what does the client do with the times?
+            } elsif($type eq 'unk') {
+                ++$unk;
+                sleep(1);
             } else {
                 xlog("error", "Job $jobid, got message ($jid, $type, $cmd) in response to xio");
             }
@@ -2197,7 +2218,7 @@ sub waitio {
         if (!$got) {
             # if you didn't get anything, ask again
             $sock = _sendcmd($host, $port, 'xio', $jobid);
-            if (time()>$start_wait+$conf{retry_secs}*10) {
+            if (time()>$start_wait+$conf{retry_secs}*7) {
                 # been a while...ask head node if this job is dead?
                 my %info = waitmsg($conf{master}, $conf{master_port}, 'jinfo', $jobid);
                 if ($info{status} =~ /\d/) {
@@ -2205,6 +2226,13 @@ sub waitio {
                     $err=$info{error};
                     $needio = 0;
                 }
+                if ($unk > 200) {
+                    $stat=$STATUS_UNKNOWN;
+                    $err="Error, job submission failed";
+                    $needio = 0;
+                }
+                # restart wait time
+                $start_wait=time();
             }
         }
     }
@@ -2403,13 +2431,14 @@ EOF
 Execution Options:
     -f|ile FILE     Read FILE for job options (mem, cpu, cmd, etc)
     -m|em INT       memory minimum in MB
-    -c|pu CPUS	    minimum number of cpus 
+    -c|pu CPUS      minimum number of cpus 
     -host N1,N2     specify certain hosts
     -j|obid TEXT    user-supplied job ID
     -v|erbose       print job id, execution node and stats to STDERR
-    -M|make	    only run job if inputs are newer than outputs
+    -M|make         only run job if inputs are newer than outputs
+    -r|priority INT  run job with only run job if inputs are newer than outputs
 
-    -noio           disable io-processing, but wait for completion
+    -noio             disable io-processing, but wait for completion
     -nowait         no io and don't wait, just start the command
     -e|rr FILE      write stderr directly to FILE, no spool *
     -o|ut FILE      write stdout directly to FILE, no spool *
@@ -2425,19 +2454,21 @@ EOF
 	$u .= <<'EOF' if $make;
 Make Semantics:
 
-	%i:file    Input file, left in the command line
-	#i:file    Input file, removed the command line before executing
-	%o:file    Output file, left in the command line
-	#o:file    Output file, removed the command line before executing
-	< file     Input file, left in the command line
-	> file     Output file, left in the command line
+    %i:file    Input file, left in the command line
+    #i:file    Input file, removed the command line before executing
+    %o:file    Output file, left in the command line
+    #o:file    Output file, removed the command line before executing
+    < file     Input file, left in the command line
+    > file     Output file, left in the command line
     %!>file    Output, but don't set as a dependency
 
 For Example:
-	grun "gzip %i:x.foo #o>x.foo.gz"
+    grun "gzip %i:x.foo #o>x.foo.gz"
 
 If a command fails under Make Semantics, the output file(s) will be 
 set to FILE.failed.
+
+NFS sync works better with make semantics.
 
 EOF
 
@@ -2482,7 +2513,7 @@ Common Options:
     -?              Show this help page
 EOF
 
-	$u .= <<'EOF' if defined $config;
+	$u .= <<'EOF' if defined($config) && $config eq '';
 
 Configuration File:
 
@@ -2496,32 +2527,39 @@ Be careful with match code.  It it's slow, it will kill the performance of your 
 
 Common variables:
 
-    master          (localhost) Hostname[:port] of master node
-    spool           (/var/spool/grun) Location for queue & io temp storage
-    log_file	    Location of the log
-    services        Must be 'queue' and/or 'exec'
-    port            Port to listen on (5184)
-    bind[:port]     Address to bind to (0.0.0.0)
-    trace           Turn tracing on for the whole server
+    master            (localhost) Hostname[:port] of master node
+    spool             (/var/spool/grun) Location for queue & io temp storage
+    log_file          Location of the log
+    services          Must be 'queue' and/or 'exec'
+    port              Port to listen on (5184)
+    bind[:port]       Address to bind to (0.0.0.0)
+    trace             Turn tracing on for the whole server
 
 Queue config vars:
 
-    env             (PATH) List of environment varialbes to copy to the processes.  An asterisk (*) means 'ALL'
-    expire_secs     (0) If set, jobs that aren't pinged in time get (failed or retried)
-    expire_action   (retry) Can be 'retry', 'fail'
-    idle_load	    (.3) If load is less than this amount, then considered idle
-    io_keep	    (3600) Time to keep unretrieved stdio files (0=forever)
-    log_file        Where to send "xlog" output
-    pid_file	    (/var/run/grun.pid)
-    ping_secs       (30) Nodes ping the master this often.
-    ping_expire     (2*$ping_secs) Drop a node if it doesn't ping in time
+    env               (PATH) List of environment varialbes to copy to the processes.  An asterisk (*) means 'ALL'
+    expire_secs       (0) If set, jobs that aren't pinged in time get (failed or retried)
+    expire_action     (retry) Can be 'retry', 'fail'
+    idle_load         (.3) If load is less than this amount, then considered idle
+    io_keep           (3600) Time to keep unretrieved stdio files (0=forever)
+    log_file          Where to send "xlog" output
+    pid_file          (/var/run/grun.pid)
+    ping_secs         (30) Nodes ping the master this often.
+    ping_expire       (2*$ping_secs) Drop a node if it doesn't ping in time
+
+Cli vars & defaults:
+
+    nfs_sync          (1) Whether to force-sync the directory cache after a job is run
+    default_cpu       (1) Default cpu reservation
+    default_memory    (1m) Default memory for jobs
+    default_priority  (20) Default priority for jobs
 
 Execution node config vars:
 
-    match           Perl code that must eval to TRUE for a node match
-    full_match      (1) If jobs queue is full, this is evaluated
-    full_exec       If full match returns true, then this command is run
-    wrap            Job command wrapper
+    match             Perl code that must eval to TRUE for a node match
+    full_match        (1) If jobs queue is full, this is evaluated
+    full_exec         If full match returns true, then this command is run
+    wrap              Job command wrapper
     
 EOF
    return $u;
@@ -2555,17 +2593,20 @@ sub showhist {
 
 	my $count = $opt{count}; 
 	$count = 10 if !$count;
-
     my @J;
 	if ($opt{job}) {
         for (@{$opt{job}}) {
             my $f = (jhistpath($_));
-            my $t=unpack_file($f);
-            my ($jid) = $f =~ /\/(.+)$/;
-            $t->{jid}=$jid;
-            my $mtime = (stat($f))[9];
-            $t->{mtime}=$mtime;
-            push @J, $t;
+            if ( -e $f ) {
+                my $t=unpack_file($f);
+                my ($jid) = $f =~ /\/(.+)$/;
+                $t->{jid}=$jid;
+                my $mtime = (stat($f))[9];
+                $t->{mtime}=$mtime;
+                push @J, $t;
+            } else {
+                xlog("error", "History for job $_ requested, but file not found\n");
+            }
         }
 	} else {
         my $k = 5;
@@ -2597,7 +2638,7 @@ sub showhist {
                 for my $jid (@T) {
                     next unless $jid=~/^\d/;
                     my $f = "$conf{spool}/jhist/$mx[$i]/$jid";
-                    my $job=unpack_file($f);
+                    my $job=eval{unpack_file($f)};
                     next unless ref($job);
 
                     # support array/text formats
@@ -2648,6 +2689,8 @@ sub showhist {
         $job{status} = 'OUTOFMEM'	if $job{status} eq 137;
         $job{status} = 'ALTSEGV' 	if $job{status} eq 139;
         $job{stat} = $job{status};
+
+        $job{wait} = $job{usage}->{start_time}-$job{time};
 
         my $cmd = join(' ', @cmd);
         $cmd =~ s/\n\s+/\n/g;
@@ -2759,7 +2802,9 @@ sub showjobs {
                 $job->{host} = $stat;
                 # ip file is created at start
                 # run file is updated regularly to prevent orphans
-			    $job->{start} = (stat("$conf{spool}/jobs/$jid.ip"))[9];
+                if ( -e "$conf{spool}/jobs/$jid.ip" ) {
+    			    $job->{start} = (stat("$conf{spool}/jobs/$jid.ip"))[9];
+                }
 			    $stat .= ' (S)' if $job->{state} eq 'susp';
 			} else {
 			    $stat = '(S)' if $job->{state} eq 'susp';
@@ -3261,8 +3306,8 @@ sub execute_job {
         $err=$!;
         $ret=$?;
     }
-    close(XOUT);
     chown($uid,0,$tfile);
+    # leave the file open for fork
 
     if (!$err && !($pid=fork)) {
         if (! defined $pid) {
@@ -3354,6 +3399,7 @@ sub execute_job {
                 # this frees all ram... yay, finally
                 exec("$GRUN_PATH $confarg -Y $bfile");
                 $err = "Can't exec: $!";
+                $pid=-1;
             } else {
                 eval {
                     # save output
@@ -3381,7 +3427,8 @@ sub execute_job {
     }
 
 # fake pid
-    if ($err && $ret) {
+    if ($err) {
+        $ret = $STATUS_EXECERR if !$ret; 
         $pid = 'e' . $opts->{id};
         xlog("note", "Error '$err' with job $opts->{id}, pid '$pid'");
         my $out = {
@@ -3390,10 +3437,14 @@ sub execute_job {
             error=>$err,
             dumped=>1,
         };
-        # not in a fork... don't need a new conneciton here...but whatever for now
-        send_status_for_job($out);
         print XOUT packfile($out);
         close XOUT;
+
+        xlog("debug", "FILE: $tfile");
+
+        notifystat($out, 1, 1);
+        # special case... exec failed
+        exit 1 if $pid == -1;
     } else {
         xlog("note", "Started job $opts->{id}, pid $pid, '@cmd'") if !$err;
         close XOUT;
@@ -3403,11 +3454,12 @@ sub execute_job {
     }
 
     $opts->{pid} = $pid;
+    $opts->{err} = $err;
     print PF packfile($opts);
     close PF;
 
     # ok we've officially either a) started this job or b) notified of failure at this point....
-    sendcmd_nowait($conf{master}, $conf{port}, 'jexok', { map { $_ => $opts->{$_} } qw/id pid uid gid/ });
+    sendcmd_nowait($conf{master}, $conf{port}, 'jexok', { map { $_ => $opts->{$_} } qw/id pid uid gid err/ });
 }
 
 sub send_status_for_job {
