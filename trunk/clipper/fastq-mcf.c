@@ -225,6 +225,7 @@ int main (int argc, char **argv) {
     bool lowcom_filter = 0;
     float hompol_pct = .92;
     float lowcom_pct = .90;
+    bool keeponlyclip=0;
 
     dupset.set_deleted_key("<>");
 
@@ -261,7 +262,7 @@ int main (int argc, char **argv) {
     meminit(phred_adjust);
 
     int option_index = 0;
-    while (	(c = getopt_long(argc, argv, "-nf0uXUVHSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:D:",long_options,&option_index)) != -1) {
+    while (	(c = getopt_long(argc, argv, "-nf0uXUVHkSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:D:",long_options,&option_index)) != -1) {
 		switch (c) {
 			case '\0':
                 { 
@@ -345,6 +346,7 @@ int main (int argc, char **argv) {
 			case 'm': nmin = atoi(optarg); break;
 			case 'l': nkeep = atoi(optarg); break;
 			case 'L': nmax = atoi(optarg); break;
+			case 'k': keeponlyclip=1; break;
 			case '0': nmax=0; skewpct=0; pctns=0; rmns=0; qthr=0; nkeep=0; ilv3=-1;  break;
 			case 'u': ilv3=1; break;
 			case 'U': ilv3=0; break;
@@ -601,6 +603,7 @@ int main (int argc, char **argv) {
 	int nsampcnt = 0;
     double stat_lowcom_total=0, stat_lowcom_ssq=0, stat_lowcom_b4_total=0, stat_lowcom_b4_ssq=0;
     long stat_lowcom_cnt=0, stat_lowcom_b4_cnt=0;
+    int skipunclip=0;
 
 	for (i=0;i<i_n;++i) {
 
@@ -1168,7 +1171,9 @@ int main (int argc, char **argv) {
 						}
 					}
 				}
-			}
+			
+			int adapcliplen = bestoff_b ? bestoff_b : bestoff_e;
+
 			// lengthen trim based on best level
 			if (bestoff_b > dotrim[f][0])
 				dotrim[f][0]=bestoff_b;
@@ -1180,7 +1185,10 @@ int main (int argc, char **argv) {
 
 //			if (debug > 1) fprintf(stderr,"totclip %d\n", totclip);
 
-			if (totclip > 0) {
+            if (adapcliplen == 0 && keeponlyclip ) {
+                ++skipunclip;
+                skip=1;
+            } else if (totclip > 0) {
                 // keep length > X, X based on mate
                 int tkeep = f == 0 ? nkeep : qf2_min_len > 0 ? qf2_min_len : nkeep;
 
@@ -1192,7 +1200,7 @@ int main (int argc, char **argv) {
 				}
 
 				// count number of adapters clipped, not the number of rows trimmed
-				if (bestoff_b > 0 || bestoff_e > 0) 
+				if ( adapcliplen > 0 )
 					++ntrim[f];
 
 				// save some stats
@@ -1200,8 +1208,7 @@ int main (int argc, char **argv) {
 					cnttrim[f][0]++;
 					tottrim[f][0]+=bestoff_b;
 					ssqtrim[f][0]+=bestoff_b*bestoff_b;
-				}
-				if (bestoff_e > 0) {
+				} else if (bestoff_e > 0) {
 					cnttrim[f][1]++;
 					tottrim[f][1]+=bestoff_e;
 					ssqtrim[f][1]+=bestoff_e*bestoff_e;
@@ -1377,6 +1384,9 @@ int main (int argc, char **argv) {
 	if (nilv3pf > 0) {
 		fprintf(fstat, "Filtered %d reads on purity flag\n", nilv3pf);
 	}
+	if (skipunclip > 0) {
+		fprintf(fstat, "Skipped %d unclipped reads\n", skipunclip);
+	}
 	if (nerr > 0) {
 		fprintf(fstat, "Errors (%s): %d\n", ifil[f], nerr);
 		return 2;
@@ -1456,8 +1466,9 @@ void usage(FILE *f, const char *msg) {
 "    -P N     Phred-scale (auto)\n"
 "    -R       Don't remove N's from the fronts/ends of reads\n"
 "    -n       Don't clip, just output what would be done\n"
-"    -C N     Number of reads to use for subsampling (300k)\n"
+"    -k       Only keep clipped reads\n"
 "    -S       Save all discarded reads to '.skip' files\n"
+"    -C N     Number of reads to use for subsampling (300k)\n"
 "    -d       Output lots of random debugging stuff\n"
 "\n"
 "Quality adjustment options:\n"
