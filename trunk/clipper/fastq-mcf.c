@@ -1470,7 +1470,7 @@ void usage(FILE *f, const char *msg) {
 "    -P N     Phred-scale (auto)\n"
 "    -R       Don't remove N's from the fronts/ends of reads\n"
 "    -n       Don't clip, just output what would be done\n"
-"    -k       Only keep clipped reads\n"
+"    -K       Only keep clipped reads\n"
 "    -S       Save all discarded reads to '.skip' files\n"
 "    -C N     Number of reads to use for subsampling (300k)\n"
 "    -d       Output lots of random debugging stuff\n"
@@ -1487,6 +1487,7 @@ void usage(FILE *f, const char *msg) {
 "    --[mate-]min-len    NUM       Minimum remaining length (same as -l)\n"
 "    --homopolymer-pct   PCT       Homopolymer filter percent (95)\n"
 "    --lowcomplex-pct    PCT       Complexity filter percent (95)\n"
+"    --keep-clipped                Only keep clipped (same as -K)\n"
 "\n"
 "If mate- prefix is used, then applies to second non-barcode read only\n"
 /*
