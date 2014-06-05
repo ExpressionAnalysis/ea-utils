@@ -990,6 +990,7 @@ int main (int argc, char **argv) {
 		int lowcom_seq=0;
 		int lowcom_cnt=0;
 		int f;	
+        bool didclip=0;
 		for (f=0;f<i_n;++f) {
 			dotrim[f][0] = sktrim[f][0];					// default, trim to detected skew levels
 			dotrim[f][1] = sktrim[f][1];
@@ -1189,10 +1190,7 @@ int main (int argc, char **argv) {
 
 //			if (debug > 1) fprintf(stderr,"totclip %d\n", totclip);
 
-            if (adapcliplen == 0 && keeponlyclip ) {
-                ++skipunclip;
-                skip=1;
-            } else if (totclip > 0) {
+            if (totclip > 0) {
                 // keep length > X, X based on mate
                 int tkeep = f == 0 ? nkeep : qf2_min_len > 0 ? qf2_min_len : nkeep;
 
@@ -1204,8 +1202,10 @@ int main (int argc, char **argv) {
 				}
 
 				// count number of adapters clipped, not the number of rows trimmed
-				if ( adapcliplen > 0 )
+				if ( adapcliplen > 0 ) {
 					++ntrim[f];
+                    didclip=1;
+                }
 
 				// save some stats
 				if (bestoff_b > 0) {
@@ -1224,6 +1224,11 @@ int main (int argc, char **argv) {
 					skip = 1;
 			}
 		}
+
+        if (keeponlyclip && !didclip) {
+            ++skipunclip;
+            skip=1;
+        }
 
         int hompol_skip=0;
         if (hompol_filter) {
