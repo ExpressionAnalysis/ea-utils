@@ -34,8 +34,8 @@ for v in $list; do
 	${prog} -l 15 test.fa test2.fq > test2.$v.out 2> test2.$v.err || echo err during 2 $v
 	${prog} -l 15 test.fa test1.fq -o test3.$v.out > test3.$v.err || echo err during 3 $v
 	${prog} -l 15 -L 72 -f test.fa test4.fq1 test4.fq2 -o test4.$v.out -o test4.$v.out2 > /dev/null || echo err during 4 $v
-# check skip saving
-	${prog} -l 15 test.fa test1.fq -S -o test5.$v.out > test5.$v.err || echo err during 5 $v
+# check skip saving & hompol removal
+	${prog} -l 15 -H test.fa test1.fq -S -o test5.$v.out > test5.$v.err || echo err during 5 $v
 # check gzipping
 	${prog} -l 15 test.fa test1.fq -o test6.$v.out.gz > test6.$v.err || echo err during 6 $v
     ${prog} -0 -D 20 n/a test-mcf-dup.fq > test7.$v.out 2> test7.$v.err || echo err during 7 $v
