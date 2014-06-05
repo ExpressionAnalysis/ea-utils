@@ -243,6 +243,7 @@ int main (int argc, char **argv) {
     char *qspec = NULL;
 
     static struct option long_options[] = {
+       {"keep-clipped", 0, 0, 0},
        {"qual-mean", 1, 0, 0},
        {"max-ns", 1, 0, 0},
        {"qual-gt", 1, 0, 0},
@@ -262,13 +263,15 @@ int main (int argc, char **argv) {
     meminit(phred_adjust);
 
     int option_index = 0;
-    while (	(c = getopt_long(argc, argv, "-nf0uXUVHkSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:D:",long_options,&option_index)) != -1) {
+    while (	(c = getopt_long(argc, argv, "-nf0uXUVHKSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:D:",long_options,&option_index)) != -1) {
 		switch (c) {
 			case '\0':
                 { 
                     const char *oname=long_options[option_index].name;
                     if(!strcmp(oname,        "qual-mean")) {
                         qf_mean=qf2_mean=atoi(optarg);
+                    } else if(!strcmp(oname,        "keep-clipped")) {
+                        keeponlyclip=1;
                     } else if(!strcmp(oname, "mate-qual-mean")) {
                         qf2_mean=atoi(optarg);
                     } else if(!strcmp(oname, "homopolymer-pct")) {
@@ -346,7 +349,7 @@ int main (int argc, char **argv) {
 			case 'm': nmin = atoi(optarg); break;
 			case 'l': nkeep = atoi(optarg); break;
 			case 'L': nmax = atoi(optarg); break;
-			case 'k': keeponlyclip=1; break;
+			case 'K': keeponlyclip=1; break;
 			case '0': nmax=0; skewpct=0; pctns=0; rmns=0; qthr=0; nkeep=0; ilv3=-1;  break;
 			case 'u': ilv3=1; break;
 			case 'U': ilv3=0; break;
@@ -1171,7 +1174,8 @@ int main (int argc, char **argv) {
 						}
 					}
 				}
-			
+		    }
+	
 			int adapcliplen = bestoff_b ? bestoff_b : bestoff_e;
 
 			// lengthen trim based on best level
