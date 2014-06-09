@@ -132,7 +132,7 @@ FILE *gzopen(const char *f, const char *m, bool*isgz) {
             char *tmp=(char *)malloc(strlen(f)+100);
             if (strchr(m,'w')) {
                     // default 2x better compression and 3x better speed
-                    strcpy(tmp, "dsrc c -m1 -t2 -s '");
+                    strcpy(tmp, "dsrc c -m0 -t2 -s '");
                     strcat(tmp, f);
                     strcat(tmp, "'");
             } else {
