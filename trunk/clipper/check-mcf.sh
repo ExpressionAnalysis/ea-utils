@@ -38,6 +38,7 @@ for v in $list; do
 	${prog} -l 15 -H test.fa test1.fq -S -o test5.$v.out > test5.$v.err || echo err during 5 $v
 # check gzipping
 	${prog} -l 15 test.fa test1.fq -o test6.$v.out.gz > test6.$v.err || echo err during 6 $v
+# test duplicate removal
     ${prog} -0 -D 20 n/a test-mcf-dup.fq > test7.$v.out 2> test7.$v.err || echo err during 7 $v
 	mv test5.$v.out.skip test5.$v.out
 done
