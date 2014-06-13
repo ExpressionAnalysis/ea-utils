@@ -1,9 +1,9 @@
 #!/bin/bash
 
 set -o xtrace
-g++ fastq-multx.cpp fastq-lib.cpp && ./a.out -v ' ' -l /mnt/scratch/all_barcodes.txt mxtest_2.fastq mxtest_1.fastq mxtest_3.fastq -o n/a -o mxout_%_1.fq.tmp -o mxout_%_2.fq.tmp > t1 2> e1
+g++ fastq-multx.cpp fastq-lib.cpp && ./a.out -v ' ' -l master-barcodes.txt mxtest_2.fastq mxtest_1.fastq mxtest_3.fastq -o n/a -o mxout_%_1.fq.tmp -o mxout_%_2.fq.tmp > t1 2> e1
 
-g++ fastq-multx.cpp fastq-lib.cpp && ./a.out -v ' ' -l /mnt/scratch/all_barcodes.txt mxtest_2.fastq mxtest_1.fastq mxtest_3.fastq -o n/a -o mxout_%_1.fq.tmp.gz -o mxout_%_2.fq.tmp.gz > t2 2> e2
+g++ fastq-multx.cpp fastq-lib.cpp && ./a.out -v ' ' -l master-barcodes.txt mxtest_2.fastq mxtest_1.fastq mxtest_3.fastq -o n/a -o mxout_%_1.fq.tmp.gz -o mxout_%_2.fq.tmp.gz > t2 2> e2
 
 g++ -g fastq-multx.cpp fastq-lib.cpp && ./a.out -g mxtest_2.fastq mxtest_1.fastq mxtest_3.fastq -o mzout_%_1.fq.tmp -o mzout_%_2.fq.tmp > t3 2> e3
 
