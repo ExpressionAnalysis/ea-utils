@@ -62,7 +62,7 @@ if [ $err == 1 ]; then
 else
     rm test?.@(new).@(out|err)
     rm test?.@(new).@(out|err).gz
-    rm a.tmp b.tmp
+    rm -f a.tmp b.tmp
 	echo OK, all tests passed
 	exit 0
 fi
