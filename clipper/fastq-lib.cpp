@@ -103,7 +103,7 @@ FILE *gzopen(const char *f, const char *m, bool*isgz) {
         if (!strcmp(ext,".gz")) {
             char *tmp=(char *)malloc(strlen(f)+100);
             if (strchr(m,'w')) {
-                    strcpy(tmp, "gzip --rsyncable > '");
+                    strcpy(tmp, "gzip -3 --rsyncable > '");
                     strcat(tmp, f);
                     strcat(tmp, "'");
             } else {
