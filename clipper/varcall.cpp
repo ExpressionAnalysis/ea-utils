@@ -77,7 +77,7 @@ double qnorm(double x);
 int rand_round(double x);
 
 // basic utils
-std::vector<char *> split(char* str, const char* delim);
+std::vector<char *> split(char* str, char delim);
 std::string string_format(const std::string &fmt, ...);
 void to_upper(const std::string str);
 void rename_tmp(std::string f);
@@ -781,10 +781,10 @@ int track_readlen[10000];
 
 PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 
-	vector<char *> d=split(line, "\t");
+	vector<char *> d=split(line, '\t');
 
 	if (d.size() < 6) {
-		warn("Can't read pileup : %d fields, need 6 columns\n", (int) d.size());
+		warn("Can't read pileup : %d fields, need 6 columns, line: ---%s---\n", (int) d.size(), line);
 		exit(1);
 	}
 
@@ -1517,7 +1517,7 @@ void PileupVisitor::LoadIndex(const char *path) {
     line l; meminit(l);
     int cnt=0;
     while(read_line(f, l)>0) {
-        vector<char *> d=split(l.s, "\t");
+        vector<char *> d=split(l.s, '\t');
         if (d.size() < 9) {
             warn("File must be a GTF or a BED: '%s'\n", path);
             exit(1);
@@ -1733,6 +1733,20 @@ std::vector<char *> split(char* str,const char* delim)
     {
         result.push_back(token);
         token = strtok(NULL,delim);
+    }
+    return result;
+}
+
+std::vector<char *> split(char* str, char delim)
+{
+    char*p=strchr(str,delim);
+    std::vector<char *> result;
+    while(p != NULL)
+    {
+        *p='\0';
+        result.push_back(str);
+        str=p+1;
+        p=strchr(str,delim);
     }
     return result;
 }
