@@ -84,6 +84,7 @@ void rename_tmp(std::string f);
 
 int errs=0;
 extern int optind;
+int g_lineno=0;
 
 class Noise {
 public:
@@ -745,19 +746,19 @@ void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref) {
 	}
 
     line l; meminit(l);
-	int cnt=0;
+    g_lineno=0;
     if (fin) {
         while(read_line(fin, l)>0) {
+            ++g_lineno;
         //	chr      2       G       6       ^9,^+.^*,^2,^&.^&,      &.'&*-  9+*2&&  166,552,643,201,299,321
             v.Parse(l.s);
-            ++cnt;
         }
         v.Finish();
 
         if (is_popen) pclose(fin); else fclose(fin);
     }
 
-	if (cnt == 0) {
+	if (g_lineno == 0) {
 		warn("No data in pileup, quitting\n");
 		exit(1);
 	}
@@ -784,7 +785,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 	vector<char *> d=split(line, '\t');
 
 	if (d.size() < 6) {
-		warn("Can't read pileup : %d fields, need 6 columns, line: ---%s---\n", (int) d.size(), line);
+		warn("Can't read pileup : %d fields, need 6 columns, line %d\n", (int) d.size(), g_lineno);
 		exit(1);
 	}
 
@@ -1748,6 +1749,8 @@ std::vector<char *> split(char* str, char delim)
         str=p+1;
         p=strchr(str,delim);
     }
+    if (*str) 
+        result.push_back(str);
     return result;
 }
 
