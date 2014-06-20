@@ -87,6 +87,7 @@ struct bc bc[MAX_BARCODE_NUM+1];
 static int bcnt=0;
 
 static int pickmax=0;
+static int pickmax2=0;
 static void *picktab=NULL;
 void pickbest(const void *nodep, const VISIT which, const int depth);
 int bnodecomp(const void *a, const void *b) {return strcmp(((bnode*)a)->seq,((bnode*)b)->seq);};
@@ -585,12 +586,15 @@ int main (int argc, char **argv) {
 
 			++fent->cnt;
 
-			if (fent->cnt > pickmax) pickmax=fent->cnt;
+			if (fent->cnt > pickmax) 
+                pickmax=fent->cnt;
+			else if (fent->cnt > pickmax2) 
+                pickmax2=fent->cnt;
 			
 			if (nr > sampcnt)
 				break;
 		}
-		pickmax=max(1,(int)(pickmaxpct*pickmax));
+		pickmax=max(1,(int)(pickmaxpct*pickmax2));
 		fprintf(stderr, "Threshold used: %d\n", pickmax);
 		twalk(picktab, pickbest);
 	} else {
