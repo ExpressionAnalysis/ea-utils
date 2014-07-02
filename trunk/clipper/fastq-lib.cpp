@@ -29,7 +29,13 @@ int main(int argc, char **argv) {
 #endif
 
 int read_line(FILE *in, struct line &l) {
-        return (l.n = getline(&l.s, &l.a, in));
+        l.n = getline(&l.s, &l.a, in);
+        // win32 support
+        if (l.n && (l.s[l.n-1]=='\r')) {
+            l.s[l.n-1]='\0';
+            --l.n;
+        }
+        return l.n;
 }
 
 int read_fq(FILE *in, int rno, struct fq *fq, const char *name) {
