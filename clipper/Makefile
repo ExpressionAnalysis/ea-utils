@@ -64,7 +64,7 @@ $(PKG).${VER}-${REL}.tar.gz: $(PKG).tar.gz
 	cp $< $@
 
 %: %.cpp fastq-lib.cpp fastq-lib.h
-	$(CC) $(CFLAGS) fastq-lib.cpp -o $@ $<
+	$(CC) $(CFLAGS) $< fastq-lib.cpp -o $@
 
 # why the libbam.a doesn't work?  not sure... *.o works
 sam-stats: sam-stats.cpp samtools/libbam.a samtools/bam.h fastq-lib.h
@@ -76,6 +76,9 @@ endif
 
 samtools/libbam.a: samtools/*.c samtools/*.h
 	cd samtools && make libbam.a
+
+ea-bcl2fastq: ea-bcl2fastq.cpp
+	$(CC) $(CFLAGS) $< -lz -o $@
 
 varcall: varcall.cpp fastq-lib.cpp tidx/tidx-lib.cpp
 ifeq ($(OS),Windows_NT)
