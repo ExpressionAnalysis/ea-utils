@@ -93,7 +93,8 @@ int main (int argc, char **argv) {
 
     unsigned int cluster_start=0;                 // offset into cluster list, ZERO BASED 
     unsigned int cluster_count=0;                 // number of reads to process
-    char *tiles=NULL;               // (if we plan to support hiseq someday)
+    unsigned int output_cluster_count=0;                 // number of reads to process
+    int tile=0;                                   // tile number
     int debug=0;                    // debug flag
     bool usegz=false;
 
@@ -113,7 +114,7 @@ int main (int argc, char **argv) {
 			case 'r': run = optarg; break;
 			case 'l': lane = atoi(optarg); break;
 			case 'o': out = optarg; break;
-			case 't': tiles = optarg; break;
+			case 't': tile = atoi(optarg); break;
 			case 'z': usegz = 1; break;
 			case 'm': 
                     {
@@ -189,6 +190,7 @@ int main (int argc, char **argv) {
 
     fprintf(flog,"Tile path: %s\n", bcipath.c_str());
     fprintf(flog,"Filter path: %s\n", filterpath.c_str());
+    fflush(flog);
 
     FILE *ftnums = fopen(bcipath.c_str(), "r");
 
@@ -206,17 +208,18 @@ int main (int argc, char **argv) {
         uint32_t numclusters;
     } locs_info;
 
-
     // READ LOCS header
     if(!flocs || !fread(&locs_info,sizeof(locs_info),1,flocs)) {
         warn("Locs file is broken, no locations will be output\n");
         if (flocs) fclose(flocs);
         flocs=NULL;
-    } else if (fseek(flocs,cluster_start*8,SEEK_CUR) < 0) {
+    } else if (fseek(flocs,cluster_start*sizeof(float)*2,SEEK_CUR) < 0) {
         warn("Locs is there, but is no good\n");
-        if (flocs) fclose(flocs);
+        fclose(flocs);
         flocs=NULL;
     }
+
+//    printf("TELL LOCS: %ld\n", ftell(flocs));
 
     // READ FILTER header
     bool ok=true;
@@ -249,16 +252,36 @@ int main (int argc, char **argv) {
         fprintf(flog,"Tile numbers invalid at: %u\n", cluster_start);
     }
 
+    // general purpose iterators
+    int i,j;
+
+    if (tile) {
+        unsigned int cur=0;
+        bool ok=false;
+        for(i=0;i<tinfo.size();++i) {
+            if (tinfo[i].tid==tile) {
+                cluster_start=cur;
+                cluster_count=tinfo[i].ccnt;
+                ok=1;
+                break;
+            }
+            cur+=tinfo[i].ccnt;
+        }
+        if (!ok) {
+            die("Tile %d not found\n", tile);
+        }
+    }
+
 //    warn("%d tiles read\n", (int) tinfo.size());
 
     // unsigned 8 bit integer
     if (fseek(ffilter,cluster_start,SEEK_CUR) < 0) {
         die("Can't seek in filter file\n");
     }
+//    printf("TELL FILTER: %ld\n", ftell(ffilter));
 
     vector<cycle>cycles;
     int output_fnum=0;
-    int i,j;
     string outtmp;
     for(i=0;i<masks.size();++i) {
         FILE *fo=NULL;                            // null by default
@@ -442,6 +465,7 @@ int main (int argc, char **argv) {
         // output read(s)
         if (pf != 'Y') {
             // convert tileid, x y to read header
+            output_cluster_count++;
             char *tmpid = pid_after_lane;
             itoa(tileid, tmpid, 10, &tmpid);
             *tmpid++=':';
@@ -482,9 +506,14 @@ int main (int argc, char **argv) {
         if(masks[i].fout && usegz) {
             if (!pclose(masks[i].fout)) {
                 fprintf(flog, "Error : gzip file may be corrupt\n");
+                die("Error : gzip file may be corrupt\n");
             }
         }
     }
+
+    // all ok?
+    fprintf(flog,"Cluster output: %u\n", output_cluster_count);
+    exit(0);
 }
 
 void usage(FILE *f, const char *msg) {
