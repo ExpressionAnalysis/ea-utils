@@ -115,11 +115,12 @@ int main (int argc, char **argv) {
     bool usefile1 = false;
     int phred = 33;
     double threshfactor = 1;
+    int bcinheader = 0;
 
 	int i;
 	bool omode = false;	
 	char *bfil = NULL;
-	while (	(c = getopt (argc, argv, "-Dzxnbeov:m:B:g:L:l:G:q:d:t:")) != -1) {
+	while (	(c = getopt (argc, argv, "-Dzxnhbeov:m:B:g:L:l:G:q:d:t:")) != -1) {
 		switch (c) t:{
 		case '\1': 
                        	if (omode) {
@@ -144,6 +145,7 @@ int main (int argc, char **argv) {
 			}
 			verify = *optarg; break;
 		case 'b': end = 'b'; break;
+		case 'h': bcinheader = 1; usefile1=1; break;
 		case 'e': end = 'e'; break;
 		case 'G': group = optarg; break;
 		case 'g': 
@@ -278,7 +280,8 @@ int main (int argc, char **argv) {
             char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
             char *q = NULL; size_t nq = 0;
 			double tots=0, totsq=0;
-			
+		    char *s2 = NULL; int ns2=0;
+	
 			stat(in[i], &st);
 
 			while (getline(&s, &na, fin[i]) > 0) {
@@ -287,13 +290,40 @@ int main (int argc, char **argv) {
 					exit(1);
 				}
 
-				if ((ns=getline(&s, &na, fin[i])) <=0)
-					break;
+                if (bcinheader) {
+                    // read in 3 more lines (seq, comment, qual) and ignore them
+                    getline(&q, &nq, fin[i]);
+                    getline(&q, &nq, fin[i]);
+                    getline(&q, &nq, fin[i]);
 
-				getline(&q, &nq, fin[i]);
-				getline(&q, &nq, fin[i]);
+                    char *p=strchr(s, ' ');
+                    if (!p) {
+                        fprintf(stderr,"Barcode not in header: %s.\n", in[i]);
+                        exit(1);
+                    }
+                    ns-=(p-s);
+                    s=p;
+                    if (ns > nq) {
+                        q=realloc(q,ns+1);
+                    }
+                    memset(q,'h',ns);
+    				s[--ns]='\0'; q[ns]='\0';
+                    if (p=strchr(s,'+')) {
+                        *p='\0';
+                        ns2=(ns-(p-s)-1);
+                        ns = p-s;
+                        s2=p+1;
+                    }
+                }  else {
+                    // read in 3 more lines (seq, comment, qual)
+                    if ((ns=getline(&s, &na, fin[i])) <=0)
+                        break;
 
-				s[--ns]='\0'; q[ns]='\0';
+                    getline(&q, &nq, fin[i]);
+                    getline(&q, &nq, fin[i]);
+
+    				s[--ns]='\0'; q[ns]='\0';
+                }
 
 // skip if quality is below average
 				if (st.st_size > (sampcnt * 500) && poorqual(i, ns, s, q)) 
@@ -315,11 +345,16 @@ int main (int argc, char **argv) {
 					}
 
 					if (bcg[b].b.dual) {
-						if (!strncasecmp(s, bcg[b].b.dual, bcg[b].b.dual_n)) {
+                        const char * t=s;
+                        int nt=ns;
+                        if (bcinheader) {             // barcode in header? use stuff after '+' sign
+                            t=s2;
+                            nt=ns2;
+                        }
+						if (!strncasecmp(t, bcg[b].b.dual, bcg[b].b.dual_n)) {
 							++bcg[b].dbcnt[i];
                         }
-
-						if (ns >= bcg[b].b.dual_n && !strcasecmp(s+ns-bcg[b].b.dual_n, bcg[b].b.dual)) {
+						if (ns >= bcg[b].b.dual_n && !strcasecmp(t+nt-bcg[b].b.dual_n, bcg[b].b.dual)) {
 							++bcg[b].decnt[i];
                         }
 					}
