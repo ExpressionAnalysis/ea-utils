@@ -44,7 +44,7 @@ getrel:
 $(PKG).spec: $(PKG).spex
 	perl -pe 's/%RELEASE%/${REL}/' $(PKG).spex > $(PKG).spec
 
-$(PKG).tar.gz: Makefile $(TOOLS) $(SRC) $(PKG).spec fastq-lib.cpp fastq-lib.h sam-stats.cpp fastq-stats.cpp gcModel.cpp gcModel.h varcall.cpp utils.h README CHANGES google sparsehash samtools/*.c 
+$(PKG).tar.gz: Makefile $(TOOLS) $(SRC) $(PKG).spec fastq-lib.cpp fastq-lib.h sam-stats.cpp fastq-stats.cpp gcModel.cpp gcModel.h varcall.cpp utils.h README CHANGES google sparsehash-2.0.2 samtools/*.c 
 	rm -rf $(PKG).${VER}-${REL}
 	mkdir $(PKG).${VER}-${REL}
 	mkdir $(PKG).${VER}-${REL}/tidx
@@ -66,8 +66,13 @@ $(PKG).${VER}-${REL}.tar.gz: $(PKG).tar.gz
 %: %.cpp fastq-lib.cpp fastq-lib.h
 	$(CC) $(CFLAGS) $< fastq-lib.cpp -o $@
 
+sparsehash: sparsehash-2.0.2
+	cd sparsehash-2.0.2; ./configure; make
+	mkdir sparsehash
+	cp -r sparsehash-2.0.2/src/sparsehash/ sparsehash/
+
 # why the libbam.a doesn't work?  not sure... *.o works
-sam-stats: sam-stats.cpp samtools/libbam.a samtools/bam.h fastq-lib.h
+sam-stats: sam-stats.cpp samtools/libbam.a samtools/bam.h fastq-lib.h sparsehash
 ifeq ($(OS),Windows_NT)
 	$(CC) $(CFLAGS) samtools/*.o -lz -lpthread -lws2_32 fastq-lib.cpp $< -o $@
 else
@@ -80,14 +85,14 @@ samtools/libbam.a: samtools/*.c samtools/*.h
 ea-bcl2fastq: ea-bcl2fastq.cpp
 	$(CC) $(CFLAGS) $< -lz -o $@
 
-varcall: varcall.cpp fastq-lib.cpp tidx/tidx-lib.cpp
+varcall: varcall.cpp fastq-lib.cpp tidx/tidx-lib.cpp sparsehash
 ifeq ($(OS),Windows_NT)
 	echo varcall: not supported yet
 else
 	$(CC) $(CFLAGS) fastq-lib.cpp tidx/tidx-lib.cpp -o $@ $< -lgsl -lgslcblas
 endif
 
-fastq-stats: fastq-stats.cpp fastq-lib.cpp gcModel.cpp
+fastq-stats: fastq-stats.cpp fastq-lib.cpp gcModel.cpp sparsehash
 	$(CC) $(CFLAGS) fastq-lib.cpp gcModel.cpp -o $@ $<
 
 bam-filter:  bam-filter.cpp 
