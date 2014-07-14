@@ -1,0 +1,54 @@
+#!/usr/bin/perl
+
+use Getopt::Long;
+use IO::Select;
+use IO::File;
+
+die "usage: $0 FIFO-LIST
+
+This allows you to merge multiple fifo outputs without causing a read 
+block on one to prevent reading from the other (deadlock!)
+
+Reads from ANY of the fifos in the list that are 
+available.   If one blocks in the middle of a line, for 
+example, this program will not block.
+" unless @ARGV;
+
+my $i = 0;
+my @findex;
+my @fbuf;
+my $sel= IO::Select->new();
+for my $file (@ARGV) {
+    open($fin[$i],$file) || die "$file: $!\n";;
+    $fin[$i]->blocking(0);
+    $findex[fileno($fin[$i])]=$i;
+    $sel->add($fin[$i]);
+    ++$i;
+}
+
+my $closed = 0;
+while ( @ready = $sel->can_read() ) {
+    for my $h (@ready) {
+        my $ret=sysread($h, $char, 1);
+
+        if ($ret) {
+            my $fn;
+            $fbuf[$fn=fileno($h)] .= $char;
+            if ($char eq "\n") {
+                print $fbuf[$fn];
+                $fbuf[$fn]="";
+            }
+        } else {
+            $sel->remove($h);
+            if (!$h->close()) {
+                die "ERROR during close: $!\n";
+            } else {
+                ++$closed;
+            }
+        }
+    }
+}
+
+if ($closed != @ARGV) {
+        die "ERROR during merge\n";
+}
