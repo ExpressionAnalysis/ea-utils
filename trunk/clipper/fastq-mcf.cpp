@@ -1061,14 +1061,12 @@ int main (int argc, char **argv) {
                     // N's always match everything
                     if (fq[f].seq.s[i] == 'N' || (fq[f].seq.s[i] == fq[f].seq.s[i-1])) {
                         ++lowcom_seq;
-                    } else if (i >= dotrim[f][0]+3) {
-                        if (fq[f].seq.s[i] == fq[f].seq.s[i-2] && fq[f].seq.s[i-1] == fq[f].seq.s[i-3]) {
-                            ++lowcom_seq;
-                        }
-                    } else if (i >= dotrim[f][0]+5) {
-                        if (fq[f].seq.s[i] == fq[f].seq.s[i-3] && fq[f].seq.s[i-1] == fq[f].seq.s[i-4] && fq[f].seq.s[i-3] == fq[f].seq.s[i-5]) {
-                            ++lowcom_seq;
-                        }
+                    } else if (i >= dotrim[f][0]+3 && (fq[f].seq.s[i] == fq[f].seq.s[i-2] && fq[f].seq.s[i-1] == fq[f].seq.s[i-3])) {
+                        ++lowcom_seq;
+                    } else if (i >= dotrim[f][0]+5 && (fq[f].seq.s[i] == fq[f].seq.s[i-3] && fq[f].seq.s[i-1] == fq[f].seq.s[i-4] && fq[f].seq.s[i-2] == fq[f].seq.s[i-5])) {
+                        ++lowcom_seq;
+                    } else if (i >= dotrim[f][0]+7 && (fq[f].seq.s[i] == fq[f].seq.s[i-4] && fq[f].seq.s[i-1] == fq[f].seq.s[i-5] && fq[f].seq.s[i-2] == fq[f].seq.s[i-6] && fq[f].seq.s[i-3] == fq[f].seq.s[i-7])) {
+                        ++lowcom_seq;
                     } 
                     ++lowcom_cnt;
                 }
