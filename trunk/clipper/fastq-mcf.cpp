@@ -211,6 +211,7 @@ int main (int argc, char **argv) {
 	int xmax = -1;
 	float scale = 2.2;
 	int noclip=0;
+        int nreadsout=0;         // max # of reads to output, all by default
 	char end[MAX_FILES]; meminit(end);
 	float skewpct = 2; 			// any base at any position is less than skewpct of reads
 	float pctns = 20;			// any base that is more than 20% n's
@@ -246,6 +247,7 @@ int main (int argc, char **argv) {
        {"keep-clipped", 0, 0, 0},
        {"qual-mean", 1, 0, 0},
        {"max-ns", 1, 0, 0},
+       {"max-output-reads", 1, 0, 'O'},
        {"qual-gt", 1, 0, 0},
        {"min-len", 1, 0, 'l'},
        {"cycle-adjust", 1, 0, 0},
@@ -263,7 +265,7 @@ int main (int argc, char **argv) {
     meminit(phred_adjust);
 
     int option_index = 0;
-    while (	(c = getopt_long(argc, argv, "-nf0uXUVHKSRdbehp:o:l:s:m:t:k:x:P:q:L:C:w:F:D:",long_options,&option_index)) != -1) {
+    while (	(c = getopt_long(argc, argv, "-nf0uXUVHKSRdbehp:o:O:l:s:m:t:k:x:P:q:L:C:w:F:D:",long_options,&option_index)) != -1) {
 		switch (c) {
 			case '\0':
                 { 
@@ -371,6 +373,7 @@ int main (int argc, char **argv) {
 			case 'o': if (!o_n < MAX_FILES) 
 						  ofil[o_n++] = optarg;
 					  break;
+               		case 'O': nreadsout = atoi(optarg); break;
 			case 's': scale = atof(optarg); break;
 			case 'S': skipb = 1; break;
 			case 'i': if (i_n<MAX_FILES)
@@ -923,6 +926,7 @@ int main (int argc, char **argv) {
 	memset(&fq, 0, sizeof(fq));
 
 	int nrec=0;
+	int wrec=0;
 	int nerr=0;
 	int nok=0;
 	int ntooshort=0;
@@ -951,8 +955,8 @@ int main (int argc, char **argv) {
     google::sparse_hash_map <std::string, int>::const_iterator lookup_it;
 
     bool io_ok = true;
-
-	while (read_ok=fin[0].read_fq(nrec, &fq[0])) {
+    while (read_ok=fin[0].read_fq(nrec, &fq[0])) {
+                if (nreadsout && (wrec == nreadsout)) break;
 		for (i=1;i<i_n;++i) {
 			int mok=fin[1].read_fq(nrec, &fq[i]);
 			if (mok != read_ok) {
@@ -1322,6 +1326,7 @@ int main (int argc, char **argv) {
                     io_ok=io_ok&&(fputs(fq[f].qual.s,fout[f])>=0);
                     io_ok=io_ok&&(fputc('\n',fout[f])>=0);
                 }
+	       wrec++;
             } else {
                 if (skipb) saveskip(fskip, i_n, fq);
                 if (skip==2) ++nfiltered;
@@ -1454,6 +1459,7 @@ void usage(FILE *f, const char *msg) {
 "Options:\n"
 "    -h       This help\n"
 "    -o FIL   Output file (stats to stdout)\n"
+"    -O N     Only output the first N records (all)\n"
 "    -s N.N   Log scale for adapter minimum-length-match (2.2)\n"
 "    -t N     %% occurance threshold before adapter clipping (0.25)\n"
 "    -m N     Minimum clip length, overrides scaled auto (1)\n"
@@ -1491,6 +1497,7 @@ void usage(FILE *f, const char *msg) {
 "    --homopolymer-pct   PCT       Homopolymer filter percent (95)\n"
 "    --lowcomplex-pct    PCT       Complexity filter percent (95)\n"
 "    --keep-clipped                Only keep clipped (same as -K)\n"
+"    --max-output-reads   N        Only output first N records (same as -O)\n"
 "\n"
 "If mate- prefix is used, then applies to second non-barcode read only\n"
 /*
