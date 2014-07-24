@@ -1,6 +1,6 @@
 #!/bin/bash
 
-g++ -g -I. fastq-mcf.c fastq-lib.cpp -o fastq-mcf.ex
+g++ -g -I. fastq-mcf.cpp fastq-lib.cpp -o fastq-mcf.ex
 
 ok=/opt/bin/fastq-mcf
 new=./fastq-mcf.ex
