@@ -10,7 +10,7 @@
 #include <limits.h>
 #include <vector>
 #include <string>
-#include <google/sparse_hash_map> // or sparse_hash_set, dense_hash_map, ...
+#include <sparsehash/sparse_hash_map> // or sparse_hash_set, dense_hash_map, ...
 
 #define max(a,b) (a>b?a:b)
 #define min(a,b) (a<b?a:b)

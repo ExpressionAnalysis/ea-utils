@@ -10,7 +10,7 @@
 #include <sys/stat.h>
 #include <search.h>
 #include <limits.h>
-#include <google/sparse_hash_map> // or sparse_hash_set, dense_hash_map, ...
+#include <sparsehash/sparse_hash_map> // or sparse_hash_set, dense_hash_map, ...
 #include <string>
 
 typedef struct line {
