@@ -31,64 +31,115 @@ int main(int argc, char **argv) {
 int read_line(FILE *in, struct line &l) {
         l.n = getline(&l.s, &l.a, in);
         // win32 support
-        if (l.n && (l.s[l.n-1]=='\r')) {
-            l.s[l.n-1]='\0';
+        if (l.n>1 && (l.s[l.n-2]=='\r')) {
+            l.s[l.n-2]='\n';
             --l.n;
+            l.s[l.n]='\0';
         }
         return l.n;
 }
 
+char sempty[1]={'\0'};
+int read_fq_sam(FILE *in, int rno, struct fq *fq, const char *name) {
+    read_line(in, fq->id);
+
+    while (fq->id.s[0] == '@') {
+        // ignore header
+        read_line(in, fq->id);
+    }
+
+    // id in first field    
+    char *p=strchr(fq->id.s, '\t');
+    if (!p) return 0;
+    *p='\0';
+
+
+    // skip next 8 tabs
+    int i;
+    for (i=0;p && *++p && (i<8); ++i) {
+        p=strchr(p,'\t');
+    }
+    if (!p) return 0;
+    // seq in next fieldi
+
+    fq->seq.s=p;
+    p=strchr(p,'\t');
+    if (!p) return 0;
+    *p='\0';
+    fq->seq.n=p-fq->seq.s;
+
+    // qual next
+    fq->qual.s=p+1;
+    p=strchr(fq->qual.s,'\t');
+    if (!p) 
+        p=strchr(fq->qual.s,'\n');
+    if (!p) return 0;
+    *p='\0';
+    fq->qual.n=p-fq->qual.s;
+
+    // fake comment
+    fq->com.s=sempty;
+    fq->com.n=0;
+
+    // mark allocation as pointer
+    fq->seq.a=0;
+    fq->qual.a=0;
+    fq->com.a=0;
+    
+    return 1;
+}
+
 int read_fq(FILE *in, int rno, struct fq *fq, const char *name) {
     read_line(in, fq->id);
-	if (fq->id.s && (*fq->id.s == '>')) {
-		fq->id.s[0] = '@';
-		// read fasta instead
-		char c = fgetc(in);
-		while (c != '>' && c != EOF) {
-			if (fq->seq.a <= (fq->seq.n+1)) {
-				fq->seq.s=(char *)realloc(fq->seq.s, fq->seq.a=(fq->seq.a+16)*2);
-			}
-			if (!isspace(c)) 
-				fq->seq.s[fq->seq.n++]=c;
-			c = fgetc(in);
-		}
-		if (c != EOF) {
-			ungetc(c, in);
-		}
-		// make it look like a fastq
-		fq->qual.s=(char *)realloc(fq->qual.s, fq->qual.a=(fq->seq.n+1));
-		memset(fq->qual.s, 'h', fq->seq.n);
-		fq->qual.s[fq->qual.n=fq->seq.n]=fq->seq.s[fq->seq.n]='\0';
-		fq->com.s=(char *)malloc(fq->com.a=2);
-		fq->com.n=1;
-		strcpy(fq->com.s,"+");
-	} else {
-		read_line(in, fq->seq);
-		read_line(in, fq->com);
-		read_line(in, fq->qual);
-	}
+    if (fq->id.s && (*fq->id.s == '>')) {
+        fq->id.s[0] = '@';
+        // read fasta instead
+        char c = fgetc(in);
+        while (c != '>' && c != EOF) {
+            if (fq->seq.a <= (fq->seq.n+1)) {
+                fq->seq.s=(char *)realloc(fq->seq.s, fq->seq.a=(fq->seq.a+16)*2);
+            }
+            if (!isspace(c)) 
+                fq->seq.s[fq->seq.n++]=c;
+            c = fgetc(in);
+        }
+        if (c != EOF) {
+            ungetc(c, in);
+        }
+        // make it look like a fastq
+        fq->qual.s=(char *)realloc(fq->qual.s, fq->qual.a=(fq->seq.n+1));
+        memset(fq->qual.s, 'h', fq->seq.n);
+        fq->qual.s[fq->qual.n=fq->seq.n]=fq->seq.s[fq->seq.n]='\0';
+        fq->com.s=(char *)malloc(fq->com.a=2);
+        fq->com.n=1;
+        strcpy(fq->com.s,"+");
+    } else {
+        read_line(in, fq->seq);
+        read_line(in, fq->com);
+        read_line(in, fq->qual);
+    }
 
-        if (fq->qual.n <= 0)
-                return 0;
-        if (fq->id.s[0] != '@' || fq->com.s[0] != '+' || fq->seq.n != fq->qual.n) {
-                const char *errtyp = (fq->seq.n != fq->qual.n) ?  "length mismatch" : fq->id.s[0] != '@' ? "no '@' for id" : "no '+' for comment";
-                if (name) {
-                    fprintf(stderr, "Malformed fastq record (%s) in file '%s', line %d\n", errtyp, name, rno*2+1);
-                } else {
-                    fprintf(stderr, "Malformed fastq record (%s) at line %d\n", errtyp, rno*2+1);
-                }
-                return -1;
+    if (fq->qual.n <= 0)
+        return 0;
+    if (fq->id.s[0] != '@' || fq->com.s[0] != '+' || fq->seq.n != fq->qual.n) {
+        const char *errtyp = (fq->seq.n != fq->qual.n) ?  "length mismatch" : fq->id.s[0] != '@' ? "no '@' for id" : "no '+' for comment";
+        if (name) {
+            fprintf(stderr, "Malformed fastq record (%s) in file '%s', line %d\n", errtyp, name, rno*2+1);
+        } else {
+            fprintf(stderr, "Malformed fastq record (%s) at line %d\n", errtyp, rno*2+1);
         }
-        // win32-safe chomp
+        return -1;
+    }
+    // win32-safe chomp
+    fq->seq.s[--fq->seq.n] = '\0';
+    if (fq->seq.s[fq->seq.n-1] == '\r') {
         fq->seq.s[--fq->seq.n] = '\0';
-        if (fq->seq.s[fq->seq.n-1] == '\r') {
-                fq->seq.s[--fq->seq.n] = '\0';
-        }
+    }
+    fq->qual.s[--fq->qual.n] = '\0';
+    if (fq->qual.s[fq->qual.n-1] == '\r') {
         fq->qual.s[--fq->qual.n] = '\0';
-        if (fq->qual.s[fq->qual.n-1] == '\r') {
-                fq->qual.s[--fq->qual.n] = '\0';
-        }
-        return 1;
+    }
+    return 1;
 }
 
 struct qual_str {

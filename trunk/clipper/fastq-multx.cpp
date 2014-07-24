@@ -92,6 +92,12 @@ static void *picktab=NULL;
 void pickbest(const void *nodep, const VISIT which, const int depth);
 int bnodecomp(const void *a, const void *b) {return strcmp(((bnode*)a)->seq,((bnode*)b)->seq);};
 static float pickmaxpct=0.10;
+void getbcfromheader(struct fq *fqin, struct fq *bc, char **s2=NULL, int *ns2=NULL);
+void getbcfromheader(char *s, int *ns, char **s2=NULL, int *ns2=NULL);
+
+int ignore;
+size_t ignore_st;
+
 
 int main (int argc, char **argv) {
 	char c;
@@ -120,7 +126,7 @@ int main (int argc, char **argv) {
 	int i;
 	bool omode = false;	
 	char *bfil = NULL;
-	while (	(c = getopt (argc, argv, "-Dzxnhbeov:m:B:g:L:l:G:q:d:t:")) != -1) {
+	while (	(c = getopt (argc, argv, "-DzxnHhbeov:m:B:g:L:l:G:q:d:t:")) != -1) {
 		switch (c) t:{
 		case '\1': 
                        	if (omode) {
@@ -145,7 +151,8 @@ int main (int argc, char **argv) {
 			}
 			verify = *optarg; break;
 		case 'b': end = 'b'; break;
-		case 'h': bcinheader = 1; usefile1=1; break;
+		case 'h': usage(stdout); exit(0); break;
+		case 'H': bcinheader = 1; usefile1=1; break;
 		case 'e': end = 'e'; break;
 		case 'G': group = optarg; break;
 		case 'g': 
@@ -284,7 +291,7 @@ int main (int argc, char **argv) {
 	
 			stat(in[i], &st);
 
-			while (getline(&s, &na, fin[i]) > 0) {
+			while ((ns=getline(&s, &na, fin[i])) > 0) {
 				if (*s != '@')  {
 					fprintf(stderr,"Invalid fastq file: %s.\n", in[i]);
 					exit(1);
@@ -292,37 +299,25 @@ int main (int argc, char **argv) {
 
                 if (bcinheader) {
                     // read in 3 more lines (seq, comment, qual) and ignore them
-                    getline(&q, &nq, fin[i]);
-                    getline(&q, &nq, fin[i]);
-                    getline(&q, &nq, fin[i]);
-
-                    char *p=strchr(s, ' ');
-                    if (!p) {
-                        fprintf(stderr,"Barcode not in header: %s.\n", in[i]);
-                        exit(1);
-                    }
-                    ns-=(p-s);
-                    s=p;
-                    if (ns > nq) {
-                        q=realloc(q,ns+1);
+                    ignore=getline(&q, &ignore_st, fin[i]);
+                    ignore=getline(&q, &ignore_st, fin[i]);
+                    nq=getline(&q, &ignore_st, fin[i]);
+                    getbcfromheader(s, &ns, &s2, &ns2);
+                    if (nq < ns) {
+                        q=(char*)realloc(q,ns+1);
+                        nq=ns;
                     }
                     memset(q,'h',ns);
-    				s[--ns]='\0'; q[ns]='\0';
-                    if (p=strchr(s,'+')) {
-                        *p='\0';
-                        ns2=(ns-(p-s)-1);
-                        ns = p-s;
-                        s2=p+1;
-                    }
+                    q[nq=ns]='\0';
                 }  else {
                     // read in 3 more lines (seq, comment, qual)
                     if ((ns=getline(&s, &na, fin[i])) <=0)
                         break;
 
-                    getline(&q, &nq, fin[i]);
-                    getline(&q, &nq, fin[i]);
+                    ignore=getline(&q, &ignore_st, fin[i]);
+                    nq=getline(&q, &ignore_st, fin[i]);
 
-    				s[--ns]='\0'; q[ns]='\0';
+    				s[--ns]='\0'; q[--nq]='\0';
                 }
 
 // skip if quality is below average
@@ -542,15 +537,24 @@ int main (int argc, char **argv) {
 
 // small sample to get lengths
 		double tots=0, totsq=0;
-		while (getline(&s, &na, gin) > 0) {
+		while ((ns=getline(&s, &na, gin)) > 0) {
 			if (*s != '@')  {
 				fprintf(stderr,"Invalid fastq file: %s.\n", in[0]);
 				exit(1);
 			}
-			if ((ns=getline(&s, &na, gin)) <=0)
-				break;
-			getline(&q, &nq, gin);
-			getline(&q, &nq, gin);
+
+            if (bcinheader) {
+                    ignore=getline(&q, &ignore_st, fin[i]);
+                    ignore=getline(&q, &ignore_st, fin[i]);
+                    ignore=getline(&q, &ignore_st, fin[i]);
+                    getbcfromheader(s, &ns);
+            } else {
+                if ((ns=getline(&s, &na, gin)) <=0)
+                    break;
+                ignore=getline(&q, &ignore_st, gin);
+                ignore=getline(&q, &ignore_st, gin);
+            }
+
 			--ns;
 			tots+=ns;
 			totsq+=ns*ns;
@@ -578,18 +582,25 @@ int main (int argc, char **argv) {
 		pickmax=0;
 		picktab=NULL;
 		bnode * ent = NULL;
-        while (getline(&s, &na, gin) > 0) {
+        while ((ns=getline(&s, &na, gin)) > 0) {
 			if (*s != '@')  {
 				fprintf(stderr,"Invalid fastq file: %s.\n", in[i]);
 				exit(1);
 			}
 
-			if ((ns=getline(&s, &na, gin)) <=0)
-				break;
+            if (bcinheader) {
+                ignore=getline(&q, &ignore_st, fin[i]);
+                ignore=getline(&q, &ignore_st, fin[i]);
+                ignore=getline(&q, &ignore_st, fin[i]);
+                getbcfromheader(s, &ns);
+            } else {
+                if ((ns=getline(&s, &na, gin)) <=0)
+                    break;
 
-			getline(&q, &nq, gin);
-			if (getline(&q, &nq, gin) != ns)
-				break;
+                ignore=getline(&q, &ignore_st, gin);
+                if (getline(&q, &ignore_st, gin) != ns)
+                    break;
+            }
 
 			s[--ns]='\0'; q[ns]='\0';
 
@@ -676,6 +687,10 @@ int main (int argc, char **argv) {
 
 	// for whatever reason, the end is not supplied... easy enough to determine accurately
 	// or it's dual... which means we need to resample stuff
+    if (bcinheader && !end) {
+        end = 'b';
+    }
+
     if (end == '\0' || dual) {
         for (i=0;i<f_n;++i) {
             if (!gzin[i])
@@ -819,8 +834,9 @@ int main (int argc, char **argv) {
 
     // don't trim if you're not outputting the read
 
-	struct fq fq[6];	
-        meminit(fq);
+	struct fq fq[8];
+
+    meminit(fq);
 
 	int nrec=0;
 	int nerr=0;
@@ -860,16 +876,25 @@ int main (int argc, char **argv) {
 
 		int i, best=-1, bestmm=mismatch+distance+1, bestd=mismatch+distance+1, next_best=mismatch+distance*2+1;
 
+        if (bcinheader) {
+            for (i=f_n-1;i>=0;--i) {
+                fq[i+(dual?2:1)]=fq[i];
+            }
+            meminit(fq[0]); 
+            if (dual) {
+                meminit(fq[1]); 
+                getbcfromheader(&fq[2], &fq[0], &fq[1].seq.s, &fq[1].seq.n);
+            } else {
+                getbcfromheader(&fq[2], &fq[0]);
+            }
+        }
+
 		if (debug) {
 			fq[0].id.s[fq[0].id.n-1] = '\0';
 			fprintf(stderr, "id: %s, seq: %s %d", fq[0].id.s, fq[0].seq.s, fq[0].seq.n);
 			if (dual) fprintf(stderr, ", sdual: %s %d", fq[1].seq.s, fq[1].seq.n);
 			fq[0].id.s[fq[0].id.n] = '\n';
 			if (debug > 1) printf("\n");
-            if (!memcmp(fq[0].id.s, "HWI-ST1000:199:C0KG2ACXX:6:1101:1497:1878",41)) {
-                printf("HERE %d\n", debug);
-                exit(0);
-            }	
 		}
 
         if (quality > 0) {
@@ -974,8 +999,15 @@ int main (int argc, char **argv) {
 
 		++bc[best].cnt;
 
-		for (i=0;i<f_n;++i) {
-			FILE *f=bc[best].fout[i];
+        int shift_index=0;
+        if (bcinheader) {
+            shift_index = 1;
+            if (dual) 
+                shift_index = 2;
+        }
+
+		for (i=shift_index;i<f_n+shift_index;++i) {
+			FILE *f=bc[best].fout[i-shift_index];
 			if (!f) continue;
             if (!trimmed) {
 			    // todo: capture always, not just when trim is off
@@ -1124,3 +1156,52 @@ void usage(FILE *f) {
 "-q N        Require a minimum phred quality of N to accept a barcode base (0)\n"
 	,VERSION,SVNREV);
 }
+
+void getbcfromheader(struct fq *fq, struct fq *bc, char **s2, int *ns2) {
+    // reallocate bc to match fq
+    bc->seq.s=(char *)realloc(bc->seq.s,fq->id.n+1);
+    strncpy(bc->seq.s,fq->id.s,fq->id.n+1);
+    bc->seq.n=fq->id.n;
+    bc->seq.a=fq->id.n+1;
+    getbcfromheader(bc->seq.s, &(bc->seq.n), s2, ns2);
+    bc->qual.s=(char *)realloc(bc->qual.s,bc->seq.n);
+    memset(bc->qual.s,'h',bc->seq.n);
+    bc->qual.n=bc->seq.n;
+}
+
+// looks for barcode in s, totally replaces s with barcode only, sets ns to length
+void getbcfromheader(char *s, int *ns, char **s2, int *ns2) {
+    char *p=strchr(s, ' ');
+    if (!p) {
+        fprintf(stderr,"Barcode not in header: %s.\n", s);
+        exit(1);
+    }
+
+    char *t;
+    while(t=strchr(p,':')) {
+        p=t+1;
+    }
+
+    if (s[*ns-1] == '\n') {
+        --*ns;
+        s[*ns]='\0';
+    }
+
+    *ns-=(p-s);
+    memmove(s,p+1,*ns);
+    s=p;
+    s[*ns]='\0';
+
+    if (p=strchr(s,'+')) {
+        *p='\0';
+        *ns = p-s;
+
+        if (ns2) {
+            *ns2=(*ns-((int)(p-s))-1);
+            *s2=p+1;
+        } else {
+            // ERROR: maybe die here?   Or assume the user knows what's up?
+        }
+    }
+}
+

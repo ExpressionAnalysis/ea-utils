@@ -84,6 +84,7 @@ const char *fext(const char *f);
 // read fq
 int read_line(FILE *in, struct line &l);                // 0=done, 1=ok, -1=err+continue
 int read_fq(FILE *in, int rno, struct fq *fq, const char *name=NULL);          // 0=done, 1=ok, -1=err+continue
+int read_fq_sam(FILE *in, int rno, struct fq *fq, const char *name=NULL);          // 0=done, 1=ok, -1=err+continue
 void free_fq(struct fq *fq);
 
 // open a file, possibly gzipped, exit on failure
