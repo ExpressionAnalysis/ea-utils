@@ -101,7 +101,7 @@ std::string arg2cmdstr(int argc, char** argv);
 // phred used
 char phred = 0;
 
-sparsehash::sparse_hash_map <std::string, int> dupset;
+google::sparse_hash_map <std::string, int> dupset;
 int dupmax = 40000000;              // this should be configurable, but right now it isn't
 int max_in_buffer = 2400000;
 
@@ -952,7 +952,7 @@ int main (int argc, char **argv) {
         fin[i].reset();
 	}
 
-    sparsehash::sparse_hash_map <std::string, int>::const_iterator lookup_it;
+    google::sparse_hash_map <std::string, int>::const_iterator lookup_it;
 
     bool io_ok = true;
     while (read_ok=fin[0].read_fq(nrec, &fq[0])) {
