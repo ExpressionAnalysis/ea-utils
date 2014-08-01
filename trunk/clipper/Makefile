@@ -69,7 +69,7 @@ $(PKG).${VER}-${REL}.tar.gz: $(PKG).tar.gz
 sparsehash: sparsehash-2.0.2
 	cd sparsehash-2.0.2; ./configure; make
 	mkdir sparsehash
-	cp -r sparsehash-2.0.2/src/sparsehash/ sparsehash/
+	cp -r sparsehash-2.0.2/src/sparsehash/* sparsehash/
 
 # why the libbam.a doesn't work?  not sure... *.o works
 sam-stats: sam-stats.cpp samtools/libbam.a samtools/bam.h fastq-lib.h sparsehash
