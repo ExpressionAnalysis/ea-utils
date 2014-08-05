@@ -86,6 +86,35 @@ int errs=0;
 extern int optind;
 int g_lineno=0;
 
+class Faidx {
+public:
+    typedef struct {
+        int len;
+        long long offset;
+        int line_blen;
+        int line_len;
+    } Faient;
+
+    sparse_hash_map<string, Faient> faimap;
+
+    string fa_n;
+    FILE *fa_f;
+
+    Faidx() {fa_f=NULL;};
+    void Load(const char *path);                    // open file, read fai
+
+    // read into buffer
+    bool Fetch(char *buf, const string &chr, int pos_from, int pos_to) {
+        Fetch(buf, Chrdex(chr), pos_from, pos_to);
+    };
+
+    // read into buffer, with cached Chrdex
+    bool Fetch(char *buf, const Faient *ent, int pos_from, int pos_to);
+    const Faient * Chrdex(const string &chr) {
+        return &(faimap[chr]);
+    }
+};
+
 class Noise {
 public:
 	Noise() {noise=0;depth=0;};
@@ -113,10 +142,10 @@ public:
 
 class vcall {
 public:
-    vcall() {base='\0'; mn_qual=mq0=fwd=rev=qual=is_ref=qual_ssq=mq_sum=mq_ssq=tail_rev=tail_fwd=0;}
+    vcall() {base='\0'; mn_qual=mq0=fwd=rev=qual=is_ref=qual_ssq=mq_sum=mq_ssq=tail_rev=tail_fwd=fwd_q=rev_q=0;}
     char base;
 	bool is_ref;
-    int qual, fwd, rev, mq0, mn_qual, qual_ssq, mq_sum, mq_ssq, tail_rev, tail_fwd;
+    int qual, fwd, rev, mq0, mn_qual, qual_ssq, mq_sum, mq_ssq, tail_rev, tail_fwd, fwd_q, rev_q;
 	vector <string> seqs;
     int depth() const {return fwd+rev;}
     int mq_rms() const {return sqrt(mq_ssq/depth());}
@@ -211,7 +240,7 @@ class VarStatVisitor : public PileupVisitor {
 class VarCallVisitor : public PileupVisitor {
 
     deque<PileupSummary> Win;
-    void VisitX(PileupSummary &dat);
+    void VisitX(PileupSummary &dat, int windex);
 
     public:
     int WinMax;
@@ -255,10 +284,12 @@ int read_tail_len=4;
 int min_idepth=3;
 int no_baq=0;
 double zygosity=.5;		        // set to .1 for 1 10% admixture, or even .05 for het/admix
+bool output_ref=0;              // set to 1 if you want to output reference-only positions
 
 void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref);
+void check_ref_fai(const char * ref);
 
-FILE *noise_f=NULL, *var_f = NULL, *varsum_f = NULL, *tgt_f = NULL, *tgtsum_f = NULL, *vcf_f = NULL, *eav_f=NULL;
+FILE *noise_f=NULL, *var_f = NULL, *varsum_f = NULL, *tgt_f = NULL, *tgtsum_f = NULL, *vcf_f = NULL, *eav_f=NULL, *cse_f=NULL;
 
 double alpha=.05;
 int phred=33;
@@ -273,13 +304,28 @@ FILE *openordie(const char *path, const char *mode) {
     return f;
 }
 
+int str_in(const char *needle, const char **haystack) {
+    int i=-1;
+    while (*haystack) {
+        ++i;
+        if (!strcasecmp(needle, *haystack)) {
+            return i;
+        }
+        ++haystack;
+    }
+    return -1;
+}
+
+
+Faidx faidx;
+
 int main(int argc, char **argv) {
 	char c;
 	const char *noiseout=NULL;
 	const char *ref=NULL;
 	optind = 0;
 	int umindepth=0;
-	int uminadepth=0;
+	int uminadepth=-1;
 	int uminidepth=0;
 	double upctqdepth=0;
 	int do_stats=0;
@@ -289,7 +335,11 @@ int main(int argc, char **argv) {
     char *target_annot = NULL;
     char *read_stats = NULL;
 
-	while ( (c = getopt_long(argc, argv, "?svVBhe:m:N:x:f:p:a:g:q:Q:i:o:D:R:b:L:S:",NULL,NULL)) != -1) {
+
+#define MAX_F 20
+    const char *format_list[MAX_F]={"var", "eav", "noise", "varsum", NULL};
+
+	while ( (c = getopt_long(argc, argv, "?svVBhe:m:N:x:f:p:a:g:q:Q:i:o:D:R:b:L:S:F:",NULL,NULL)) != -1) {
 		switch (c) {
 			case 'h': usage(stdout); return 0;
 			case 'm': umindepth=atoi(optarg); break;
@@ -322,6 +372,14 @@ int main(int argc, char **argv) {
 			case 's': do_stats=1; break;
 			case 'S': read_stats=optarg; break;
 			case 'v': do_varcall=1; break;
+			case 'F': {
+                char *tok, *saved; int i=0;
+                for (tok = strtok_r(optarg, "%", &saved); tok && i < MAX_F; tok = strtok_r(NULL, " ,", &saved)) {
+                    format_list[i++]=tok;
+                }
+                format_list[i]=NULL;
+                break;
+            }
 			case '?':
 					  if (!optopt) {
 						  usage(stdout); return 0;
@@ -351,13 +409,28 @@ int main(int argc, char **argv) {
         }
 
         var_f = openordie(string_format("%s.var.tmp", out_prefix).c_str(), "w");
-        vcf_f = openordie(string_format("%s.vcf.tmp", out_prefix).c_str(), "w");
-        eav_f = openordie(string_format("%s.eav.tmp", out_prefix).c_str(), "w");
-        noise_f = openordie(string_format("%s.noise.tmp", out_prefix).c_str(), "w");
         varsum_f = openordie(string_format("%s.varsum.tmp", out_prefix).c_str(), "w");
+
+        if (str_in("vcf", format_list)>=0) {
+            vcf_f = openordie(string_format("%s.vcf.tmp", out_prefix).c_str(), "w");
+        }
+        if (str_in("eav", format_list)>=0) {
+            eav_f = openordie(string_format("%s.eav.tmp", out_prefix).c_str(), "w");
+        }
+
+// This is a stats-only output for now
+//        if (str_in("noise", format_list)>=0) {
+//            noise_f = openordie(string_format("%s.noise.tmp", out_prefix).c_str(), "w");
+//        }
+
         if (target_annot) {
             tgt_f = openordie(string_format("%s.tgt.tmp", out_prefix).c_str(), "w");
             tgtsum_f = openordie(string_format("%s.tgtsum.tmp", out_prefix).c_str(), "w");
+        }
+        if (str_in("cse", format_list)>=0) {
+            check_ref_fai(ref);
+            cse_f = openordie(string_format("%s.cse.tmp", out_prefix).c_str(), "w");
+            faidx.Load(ref);
         }
     } else {
         var_f = stdout;
@@ -533,12 +606,16 @@ int main(int argc, char **argv) {
 	if (do_varcall) {
 		if (umindepth) min_depth=umindepth;
 		if (upctqdepth > 0) pct_qdepth=(double)upctqdepth/100;
-		if (uminadepth) min_adepth=uminadepth;
+		if (uminadepth>=0) min_adepth=uminadepth;
 		if (uminidepth) min_idepth=uminidepth;
 
 		if (!min_depth || (!pct_depth  && !pct_qdepth)) {
 			fprintf(varsum_f,"warning\toutputting all variations, no minimum depths specified\n");
 		}
+
+        if (pct_qdepth==0.0 && !min_adepth) {
+            output_ref=1;
+        }
 
 		fprintf(varsum_f,"version\tvarcall-%s.%d\n", VERSION, SVNREV);
 		fprintf(varsum_f,"min depth\t%d\n", min_depth);
@@ -555,7 +632,9 @@ int main(int argc, char **argv) {
 
 		VarCallVisitor vcall;
 
-        if (repeat_filter > 0) {
+        if (cse_f) {
+            vcall.WinMax=21;
+        } else if (repeat_filter > 0) {
 		    fprintf(varsum_f,"homopolymer filter\t%d\n", repeat_filter);
             vcall.WinMax=repeat_filter+repeat_filter+3;
         } else {
@@ -565,6 +644,9 @@ int main(int argc, char **argv) {
         if (vcf_f) {
             // print VCF header
             fprintf(vcf_f, "%s\n", "##fileformat=VCFv4.1");
+        }
+        if (cse_f) {
+            fprintf(cse_f, "Chr\tPos\tRef\tA\tC\tG\tT\ta\tc\tg\tt\tAq\tCq\tGq\tTq\taq\tcq\tgq\ttq\tRefAllele\n");
         }
 
 		parse_bams(vcall, in_n, in, ref);
@@ -579,19 +661,22 @@ int main(int argc, char **argv) {
 
         if (out_prefix) {
             fclose(var_f);
-            fclose(vcf_f);
-            fclose(eav_f);
-            fclose(noise_f);
             fclose(varsum_f);
+            if (vcf_f) fclose(vcf_f);
+            if (eav_f) fclose(eav_f);
+            if (noise_f) fclose(noise_f);
+            if (cse_f) fclose(cse_f);
             if (target_annot) {
                 fclose(tgt_f);
                 fclose(tgtsum_f);
             }
             rename_tmp(string_format("%s.var.tmp", out_prefix));
-            rename_tmp(string_format("%s.vcf.tmp", out_prefix));
-            rename_tmp(string_format("%s.eav.tmp", out_prefix));
-            rename_tmp(string_format("%s.noise.tmp", out_prefix));
             rename_tmp(string_format("%s.varsum.tmp", out_prefix));
+            if (vcf_f) rename_tmp(string_format("%s.vcf.tmp", out_prefix));
+            if (eav_f) rename_tmp(string_format("%s.eav.tmp", out_prefix));
+            if (cse_f) rename_tmp(string_format("%s.cse.tmp", out_prefix));
+            if (noise_f) rename_tmp(string_format("%s.noise.tmp", out_prefix));
+
             if (target_annot) {
                 rename_tmp(string_format("%s.tgt.tmp", out_prefix));
                 rename_tmp(string_format("%s.tgtsum.tmp", out_prefix));
@@ -695,19 +780,7 @@ void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref) {
 	FILE *fin;
 
 	if (bam_n) {
-        if (!ref) {
-            warn("Need a reference file (-f) parameter, try -h for help\n");
-            exit(1);
-        }
-
-        if (!hasdata(string(ref)+".fai")) {
-            int ret=system(string_format("samtools faidx '%s'", ref).c_str());
-            if (ret) {
-                warn("Need a %s.fai file, run samtools faidx\n", ref);
-                exit(1);
-            }
-        }
-
+        check_ref_fai(ref);
 
 		const char *nobaq = no_baq ? "-B" : "";
 
@@ -890,8 +963,10 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 
 			if ( o == ',' || o == 'a' || o == 'c' || o == 't' || o == 'g' ) {
 				++Calls[j].rev;
+				Calls[j].rev_q += q;
 			} else if ( c != 'N' ) {
 				++Calls[j].fwd;
+				Calls[j].fwd_q += q;
 			}
 
 			Calls[j].qual+=q;
@@ -941,8 +1016,10 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
                 }
                 if ( o == ',' || o == 'a' || o == 'c' || o == 't' || o == 'g' ) {
                     ++Calls[j].rev;
+                    Calls[j].rev_q+=q;
                 } else {
                     ++Calls[j].fwd;
+                    Calls[j].fwd_q+=q;
                 }
                 Calls[j].qual+=q;
                 Calls[j].mn_qual+=min(q, mq);
@@ -1011,7 +1088,7 @@ PileupSummary JunkSummary;
 void VarCallVisitor::Visit(PileupSummary &p) {
     if (WinMax < 3) {
         // no real window ... just go straight
-        VisitX(p);
+        VisitX(p, -1);
         return;
     }
 
@@ -1137,7 +1214,7 @@ void VarCallVisitor::Visit(PileupSummary &p) {
         }
     }
 
-    VisitX(Win[vx]);
+    VisitX(Win[vx], vx);
 }
 
 void VarCallVisitor::Finish() {
@@ -1145,11 +1222,11 @@ void VarCallVisitor::Finish() {
     int vx = WinMax/2+1;
     while (vx < Win.size()) {
         ///debug("Finish: %d\n", Win[vx].Pos);
-        VisitX(Win[vx++]);
+        VisitX(Win[vx++], vx);
     }
 }
 
-void VarCallVisitor::VisitX(PileupSummary &p) {
+void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
     //debug("VisitX: %d\n", p.Pos);
 
 	if (debug_xpos) {
@@ -1178,6 +1255,40 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 	if (p.Calls.size() > 6) 
 		p.Calls.resize(7);	// toss N's before sort
 
+    if (cse_f) {
+        if (p.Calls.size() < 4) 
+            p.Calls.resize(4);	// cse needs 4 calls
+    
+        char ref21[22];
+        if (windex==10 && Win.size()==21) {
+            bool needfai=0;
+            for (i=windex-10;i<21;++i) {
+                if (!isalpha(Win[i].Base)) {
+                    needfai=1;
+                    break;
+                } else {
+                    ref21[i-(windex-10)]=Win[i].Base;
+                }
+            }
+            if (needfai) {
+                faidx.Fetch(ref21, p.Chr, p.Pos-10, p.Pos+10);
+            }
+        }
+        ref21[21]='\0';
+
+        // cse format... no need to sort or call anything
+        if (p.Calls[T_A].depth()||p.Calls[T_C].depth()|| p.Calls[T_G].depth()|| p.Calls[T_T].depth()) {
+            // silly 15 decimals to match R's default output ... better off with the C default
+            fprintf(cse_f,"%s\t%d\t%c\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%s\n",p.Chr.c_str(), p.Pos, toupper(p.Base)
+                    , p.Calls[T_A].fwd, p.Calls[T_C].fwd, p.Calls[T_G].fwd, p.Calls[T_T].fwd
+                    , p.Calls[T_A].rev, p.Calls[T_C].rev, p.Calls[T_G].rev, p.Calls[T_T].rev
+                    , p.Calls[T_A].fwd_q/(double)p.Calls[T_A].fwd, p.Calls[T_C].fwd_q/(double)p.Calls[T_C].fwd, p.Calls[T_G].fwd_q/(double)p.Calls[T_G].fwd, p.Calls[T_T].fwd_q/(double)p.Calls[T_T].fwd
+                    , p.Calls[T_A].rev_q/(double)p.Calls[T_A].rev, p.Calls[T_C].rev_q/(double)p.Calls[T_C].rev, p.Calls[T_G].rev_q/(double)p.Calls[T_G].rev, p.Calls[T_T].rev_q/(double)p.Calls[T_T].rev
+                    , ref21
+            );
+        }
+    }
+
 	sort(p.Calls.begin(), p.Calls.end(), hitolocall);
 
 	int need_out = -1;
@@ -1203,7 +1314,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 
 		double bpct = (double) min(p.Calls[i].fwd,p.Calls[i].rev)/p.Calls[i].depth();
 
-		if (pct > pct_depth && qpct >= pct_qdepth && (p.Calls[i].depth() >= min_adepth)) {
+		if (pct >= pct_depth && qpct >= pct_qdepth && (p.Calls[i].depth() >= min_adepth)) {
             if (bpct < pct_balance) {
                 int fwd_adj=0, rev_adj=0;
                 // f=b*(f+r); r=f/b-f; adj=r-(f/b-f)
@@ -1234,7 +1345,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
             }
         }
 
-		if (pct > pct_depth && qpct >= pct_qdepth && (p.Calls[i].depth() >= min_adepth)) {
+		if (pct >= pct_depth && qpct >= pct_qdepth && (p.Calls[i].depth() >= min_adepth)) {
 			// balance is meaningless at low depths
 			if ((bpct >= pct_balance) || (p.Calls[i].depth()<4)) {
 				if (p.Calls[i].base == '+' || p.Calls[i].base == '-') {
@@ -1272,7 +1383,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                                 double pval=(p.Depth*err_rate==0)?0:gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
                                 double padj=total_locii ? pval*total_locii : pval;           // multiple-testing adjustment
 
-                                if (padj <= alpha) {
+                                if (alpha>=1 || padj <= alpha) {
                                     vfinal final(p.Calls[i]);
                              
                                     double mq_padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report pval as better than the total mapping quality
@@ -1330,14 +1441,14 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
                             double pval=(p.Depth*err_rate==0)?0:gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
                             double padj=total_locii ? pval*total_locii : pval;           // multiple-testing adjustment
 
-                            if (padj <= alpha) {
+                            if (alpha>=1 || padj <= alpha) {
                                 double mq_padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report as better than the mapping quality
 
                                 if (mq_padj > 1) mq_padj=1;
 
 		                        if (debug_xpos) fprintf(stderr,"xpos-debug-pval\tbase:%c, err:%g, pval:%g, padj:%g, mq_padj:%g, mq_sum:%d\n", p.Calls[i].base, err_rate, pval, padj, mq_padj, p.Calls[i].mq_sum);
 
-                                if (!p.Calls[i].is_ref || debug_xpos) {
+                                if (!p.Calls[i].is_ref || debug_xpos || output_ref) {
                                     if (need_out == -1)
                                         need_out = i;
                                 }
@@ -1363,7 +1474,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
 
 	if (need_out>=0||debug_xpos) {
 
-        if (final_calls.size() > 1){
+        if (final_calls.size() > 1) {
 //            printf("HERE1 %c/%c\n", final_calls[0].pcall->base, final_calls[1].pcall->base);
             if(final_calls[1].pcall->is_ref) {
                 vfinal tmp=final_calls[1];
@@ -1412,8 +1523,7 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
             fprintf(var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_alpha+skipped_depth+skipped_balance+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, pil.c_str());
         }
 
-        if (vcf_f) {
-
+       if (vcf_f) {
             for (i=0;i<final_calls.size();++i) {
                vfinal &f=final_calls[i];
                int qual = f.padj>0?min(40,10*(-log10(f.padj))):40;
@@ -1503,6 +1613,8 @@ void VarCallVisitor::VisitX(PileupSummary &p) {
             }
 			exit(0);
 		}
+
+
 	}
 }
 
@@ -1757,5 +1869,52 @@ std::vector<char *> split(char* str, char delim)
 int rand_round(double x) {
     return floor(x)+((rand()>(x-int(x))) ? 1 : 0);
 //warn("rr:%f=%d\n",x);
+}
+
+
+void check_ref_fai(const char * ref) {
+    if (!ref) {
+        warn("Need a reference file (-f) parameter, try -h for help\n");
+        exit(1);
+    }
+
+    if (!hasdata(string(ref)+".fai")) {
+        int ret=system(string_format("samtools faidx '%s'", ref).c_str());
+        if (ret) {
+            warn("Need a %s.fai file, run samtools faidx\n", ref);
+            exit(1);
+        }
+    }
+}
+
+void Faidx::Load(const char *path) {
+    fa_f = openordie(path, "r");
+    FILE *fp = openordie(string_format("%s.fai", path).c_str(), "r");
+
+    char *buf = (char*)calloc(0x10000, 1);
+    char *p;
+    while (!feof(fp) && fgets(buf, 0x10000, fp)) {
+        for (p = buf; *p && isgraph(*p); ++p);
+        *p = 0; ++p;
+        Faient e;
+        sscanf(p, "%d%lld%d%d", &e.len, &e.offset, &e.line_blen, &e.line_len);
+        string chr = buf;
+        faimap[chr]=e;
+    }
+    free(buf);
+}
+
+bool Faidx::Fetch(char *buf, const Faient *ent, int pos_from, int pos_to) {
+    int len = (pos_to-pos_from+1);
+
+    if (fseek(fa_f, ent->offset + pos_from / ent->line_blen * ent->line_len + pos_from % ent->line_blen, SEEK_SET) == -1) {
+        return false;
+    }
+    int l = 0;
+    char c;
+    while (((c=fgetc(fa_f))!= EOF) && (l < len)) {
+        if (isgraph(c)) buf[l++] = c;
+    }
+    return l==len;
 }
 
