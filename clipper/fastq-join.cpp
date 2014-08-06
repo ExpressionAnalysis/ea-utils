@@ -334,6 +334,7 @@ int main (int argc, char **argv) {
 					rc.qual.s[ri] = max(fq[0].qual.s[li], rc.qual.s[ri])+min(4,min(fq[0].qual.s[li],rc.qual.s[ri]));
 				} else {
 					// use the better-quality read
+                    // this approximates the formula: E = min(0.5,[(1-e2/2) * e1] / [(1-e1) * e2/2 + (1-e2/2) * e1])
 					if (fq[0].qual.s[li] > rc.qual.s[ri]) {
 						rc.seq.s[ri] = fq[0].seq.s[li];
                         // reduction in quality, based on phred-difference
