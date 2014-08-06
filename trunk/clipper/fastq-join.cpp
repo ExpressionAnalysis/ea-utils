@@ -337,11 +337,11 @@ int main (int argc, char **argv) {
 					if (fq[0].qual.s[li] > rc.qual.s[ri]) {
 						rc.seq.s[ri] = fq[0].seq.s[li];
                         // reduction in quality, based on phred-difference
-					    rc.qual.s[ri] = min(rc.qual.s[ri],max(fq[0].qual.s[li]-rc.qual.s[ri],3));
+					    rc.qual.s[ri] = min(fq[0].qual.s[li],max(fq[0].qual.s[li]-rc.qual.s[ri],3));
 					} else {
 						fq[0].seq.s[li] = rc.seq.s[ri];
                         // reduction in quality, based on phred-difference
-					    fq[0].qual.s[li] = min(fq[0].qual.s[li],max(rc.qual.s[ri]-fq[0].qual.s[li],3));
+					    fq[0].qual.s[li] = min(rc.qual.s[ri],max(rc.qual.s[ri]-fq[0].qual.s[li],3));
 					}
 				}
 			}
