@@ -330,13 +330,18 @@ int main (int argc, char **argv) {
 				int ri = i;
 				if (fq[0].seq.s[li] == rc.seq.s[ri]) {
 					fq[0].qual.s[li] = max(fq[0].qual.s[li], rc.qual.s[ri]);
-					rc.qual.s[ri] = max(fq[0].qual.s[li], rc.qual.s[ri]);
+                    // bounded improvement in quality, since there's no independence
+					rc.qual.s[ri] = max(fq[0].qual.s[li], rc.qual.s[ri])+min(4,min(fq[0].qual.s[li],rc.qual.s[ri]));
 				} else {
-					// use the better-quality read, although the qual should be downgraded due to the difference!
+					// use the better-quality read
 					if (fq[0].qual.s[li] > rc.qual.s[ri]) {
 						rc.seq.s[ri] = fq[0].seq.s[li];
+                        // reduction in quality, based on phred-difference
+					    rc.qual.s[ri] = min(rc.qual.s[ri],max(fq[0].qual.s[li]-rc.qual.s[ri],3));
 					} else {
 						fq[0].seq.s[li] = rc.seq.s[ri];
+                        // reduction in quality, based on phred-difference
+					    fq[0].qual.s[li] = min(fq[0].qual.s[li],max(rc.qual.s[ri]-fq[0].qual.s[li],3));
 					}
 				}
 			}
