@@ -612,7 +612,7 @@ int main(int argc, char **argv) {
     if (total_locii==0) total_locii=1;          // no adjustment
 
     if (eav_f) {
-        fprintf(eav_f,"chr\tpos\tref\tdepth\tnum_states\ttop_consensus\ttop_freq\tvar_base\tvar_depth\tvar_qual\tvar_strands\tforward_strands\treverse_strands\t%cval\n",total_locii>1?'e':'p');
+        fprintf(eav_f,"chr\tpos\tref\tdepth\tnum_states\ttop_consensus\ttop_freq\tvar_base\tvar_depth\tvar_qual\tvar_strands\tforward_strands\treverse_strands\t%cval%s\n", (total_locii>1?'e':'p'), target_annot?"\tin_target":"");
     }
 
 	if (do_varcall) {
@@ -1628,7 +1628,7 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
                 if (i > 0) reverse += ";";
                 reverse+= string_format("%d",f.pcall->rev);
             }
-            fprintf(eav_f,"%s\t%d\t%c\t%d\t%d\t%s\t%2.2f\t%s\t%s\t%s\t%s\t%s\t%s\t%.1e\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, (int) final_calls.size(),top_cons.c_str(), pct_allele, var_base.c_str(), var_depth.c_str(), var_qual.c_str(), var_strands.c_str(), forward.c_str(), reverse.c_str(), padj);
+            fprintf(eav_f,"%s\t%d\t%c\t%d\t%d\t%s\t%2.2f\t%s\t%s\t%s\t%s\t%s\t%s\t%.1e%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, (int) final_calls.size(),top_cons.c_str(), pct_allele, var_base.c_str(), var_depth.c_str(), var_qual.c_str(), var_strands.c_str(), forward.c_str(), reverse.c_str(), padj, UseAnnot?(p.InTarget?"\t1":"\t0"):"");
         }
 
 		if (debug_xpos) {
@@ -1800,14 +1800,14 @@ void usage(FILE *f) {
 "Varcalls go to stdout.  Stats go to stdout, or stderr if varcalling too\n"
 "\n"
 "If an output prefix is used, files are created as follows:\n"
-"   PREFIX.var       Variant calls in tab delimited 'varcall' format\n"
-"   PREFIX.eav       Variant calls in tab delimited 'ea-var' format\n"
-"   PREFIX.cse       Variant calls in tab delimited 'varprowl' format\n"
-"   PREFIX.vcf       Variant calls, in vcf format\n"
-"   PREFIX.varsum    Summary of variant calls\n"
-"   PREFIX.tgt       On-target stats detail\n"
-"   PREFIX.tgtsum    Summary of on-target stats\n"
-"   PREFIX.noise     Noise stats detail\n"
+"   PREFIX.var         Variant calls in tab delimited 'varcall' format\n"
+"   PREFIX.eav         Variant calls in tab delimited 'ea-var' format\n"
+"   PREFIX.cse         Variant calls in tab delimited 'varprowl' format\n"
+"   PREFIX.vcf         Variant calls, in vcf format\n"
+"   PREFIX.varsum      Summary of variant calls\n"
+"   PREFIX.tgt.var     On-target version of .var\n"
+"   PREFIX.tgt.cse     On-target version of .cse\n"
+"   PREFIX.tgt.varsum  On-target version of .varsum\n"
 "\n"
 "Stats Output:\n"
 "\n"
