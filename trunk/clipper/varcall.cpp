@@ -762,8 +762,7 @@ double pnorm(double x)
 void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref) {
 
 	if (!in_n) {
-		warn("No input files, quitting\n");
-		exit(1);
+		die("No input files, quitting\n");
 	}
 
 	int i, bam_n=0;
@@ -775,12 +774,10 @@ void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref) {
 
 	if (bam_n != in_n) {
 		if (bam_n > 0) {
-			warn("Can't mix bams and other input files\n");
-			exit(1);
+			die("Can't mix bams and other input files\n");
 		} else {
 			if (in_n > 1) {
-				warn("Can't handle multiple pileups... TODO\n");
-				exit(1);
+				die("Can't handle multiple pileups... TODO\n");
 			} else {
 				warn("input\t%d pileup\n", in_n);
                 v.InputType='P';
@@ -1266,7 +1263,7 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
 
     if (UseAnnot) {
         // index lookup only.... not string lookup
-        const std::vector <long int> * v = &(AnnotDex.lookup(p.Chr.data(), p.Pos));
+        const std::vector <long int> * v = &(AnnotDex.lookup(p.Chr.data(), p.Pos + (AnnotType=='b' ? -1 : 0)));
         if (v && v->size()) {
             p.InTarget=1;
         }
@@ -1663,36 +1660,43 @@ void PileupVisitor::LoadAnnot(const char *path) {
         warn("Can't open %s : %s\n", path, strerror(errno));
         exit(1);
     }
+
+    AnnotType = '\0';
+
+    if (!strcmp(fext(path), ".bed"))  
+        AnnotType='b';
+
+    if (!strcmp(fext(path), ".gtf"))  
+        AnnotType='g';
+
+    if (!AnnotType) { 
+        // try to detect it?
+        line l; meminit(l);
+        int cnt=0;
+        while(read_line(f, l)>0) {
+            vector<char *> d=split(l.s, '\t');
+            if (d.size() >= 7) {
+                AnnotType = (*d[5]=='+' || *d[5] == '-') ? 'b' : '\0';  
+                AnnotType = (*d[6]=='+' || *d[6] == '-') ? 'g' : AnnotType;
+            }
+            break;
+        }
+        if (AnnotType)
+            warn("detect annot\t%c\n", AnnotType);
+    }
+
     fclose(f);
 
-/*
-    AnnotType = '\0';
-    line l; meminit(l);
-    int cnt=0;
-    while(read_line(f, l)>0) {
-        vector<char *> d=split(l.s, '\t');
-        if (d.size() < 9) {
-            warn("File must be a GTF or a BED: '%s'\n", path);
-            exit(1);
-        }
-        AnnotType = (*d[5]=='+' || *d[5] == '-') ? 'b' : '\0';  
-        AnnotType = (*d[6]=='+' || *d[5] == '-') ? 'g' : AnnotType;
-        break;
-    }
-
-    if (!AnnotType) {
-        warn("File must be a GTF or a BED: '%s'\n", path);
-        exit(1);
-    }
-*/
-
     if (!AnnotDex.read(path)) {
-        //    void build(const char *path, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c);
-        die("%s.tids must be a valid tids indexed file\n", path);
+        // try building if we know the type
+        if (AnnotType) {
+        //    void build(const char *path, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c, int sub_e);
+            AnnotDex.build(path, "\t", 0, 1, 2, 0, '#', AnnotType=='b' ? 1 : 0);
+        }
+        die("Either %s.tidx must be a valid tidx indexed file, or %s must be a BED or GTF file\n", path, path);
     }
 
     UseAnnot=1;
-
 }
 
 void VarStatVisitor::Visit(PileupSummary &p) {
