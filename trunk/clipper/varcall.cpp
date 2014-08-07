@@ -191,6 +191,7 @@ public:
     int TotQual;
     int NumReads;
     vector<vcall> Calls;
+    bool InTarget;
 
     int SkipN;
     int SkipDupReads;
@@ -208,15 +209,14 @@ class PileupVisitor {
     public:
         char InputType;
 
-        string AnnotFile;       // path to file
+        bool UseAnnot;
         tidx AnnotDex;          // start/stop index file
         char AnnotType;         // b (bed) or g (gtf - preferred)
         
         PileupReads Reads;
         PileupVisitor() {InputType ='\0';}
-        PileupVisitor(const char *a) {InputType ='\0'; LoadIndex(a);}
 		void Parse(char *dat) {PileupSummary p(dat, Reads); Visit(p);};
-        void LoadIndex(const char *a);
+        void LoadAnnot(const char *annot_file);
 		virtual void Visit(PileupSummary &dat)=0;
 		virtual void Finish()=0;
 };
@@ -289,7 +289,7 @@ bool output_ref=0;              // set to 1 if you want to output reference-only
 void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref);
 void check_ref_fai(const char * ref);
 
-FILE *noise_f=NULL, *var_f = NULL, *varsum_f = NULL, *tgt_f = NULL, *tgtsum_f = NULL, *vcf_f = NULL, *eav_f=NULL, *cse_f=NULL;
+FILE *noise_f=NULL, *var_f = NULL, *varsum_f = NULL, *tgt_var_f = NULL, *tgt_cse_f = NULL, *vcf_f = NULL, *eav_f=NULL, *cse_f=NULL;
 
 double alpha=.05;
 int phred=33;
@@ -409,8 +409,17 @@ int main(int argc, char **argv) {
         }
 
         var_f = openordie(string_format("%s.var.tmp", out_prefix).c_str(), "w");
+
+        fprintf(var_f,"%s\t%s\t%s\t%s\t%s\t%s\t%s%s\n","chr", "pos", "ref", "depth", "skip", "pct", target_annot ? "target\t" : "", "...");
+
         varsum_f = openordie(string_format("%s.varsum.tmp", out_prefix).c_str(), "w");
 
+        if (target_annot) {
+            // targted only output
+            tgt_var_f = openordie(string_format("%s.tgt.var.tmp", out_prefix).c_str(), "w");
+            fprintf(tgt_var_f,"%s\t%s\t%s\t%s\t%s\t%s\t%s\n","chr", "pos", "ref", "depth", "skip", "pct", "...");
+        }
+ 
         if (str_in("vcf", format_list)>=0) {
             vcf_f = openordie(string_format("%s.vcf.tmp", out_prefix).c_str(), "w");
         }
@@ -418,19 +427,13 @@ int main(int argc, char **argv) {
             eav_f = openordie(string_format("%s.eav.tmp", out_prefix).c_str(), "w");
         }
 
-// This is a stats-only output for now
-//        if (str_in("noise", format_list)>=0) {
-//            noise_f = openordie(string_format("%s.noise.tmp", out_prefix).c_str(), "w");
-//        }
-
-        if (target_annot) {
-            tgt_f = openordie(string_format("%s.tgt.tmp", out_prefix).c_str(), "w");
-            tgtsum_f = openordie(string_format("%s.tgtsum.tmp", out_prefix).c_str(), "w");
-        }
         if (str_in("cse", format_list)>=0) {
             check_ref_fai(ref);
             cse_f = openordie(string_format("%s.cse.tmp", out_prefix).c_str(), "w");
             faidx.Load(ref);
+            // targted only output
+            if (target_annot) 
+                tgt_cse_f = openordie(string_format("%s.tgt.cse.tmp", out_prefix).c_str(), "w");
         }
     } else {
         var_f = stdout;
@@ -632,6 +635,10 @@ int main(int argc, char **argv) {
 
 		VarCallVisitor vcall;
 
+        if (target_annot) {
+            vcall.LoadAnnot(target_annot);
+       }
+
         if (cse_f) {
             vcall.WinMax=21;
         } else if (repeat_filter > 0) {
@@ -660,27 +667,26 @@ int main(int argc, char **argv) {
         fprintf(varsum_f,"locii below depth\t%d\n", vcall.SkippedDepth);
 
         if (out_prefix) {
+            // close it all
             fclose(var_f);
             fclose(varsum_f);
             if (vcf_f) fclose(vcf_f);
             if (eav_f) fclose(eav_f);
             if (noise_f) fclose(noise_f);
             if (cse_f) fclose(cse_f);
-            if (target_annot) {
-                fclose(tgt_f);
-                fclose(tgtsum_f);
-            }
+            if (tgt_var_f) fclose(tgt_var_f);
+            if (tgt_cse_f) fclose(tgt_cse_f);
+
             rename_tmp(string_format("%s.var.tmp", out_prefix));
             rename_tmp(string_format("%s.varsum.tmp", out_prefix));
+
             if (vcf_f) rename_tmp(string_format("%s.vcf.tmp", out_prefix));
             if (eav_f) rename_tmp(string_format("%s.eav.tmp", out_prefix));
             if (cse_f) rename_tmp(string_format("%s.cse.tmp", out_prefix));
             if (noise_f) rename_tmp(string_format("%s.noise.tmp", out_prefix));
 
-            if (target_annot) {
-                rename_tmp(string_format("%s.tgt.tmp", out_prefix));
-                rename_tmp(string_format("%s.tgtsum.tmp", out_prefix));
-            }
+            if (tgt_var_f) rename_tmp(string_format("%s.tgt.var.tmp", out_prefix));
+            if (tgt_cse_f) rename_tmp(string_format("%s.tgt.cse.tmp", out_prefix));
         }
 	}
 }
@@ -876,6 +882,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 	RepeatCount = 0;
 	RepeatBase = '\0';
 	NumReads = 0;
+    InTarget = 0;
 
 	int i;
 	vector<int> depthbypos;
@@ -1248,6 +1255,14 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
 		return;
 	}
 
+    if (UseAnnot) {
+        // index lookup only.... not string lookup
+        const std::vector <long int> * v = &(AnnotDex.lookup(p.Chr.data(), p.Pos));
+        if (v && v->size()) {
+            p.InTarget=1;
+        }
+    }
+
 	int ins_fwd = p.Calls.size() > 6 ? p.Calls[6].fwd : 0;
 	int ins_rev = p.Calls.size() > 6 ? p.Calls[6].rev : 0;
 
@@ -1255,6 +1270,7 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
 	if (p.Calls.size() > 6) 
 		p.Calls.resize(7);	// toss N's before sort
 
+    // OUTPUT CSE BEFORE REORDRED BASES!
     if (cse_f) {
         if (p.Calls.size() < 4) 
             p.Calls.resize(4);	// cse needs 4 calls
@@ -1279,13 +1295,19 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
         // cse format... no need to sort or call anything
         if (p.Calls[T_A].depth()||p.Calls[T_C].depth()|| p.Calls[T_G].depth()|| p.Calls[T_T].depth()) {
             // silly 15 decimals to match R's default output ... better off with the C default
-            fprintf(cse_f,"%s\t%d\t%c\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%s\n",p.Chr.c_str(), p.Pos, toupper(p.Base)
+            static char cse_buf[8192]; 
+            sprintf(cse_buf,"%s\t%d\t%c\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%s\n",p.Chr.c_str(), p.Pos, toupper(p.Base)
                     , p.Calls[T_A].fwd, p.Calls[T_C].fwd, p.Calls[T_G].fwd, p.Calls[T_T].fwd
                     , p.Calls[T_A].rev, p.Calls[T_C].rev, p.Calls[T_G].rev, p.Calls[T_T].rev
                     , p.Calls[T_A].fwd_q/(double)p.Calls[T_A].fwd, p.Calls[T_C].fwd_q/(double)p.Calls[T_C].fwd, p.Calls[T_G].fwd_q/(double)p.Calls[T_G].fwd, p.Calls[T_T].fwd_q/(double)p.Calls[T_T].fwd
                     , p.Calls[T_A].rev_q/(double)p.Calls[T_A].rev, p.Calls[T_C].rev_q/(double)p.Calls[T_C].rev, p.Calls[T_G].rev_q/(double)p.Calls[T_G].rev, p.Calls[T_T].rev_q/(double)p.Calls[T_T].rev
                     , ref21
             );
+            fputs(cse_buf, cse_f);
+            // cse requires separate output for on-target (instead of another column)
+            if (tgt_cse_f && p.InTarget) {
+                fputs(cse_buf, tgt_cse_f);
+            }
         }
     }
 
@@ -1509,6 +1531,7 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
             }
         }
 
+        /// INTERNAL VAR FILE
         if (var_f) {
             int i;
             string pil;
@@ -1520,7 +1543,16 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
                     pil += string_format("\t%c:%d,%d,%.1e",f.pcall->base,f.pcall->depth(),f.pcall->qual/f.pcall->depth(),f.padj);
                }
             }
-            fprintf(var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_alpha+skipped_depth+skipped_balance+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, pil.c_str());
+            fprintf(var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_alpha+skipped_depth+skipped_balance+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, pil.c_str());
+            if (UseAnnot) {
+                fprintf(var_f, "%c\n", p.InTarget ? '1' : '0');
+            } else {
+                fputc('\n', var_f);
+            }
+
+            if (tgt_var_f) {
+                fprintf(tgt_var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_alpha+skipped_depth+skipped_balance+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, pil.c_str());
+            }
         }
 
        if (vcf_f) {
@@ -1619,13 +1651,15 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
 }
 
 
-void PileupVisitor::LoadIndex(const char *path) {
+void PileupVisitor::LoadAnnot(const char *path) {
     FILE *f = fopen(path,"r");
     if (!f) {
         warn("Can't open %s : %s\n", path, strerror(errno));
         exit(1);
     }
+    fclose(f);
 
+/*
     AnnotType = '\0';
     line l; meminit(l);
     int cnt=0;
@@ -1644,13 +1678,15 @@ void PileupVisitor::LoadIndex(const char *path) {
         warn("File must be a GTF or a BED: '%s'\n", path);
         exit(1);
     }
+*/
 
     if (!AnnotDex.read(path)) {
         //    void build(const char *path, const char *sep, int nchr, int nbeg, int nend, int skip_i, char skip_c);
-        AnnotDex.build(path, "\t",  0, 1, 2, 0, '#', 1);
+        die("%s.tids must be a valid tids indexed file\n", path);
     }
 
-    fclose(f);
+    UseAnnot=1;
+
 }
 
 void VarStatVisitor::Visit(PileupSummary &p) {
