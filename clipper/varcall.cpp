@@ -50,6 +50,7 @@ const char * VERSION = "0.9";
 #define MIN_READ_LEN 20
 #define DEFAULT_LOCII 1000000
 
+
 using namespace std;
 using namespace google;
 
@@ -69,6 +70,14 @@ void usage(FILE *f);
 #define stat_out(s,...) fprintf(stat_fout,s,##__VA_ARGS__)
 #define stdev(cnt, sum, ssq) sqrt((((double)cnt)*ssq-pow((double)sum,2)) / ((double)cnt*((double)cnt-1)))
 #define log10(x) (log(x)/log(10))
+
+// die unless it's a number
+int ok_atoi(const char *s) {
+    if (!s || (!isdigit(*s)&& !(*s=='-'))) {
+        die("%s is not a number\n", s);
+    }
+    return atoi(s);
+}
 
 double quantile(const std::vector<int> &vec, double p);
 double quantile(const std::vector<double> &vec, double p);
@@ -339,19 +348,19 @@ int main(int argc, char **argv) {
 #define MAX_F 20
     const char *format_list[MAX_F]={"var", "eav", "noise", "varsum", NULL};
 
-	while ( (c = getopt_long(argc, argv, "?svVBhe:m:N:x:f:p:a:g:q:Q:i:o:D:R:b:L:S:F:",NULL,NULL)) != -1) {
+	while ( (c = getopt_long(argc, argv, "?svVBhe:m:N:x:f:p:a:g:q:Q:i:o:D:R:b:L:S:F:A:",NULL,NULL)) != -1) {
 		switch (c) {
 			case 'h': usage(stdout); return 0;
-			case 'm': umindepth=atoi(optarg); break;
-			case 'q': min_qual=atoi(optarg); break;
+			case 'm': umindepth=ok_atoi(optarg); break;
+			case 'q': min_qual=ok_atoi(optarg); break;
 			case 'o': out_prefix=optarg; break;
-			case 'Q': min_mapq=atoi(optarg); break;
+			case 'Q': min_mapq=ok_atoi(optarg); break;
 			case 'V': printf("Version: %s.%d\n", VERSION, SVNREV); exit(0); break;
-			case 'R': repeat_filter=atoi(optarg); break;
+			case 'R': repeat_filter=ok_atoi(optarg); break;
 			case 'A': target_annot=optarg; break;
-			case 'a': uminadepth=atoi(optarg);break;
+			case 'a': uminadepth=ok_atoi(optarg);break;
 			case 'D': artifact_filter=atof(optarg);break;
-			case 'i': uminidepth=atoi(optarg);break;
+			case 'i': uminidepth=ok_atoi(optarg);break;
 			case 'x': {
 					debug_xchr=optarg;
 					char *p=strrchr(debug_xchr, ':');
@@ -366,7 +375,7 @@ int main(int argc, char **argv) {
 			case 'p': upctqdepth=atof(optarg); break;
 			case 'e': alpha=atof(optarg); break;
 			case 'g': global_error_rate=atof(optarg); break;
-			case 'L': total_locii=atoi(optarg); break;
+			case 'L': total_locii=ok_atoi(optarg); break;
 			case 'f': ref=optarg; break;
 			case 'N': noiseout=optarg; break;
 			case 's': do_stats=1; break;
@@ -1543,15 +1552,12 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
                     pil += string_format("\t%c:%d,%d,%.1e",f.pcall->base,f.pcall->depth(),f.pcall->qual/f.pcall->depth(),f.padj);
                }
             }
-            fprintf(var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_alpha+skipped_depth+skipped_balance+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, pil.c_str());
-            if (UseAnnot) {
-                fprintf(var_f, "%c\n", p.InTarget ? '1' : '0');
-            } else {
-                fputc('\n', var_f);
-            }
+            fprintf(var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_alpha+skipped_depth+skipped_balance+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, UseAnnot?(p.InTarget ? "\t1" : "\t0"):"", pil.c_str());
 
             if (tgt_var_f) {
-                fprintf(tgt_var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_alpha+skipped_depth+skipped_balance+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, pil.c_str());
+                if (p.InTarget) {
+                    fprintf(tgt_var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_alpha+skipped_depth+skipped_balance+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, pil.c_str());
+                }
             }
         }
 
