@@ -45,7 +45,7 @@ THE SOFTWARE.
 #include "fastq-lib.h"
 
 #define SVNREV atoi(strchr("$Revision$", ':')+1)
-const char * VERSION = "0.9";
+const char * VERSION = "0.92";
 
 #define MIN_READ_LEN 20
 #define DEFAULT_LOCII 1000000
@@ -206,7 +206,9 @@ public:
     int SkipDupReads;
     int SkipMinMapq;
     int SkipMinQual;
-    int MaxDepthByPos;
+
+    double PositionalDiversity;
+
     int RepeatCount;
     char RepeatBase;
 
@@ -253,12 +255,13 @@ class VarCallVisitor : public PileupVisitor {
 
     public:
     int WinMax;
-    VarCallVisitor() : PileupVisitor() {SkippedDepth=0;WinMax=0;Hets=0;Homs=0;Locii=0;};
+    VarCallVisitor() : PileupVisitor() {SkippedDiversity=0;SkippedDepth=0;WinMax=0;Hets=0;Homs=0;Locii=0;};
 
     void Visit(PileupSummary &dat);
     void Finish();
 
 	int SkippedDepth;
+	int SkippedDiversity;
 	int Locii;
 	int Hets;
 	int Homs;
@@ -284,6 +287,7 @@ char *debug_xchr=NULL;
 int debug_xpos=0;
 int min_depth=1;
 int min_mapq=0;
+double min_diversity=0.25;     // only skip huge piles in one spot... even a little diversity is OK
 int min_qual=3;
 int repeat_filter=7;
 double artifact_filter=1;
@@ -348,7 +352,7 @@ int main(int argc, char **argv) {
 #define MAX_F 20
     const char *format_list[MAX_F]={"var", "eav", "noise", "varsum", NULL};
 
-	while ( (c = getopt_long(argc, argv, "?svVBhe:m:N:x:f:p:a:g:q:Q:i:o:D:R:b:L:S:F:A:",NULL,NULL)) != -1) {
+	while ( (c = getopt_long(argc, argv, "?sv0VBhe:m:N:x:f:p:a:g:q:Q:i:o:D:R:b:L:S:F:A:",NULL,NULL)) != -1) {
 		switch (c) {
 			case 'h': usage(stdout); return 0;
 			case 'm': umindepth=ok_atoi(optarg); break;
@@ -361,6 +365,8 @@ int main(int argc, char **argv) {
 			case 'a': uminadepth=ok_atoi(optarg);break;
 			case 'D': artifact_filter=atof(optarg);break;
 			case 'i': uminidepth=ok_atoi(optarg);break;
+			case 'd': min_diversity=atof(optarg); break;
+			case '0': min_qual=0; umindepth=0; min_mapq=0; repeat_filter=0; uminadepth=0; artifact_filter=0; uminidepth=0; min_diversity=0; alpha=1; pct_balance=0; upctqdepth=0; break;
 			case 'x': {
 					debug_xchr=optarg;
 					char *p=strrchr(debug_xchr, ':');
@@ -674,6 +680,7 @@ int main(int argc, char **argv) {
         fprintf(varsum_f,"hom calls\t%d\n", vcall.Homs);
         fprintf(varsum_f,"het calls\t%d\n", vcall.Hets);
         fprintf(varsum_f,"locii below depth\t%d\n", vcall.SkippedDepth);
+        fprintf(varsum_f,"locii below diversity\t%d\n", vcall.SkippedDiversity);
 
         if (out_prefix) {
             // close it all
@@ -884,7 +891,6 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 	SkipN = 0;
 	SkipMinQual = 0;
 	SkipMinMapq = 0;
-	MaxDepthByPos = 0;
 	RepeatCount = 0;
 	RepeatBase = '\0';
 	NumReads = 0;
@@ -900,7 +906,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
     int eor=0;
 	for (i=0;i<Depth;++i,++read_i) {
 		bool sor=0;
-		
+
 		if (*cur_p == '^') {
 			sor=1;
 			++cur_p;
@@ -1078,11 +1084,15 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 		exit(1);
 	}
 
+    double expected=Depth/rds.MeanReadLen();
+    double total_v=0;
+    double diff;
 	for (i=0;i<depthbypos.size();++i) {
-		if (depthbypos[i] > MaxDepthByPos) {
-			MaxDepthByPos = depthbypos[i];
-		}
+		diff=floor(fabs(depthbypos[i]-expected));
+        total_v+=diff*diff;
 	}
+
+    PositionalDiversity = max(0,1-total_v/(Depth-expected));
 
 	Depth=0;
 	for (i=0;i<5 && i < Calls.size();++i) {		// total depth (exclude inserts for tot depth, otherwise they are double-counted)
@@ -1316,6 +1326,12 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
             }
         }
     }
+
+    if (p.PositionalDiversity < min_diversity) {
+        ++SkippedDiversity;
+        return;
+    }
+
 
 	sort(p.Calls.begin(), p.Calls.end(), hitolocall);
 
@@ -1771,14 +1787,16 @@ void usage(FILE *f) {
 "-s          Calculate statistics\n"
 "-v          Calculate variants bases on supplied parameters (see -S)\n"
 "-f          Reference fasta (required if using bams, ignored otherwise)\n"
-"-m          Min locii depth (0)\n"
-"-a          Min allele depth (0)\n"
+"-m          Min locii depth (1)\n"
+"-a          Min allele depth (2)\n"
 "-p          Min allele pct by quality (0)\n"
 "-q          Min qual (3)\n"
 "-Q          Min mapping quality (0)\n"
 "-b          Min pct balance (strand/total) (0)\n"
 "-D FLOAT    Max duplicate read fraction (depth/length per position) (1)\n"
-"-B          Turn off BAQ correction (false)\n"
+"-d FLOAT    Minimum diversity (CV from optimal depth) (0.5)\n"
+"-0          Zero out all filters, set e-value filter to 1, report everything\n"
+"-B          If running from a BAM, turn off BAQ correction (false)\n"
 "-R          Homopolymer repeat indel filtering (8)\n"
 "-e FLOAT    Alpha filter to use, requires -l or -S (.05)\n"
 "-g FLOAT    Global minimum error rate (default: assume phred is ok)\n"
