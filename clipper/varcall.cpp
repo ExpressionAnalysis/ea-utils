@@ -56,6 +56,7 @@ using namespace google;
 
 void usage(FILE *f);
 
+
 // #define DEBUG 1
 
 #define meminit(l) (memset(&l,0,sizeof(l)))
@@ -151,10 +152,11 @@ public:
 
 class vcall {
 public:
-    vcall() {base='\0'; mn_qual=mq0=fwd=rev=qual=is_ref=qual_ssq=mq_sum=mq_ssq=tail_rev=tail_fwd=fwd_q=rev_q=0;}
+    vcall() {base='\0'; mn_qual=mq0=fwd=rev=qual=is_ref=qual_ssq=mq_sum=mq_ssq=tail_rev=tail_fwd=fwd_q=rev_q=0; diversity=0.0;}
     char base;
 	bool is_ref;
     int qual, fwd, rev, mq0, mn_qual, qual_ssq, mq_sum, mq_ssq, tail_rev, tail_fwd, fwd_q, rev_q;
+    double diversity;
 	vector <string> seqs;
     int depth() const {return fwd+rev;}
     int mq_rms() const {return sqrt(mq_ssq/depth());}
@@ -207,8 +209,6 @@ public:
     int SkipMinMapq;
     int SkipMinQual;
 
-    double PositionalDiversity;
-
     int RepeatCount;
     char RepeatBase;
 
@@ -255,13 +255,12 @@ class VarCallVisitor : public PileupVisitor {
 
     public:
     int WinMax;
-    VarCallVisitor() : PileupVisitor() {SkippedDiversity=0;SkippedDepth=0;WinMax=0;Hets=0;Homs=0;Locii=0;};
+    VarCallVisitor() : PileupVisitor() {SkippedDepth=0;WinMax=0;Hets=0;Homs=0;Locii=0;};
 
     void Visit(PileupSummary &dat);
     void Finish();
 
 	int SkippedDepth;
-	int SkippedDiversity;
 	int Locii;
 	int Hets;
 	int Homs;
@@ -680,7 +679,6 @@ int main(int argc, char **argv) {
         fprintf(varsum_f,"hom calls\t%d\n", vcall.Homs);
         fprintf(varsum_f,"het calls\t%d\n", vcall.Hets);
         fprintf(varsum_f,"locii below depth\t%d\n", vcall.SkippedDepth);
-        fprintf(varsum_f,"locii below diversity\t%d\n", vcall.SkippedDiversity);
 
         if (out_prefix) {
             // close it all
@@ -872,6 +870,10 @@ bool hitoloint (int i,int j) { return (i>j);}
 int track_readlen[10000];
 
 
+class q_calls {public: q_calls() {meminit(call);} int call[8];};
+vector<int> depthbypos;
+vector<q_calls> depthbyposbycall;
+
 PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 
 	vector<char *> d=split(line, '\t');
@@ -897,11 +899,13 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
     InTarget = 0;
 
 	int i;
-	vector<int> depthbypos;
 
 	const char *cur_p = d[4];
 
     list<Read>::iterator read_i = rds.ReadList.begin();
+
+    memset(depthbypos.data(),0,depthbypos.size()*sizeof(depthbypos[0]));
+    memset(depthbyposbycall.data(),0,depthbyposbycall.size()*sizeof(depthbyposbycall[0]));
 
     int eor=0;
 	for (i=0;i<Depth;++i,++read_i) {
@@ -929,6 +933,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
         int pia = read_i->Seq.length()+1;
 		if (pia >= depthbypos.size()) {
 			depthbypos.resize(pia+1);
+			depthbyposbycall.resize(pia+1);
 		}
 		depthbypos[pia]++;
 
@@ -970,6 +975,9 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 			skip=1;
 		} else {
 			int j = b2i(c);
+
+		    depthbyposbycall[pia].call[j]++;
+
 			if (j >= Calls.size()) {
 				int was = Calls.size();
 				Calls.resize(j+1);
@@ -1084,21 +1092,25 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 		exit(1);
 	}
 
-    double expected=Depth/rds.MeanReadLen();
-    double total_v=0;
-    double diff;
-	for (i=0;i<depthbypos.size();++i) {
-		diff=floor(fabs(depthbypos[i]-expected));
-        total_v+=diff*diff;
-	}
-
-    PositionalDiversity = max(0,1-total_v/(Depth-expected));
-
 	Depth=0;
 	for (i=0;i<5 && i < Calls.size();++i) {		// total depth (exclude inserts for tot depth, otherwise they are double-counted)
 		Depth+=Calls[i].depth();
 	}
 
+	for (i=0;i<5 && i < Calls.size();++i) {		// total depth (exclude inserts for tot depth, otherwise they are double-counted)
+        if (Calls[i].depth()>0) {
+            double expected=Calls[i].depth()/rds.MeanReadLen();
+            double total_v=0;
+            double diff;
+            int j;
+            for (j=0;j<depthbyposbycall.size();++j) {
+                diff=floor(fabs(depthbyposbycall[j].call[i]-expected));
+                total_v+=diff*diff;
+            }
+            double shift_v = max(0, total_v-2*Calls[i].depth());
+            Calls[i].diversity = max(0,1-shift_v/(pow(Calls[i].depth()-expected,2)-2*Calls[i].depth()));
+        }
+	}
 
 	TotQual=0;
 	for (i=0;i<5 && i < Calls.size();++i) {		// total depth (exclude inserts for tot depth, otherwise they are double-counted)
@@ -1312,12 +1324,17 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
         if (p.Calls[T_A].depth()||p.Calls[T_C].depth()|| p.Calls[T_G].depth()|| p.Calls[T_T].depth()) {
             // silly 15 decimals to match R's default output ... better off with the C default
             static char cse_buf[8192]; 
-            sprintf(cse_buf,"%s\t%d\t%c\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%.15g\t%s\n",p.Chr.c_str(), p.Pos, toupper(p.Base)
+            #define MEANQ(base,dir) (p.Calls[base].dir?(p.Calls[base].dir##_q/(double)p.Calls[base].dir):0)
+            sprintf(cse_buf,"%s\t%d\t%c\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%s\t%g\t%g\t%g\t%g\n",p.Chr.c_str(), p.Pos, toupper(p.Base)
                     , p.Calls[T_A].fwd, p.Calls[T_C].fwd, p.Calls[T_G].fwd, p.Calls[T_T].fwd
                     , p.Calls[T_A].rev, p.Calls[T_C].rev, p.Calls[T_G].rev, p.Calls[T_T].rev
-                    , p.Calls[T_A].fwd_q/(double)p.Calls[T_A].fwd, p.Calls[T_C].fwd_q/(double)p.Calls[T_C].fwd, p.Calls[T_G].fwd_q/(double)p.Calls[T_G].fwd, p.Calls[T_T].fwd_q/(double)p.Calls[T_T].fwd
-                    , p.Calls[T_A].rev_q/(double)p.Calls[T_A].rev, p.Calls[T_C].rev_q/(double)p.Calls[T_C].rev, p.Calls[T_G].rev_q/(double)p.Calls[T_G].rev, p.Calls[T_T].rev_q/(double)p.Calls[T_T].rev
+                    , MEANQ(T_A,fwd), MEANQ(T_C,fwd), MEANQ(T_G,fwd), MEANQ(T_T,fwd)
+                    , MEANQ(T_A,rev), MEANQ(T_C,rev), MEANQ(T_G,rev), MEANQ(T_T,rev)
                     , ref21
+                    , p.Calls[T_A].diversity
+                    , p.Calls[T_C].diversity
+                    , p.Calls[T_G].diversity
+                    , p.Calls[T_T].diversity
             );
             fputs(cse_buf, cse_f);
             // cse requires separate output for on-target (instead of another column)
@@ -1326,12 +1343,6 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
             }
         }
     }
-
-    if (p.PositionalDiversity < min_diversity) {
-        ++SkippedDiversity;
-        return;
-    }
-
 
 	sort(p.Calls.begin(), p.Calls.end(), hitolocall);
 
@@ -1342,6 +1353,7 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
 	int skipped_tail_hom=0;
 	int skipped_depth=0;
 	int skipped_repeat=0;
+	int skipped_diversity=0;
 
     vector<vfinal> final_calls;
 	for (i=0;i<p.Calls.size();++i) {		// all calls
@@ -1358,6 +1370,7 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
 
 		double bpct = (double) min(p.Calls[i].fwd,p.Calls[i].rev)/p.Calls[i].depth();
 
+        // REBALANCE READS.... CUTTING OFF HIGH COLUMNS
 		if (pct >= pct_depth && qpct >= pct_qdepth && (p.Calls[i].depth() >= min_adepth)) {
             if (bpct < pct_balance) {
                 int fwd_adj=0, rev_adj=0;
@@ -1389,130 +1402,135 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
             }
         }
 
-		if (pct >= pct_depth && qpct >= pct_qdepth && (p.Calls[i].depth() >= min_adepth)) {
-			// balance is meaningless at low depths
-			if ((bpct >= pct_balance) || (p.Calls[i].depth()<4)) {
-				if (p.Calls[i].base == '+' || p.Calls[i].base == '-') {
-                    // yuk ... time to think about a possible indel call
-					if (p.Calls[i].depth() >= min_idepth) {
-						// should really pick more than 1
-						// but need to allow "similar" indels to pile up
-                        // should group into distinct bins, using some homology thing
-						sort(p.Calls[i].seqs.begin(), p.Calls[i].seqs.end());
-						string prev, maxs;
-						int pcnt=0, maxc=0, j;
-						for (j=0;j<p.Calls[i].seqs.size();++j) {
-							if (prev == p.Calls[i].seqs[j]) {
-								++pcnt;
-							} else {
-								if (pcnt > maxc) {
-									maxs=prev;
-									maxc=pcnt;
-								}
-								prev=p.Calls[i].seqs[j];
-								pcnt=1;
-							}
-						}
-						if (pcnt > maxc) {
-							maxs=prev;
-							maxc=pcnt;
-						}
-						if (maxc >= min_idepth && maxc >= min_adepth) {
-                            // only calls 1 indel at a given position
-                            if ((repeat_filter == 0) || (p.RepeatCount < repeat_filter)) {
-                                // maybe use rms here... see if it helps
-                                double mean_qual = p.Calls[i].qual/(double)p.Calls[i].depth();
+        if (pct >= pct_depth && qpct >= pct_qdepth && (p.Calls[i].depth() >= min_adepth)) {
+            // balance is meaningless at low depths
+            if ((bpct >= pct_balance) || (p.Calls[i].depth()<4)) {
+                // reads come from diverse positions
+                if (p.Calls[i].diversity >= min_diversity) {
+                    if (p.Calls[i].base == '+' || p.Calls[i].base == '-') {
+                        // yuk ... time to think about a possible indel call
+                        if (p.Calls[i].depth() >= min_idepth) {
+                            // should really pick more than 1
+                            // but need to allow "similar" indels to pile up
+                            // should group into distinct bins, using some homology thing
+                            sort(p.Calls[i].seqs.begin(), p.Calls[i].seqs.end());
+                            string prev, maxs;
+                            int pcnt=0, maxc=0, j;
+                            for (j=0;j<p.Calls[i].seqs.size();++j) {
+                                if (prev == p.Calls[i].seqs[j]) {
+                                    ++pcnt;
+                                } else {
+                                    if (pcnt > maxc) {
+                                        maxs=prev;
+                                        maxc=pcnt;
+                                    }
+                                    prev=p.Calls[i].seqs[j];
+                                    pcnt=1;
+                                }
+                            }
+                            if (pcnt > maxc) {
+                                maxs=prev;
+                                maxc=pcnt;
+                            }
+                            if (maxc >= min_idepth && maxc >= min_adepth) {
+                                // only calls 1 indel at a given position
+                                if ((repeat_filter == 0) || (p.RepeatCount < repeat_filter)) {
+                                    // maybe use rms here... see if it helps
+                                    double mean_qual = p.Calls[i].qual/(double)p.Calls[i].depth();
+                                    double err_rate = mean_qual < max_phred ? pow(10,-mean_qual/10.0) : global_error_rate;
+                                    // expected number of non-reference = error_rate*depth
+                                    double pval=(p.Depth*err_rate==0)?0:gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
+                                    double padj=total_locii ? pval*total_locii : pval;           // multiple-testing adjustment
+
+                                    if (alpha>=1 || padj <= alpha) {
+                                        vfinal final(p.Calls[i]);
+
+                                        double mq_padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report pval as better than the total mapping quality
+                                        if (debug_xpos) fprintf(stderr,"xpos-debug-pval\tbase:%c, err:%g, pval:%g, padj:%g, mq_padj:%g, mq_sum:%d\n", p.Calls[i].base, err_rate, pval, padj, mq_padj, p.Calls[i].mq_sum);
+
+                                        if (mq_padj > 1) mq_padj=1;
+
+                                        if (need_out == -1) 
+                                            need_out = i;
+
+                                        //                                    printf("FINAL: depth:%d base: %s\n", (int) maxc, maxs.c_str());
+                                        final.padj=mq_padj;
+                                        final.max_idl_cnt=maxc;
+                                        final.max_idl_seq=maxs;
+                                        final_calls.push_back(final);
+                                    } else {
+                                        skipped_alpha+=p.Calls[i].depth();
+                                    }
+                                    // implicitly skip all the ohter indel calls at the same locus
+                                    skipped_indel+=p.Calls[i].depth()-maxc;
+                                } else {
+                                    skipped_repeat+=p.Calls[i].depth();
+                                }
+                            } else {
+                                skipped_indel+=p.Calls[i].depth();
+                            }
+                        } else {
+                            skipped_indel+=p.Calls[i].depth();
+                        }
+                    } else {
+                        if (p.Calls[i].base == '*' && (
+                                    ((repeat_filter > 0) && (p.RepeatCount >= repeat_filter)) || 
+                                    (p.Calls[i].depth() < min_idepth)
+                                    )) {
+                            skipped_indel+=p.Calls[i].depth();
+                        } else {
+                            // subtract inserts from reference .. perhaps > 0 is correct here....
+                            if (p.Calls[i].is_ref && (ins_rev+ins_fwd) > max(min_idepth,min_adepth)) {
+                                p.Calls[i].fwd-=ins_fwd;
+                                p.Calls[i].rev-=ins_rev;
+                            }
+
+                            double mean_qual = p.Calls[i].qual/(double)p.Calls[i].depth();
+
+                            /*
+                               if ( (repeat_filter > 0) && (p.RepeatCount >= repeat_filter) ) {
+                               p.Calls[i].fwd-=p.Calls[i].tail_fwd; 
+                               p.Calls[i].rev-=p.Calls[i].tail_rev;
+                               skipped_tail_hom+=p.Calls[i].tail_fwd+p.Calls[i].tail_rev;
+                               }
+                             */
+                            if (p.Calls[i].depth() >= min_adepth && p.Calls[i].depth() > 0) {
                                 double err_rate = mean_qual < max_phred ? pow(10,-mean_qual/10.0) : global_error_rate;
-                                // expected number of non-reference = error_rate*depth
+                                // expected number of non-reference bases at this position is error_rate*depth
                                 double pval=(p.Depth*err_rate==0)?0:gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
                                 double padj=total_locii ? pval*total_locii : pval;           // multiple-testing adjustment
 
                                 if (alpha>=1 || padj <= alpha) {
-                                    vfinal final(p.Calls[i]);
-                             
-                                    double mq_padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report pval as better than the total mapping quality
-		                            if (debug_xpos) fprintf(stderr,"xpos-debug-pval\tbase:%c, err:%g, pval:%g, padj:%g, mq_padj:%g, mq_sum:%d\n", p.Calls[i].base, err_rate, pval, padj, mq_padj, p.Calls[i].mq_sum);
+                                    double mq_padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report as better than the mapping quality
 
                                     if (mq_padj > 1) mq_padj=1;
 
-                                    if (need_out == -1) 
-                                        need_out = i;
+                                    if (debug_xpos) fprintf(stderr,"xpos-debug-pval\tbase:%c, err:%g, pval:%g, padj:%g, mq_padj:%g, mq_sum:%d\n", p.Calls[i].base, err_rate, pval, padj, mq_padj, p.Calls[i].mq_sum);
 
-//                                    printf("FINAL: depth:%d base: %s\n", (int) maxc, maxs.c_str());
+                                    if (!p.Calls[i].is_ref || debug_xpos || output_ref) {
+                                        if (need_out == -1)
+                                            need_out = i;
+                                    }
+                                    vfinal final(p.Calls[i]);
                                     final.padj=mq_padj;
-                                    final.max_idl_cnt=maxc;
-                                    final.max_idl_seq=maxs;
                                     final_calls.push_back(final);
                                 } else {
                                     skipped_alpha+=p.Calls[i].depth();
                                 }
-                                // implicitly skip all the ohter indel calls at the same locus
-                                skipped_indel+=p.Calls[i].depth()-maxc;
-                            } else {
-                                skipped_repeat+=p.Calls[i].depth();
-                            }
-						} else {
-							skipped_indel+=p.Calls[i].depth();
-						}
-					} else {
-						skipped_indel+=p.Calls[i].depth();
-					}
-				} else {
-                    if (p.Calls[i].base == '*' && (
-                            ((repeat_filter > 0) && (p.RepeatCount >= repeat_filter)) || 
-                            (p.Calls[i].depth() < min_idepth)
-                       )) {
-					   skipped_indel+=p.Calls[i].depth();
-                    } else {
-                        // subtract inserts from reference .. perhaps > 0 is correct here....
-                        if (p.Calls[i].is_ref && (ins_rev+ins_fwd) > max(min_idepth,min_adepth)) {
-                            p.Calls[i].fwd-=ins_fwd;
-                            p.Calls[i].rev-=ins_rev;
-                        }
-
-                        double mean_qual = p.Calls[i].qual/(double)p.Calls[i].depth();
-
-/*
-                        if ( (repeat_filter > 0) && (p.RepeatCount >= repeat_filter) ) {
-                           p.Calls[i].fwd-=p.Calls[i].tail_fwd; 
-                           p.Calls[i].rev-=p.Calls[i].tail_rev;
-                           skipped_tail_hom+=p.Calls[i].tail_fwd+p.Calls[i].tail_rev;
-                        }
-*/
-                        if (p.Calls[i].depth() >= min_adepth && p.Calls[i].depth() > 0) {
-                            double err_rate = mean_qual < max_phred ? pow(10,-mean_qual/10.0) : global_error_rate;
-                            // expected number of non-reference bases at this position is error_rate*depth
-                            double pval=(p.Depth*err_rate==0)?0:gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
-                            double padj=total_locii ? pval*total_locii : pval;           // multiple-testing adjustment
-
-                            if (alpha>=1 || padj <= alpha) {
-                                double mq_padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report as better than the mapping quality
-
-                                if (mq_padj > 1) mq_padj=1;
-
-		                        if (debug_xpos) fprintf(stderr,"xpos-debug-pval\tbase:%c, err:%g, pval:%g, padj:%g, mq_padj:%g, mq_sum:%d\n", p.Calls[i].base, err_rate, pval, padj, mq_padj, p.Calls[i].mq_sum);
-
-                                if (!p.Calls[i].is_ref || debug_xpos || output_ref) {
-                                    if (need_out == -1)
-                                        need_out = i;
-                                }
-                                vfinal final(p.Calls[i]);
-                                final.padj=mq_padj;
-                                final_calls.push_back(final);
-                            } else {
-                                skipped_alpha+=p.Calls[i].depth();
                             }
                         }
                     }
-				}
-			} else {
-				skipped_balance+=p.Calls[i].depth();
-			}
-		} else {
-            // depth is too low now.... technically you can just add all the rest of the calls to skipped_depth without checking
-			skipped_depth+=p.Calls[i].depth();
-		}
-	}
+                } else {
+                    skipped_diversity+=p.Calls[i].depth();
+                } 
+            } else {
+                skipped_balance+=p.Calls[i].depth();
+            }
+        } else {
+                // depth is too low now.... technically you can just add all the rest of the calls to skipped_depth without checking
+                skipped_depth+=p.Calls[i].depth();
+        }
+    }
 
     ++Locii;
 
