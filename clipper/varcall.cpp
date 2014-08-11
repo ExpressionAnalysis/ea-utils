@@ -619,7 +619,7 @@ int main(int argc, char **argv) {
     if (total_locii==0) total_locii=1;          // no adjustment
 
     if (eav_f) {
-        fprintf(eav_f,"chr\tpos\tref\tdepth\tnum_states\ttop_consensus\ttop_freq\tvar_base\tvar_depth\tvar_qual\tvar_strands\tforward_strands\treverse_strands\t%cval%s\n", (total_locii>1?'e':'p'), target_annot?"\tin_target":"");
+        fprintf(eav_f,"chr\tpos\tref\tdepth\tnum_states\ttop_consensus\ttop_freq\tvar_base\tvar_depth\tvar_qual\tvar_strands\tforward_strands\treverse_strands\t%cval\tdiversity\tagreement\t%s\n", (total_locii>1?'e':'p'), target_annot?"\tin_target":"");
     }
 
 	if (do_varcall) {
@@ -669,7 +669,7 @@ int main(int argc, char **argv) {
             fprintf(vcf_f, "%s\n", "##fileformat=VCFv4.1");
         }
         if (cse_f) {
-            fprintf(cse_f, "Chr\tPos\tRef\tA\tC\tG\tT\ta\tc\tg\tt\tAq\tCq\tGq\tTq\taq\tcq\tgq\ttq\tRefAllele\n");
+            fprintf(cse_f, "Chr\tPos\tRef\tA\tC\tG\tT\ta\tc\tg\tt\tAq\tCq\tGq\tTq\taq\tcq\tgq\ttq\tRefAllele\tAd\tCd\tGd\tTd\tAg\tCg\tGg\tTg\n");
         }
 
 		parse_bams(vcall, in_n, in, ref);
@@ -1100,7 +1100,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 	}
 
 //    bool quit=0;
-	for (i=0;i<5 && i < Calls.size();++i) {		// total depth (exclude inserts for tot depth, otherwise they are double-counted)
+	for (i=0;i < Calls.size();++i) {		// total depth (exclude inserts for tot depth, otherwise they are double-counted)
         if (Calls[i].depth()>0) {
             double expected=Calls[i].depth()/rds.MeanReadLen();
             double p2=(Calls[i].depth()+depthbypos.size())/(double)(Depth+2*depthbypos.size());
@@ -1356,7 +1356,7 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
                 }
             }
             if (needfai) {
-                faidx.Fetch(ref21, p.Chr, p.Pos-10, p.Pos+10);
+                faidx.Fetch(ref21, p.Chr, p.Pos-10-1, p.Pos+10-1);
             }
         }
         ref21[21]='\0';
@@ -1399,24 +1399,25 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
 	int skipped_depth=0;
 	int skipped_repeat=0;
 	int skipped_diversity=0;
+	int skipped_agreement=0;
 
     vector<vfinal> final_calls;
-	for (i=0;i<p.Calls.size();++i) {		// all calls
-//        printf("CALL TOP: depth:%d base: %c, pd: %d, calls: %d\n", (int) p.Calls[i].depth(), p.Calls[i].base, p.Depth, (int) p.Calls.size());
-	
-		double pct = (double) p.Calls[i].depth()/p.Depth;
-		double qpct = (double) p.Calls[i].qual/p.TotQual;
+    for (i=0;i<p.Calls.size();++i) {		// all calls
+        //        printf("CALL TOP: depth:%d base: %c, pd: %d, calls: %d\n", (int) p.Calls[i].depth(), p.Calls[i].base, p.Depth, (int) p.Calls.size());
 
-		if (!p.Calls[i].base)
-			continue;
+        double pct = (double) p.Calls[i].depth()/p.Depth;
+        double qpct = (double) p.Calls[i].qual/p.TotQual;
 
-		if (!p.Calls[i].depth())
-			continue;
+        if (!p.Calls[i].base)
+            continue;
 
-		double bpct = (double) min(p.Calls[i].fwd,p.Calls[i].rev)/p.Calls[i].depth();
+        if (!p.Calls[i].depth())
+            continue;
+
+        double bpct = (double) min(p.Calls[i].fwd,p.Calls[i].rev)/p.Calls[i].depth();
 
         // REBALANCE READS.... CUTTING OFF HIGH COLUMNS
-		if (pct >= pct_depth && qpct >= pct_qdepth && (p.Calls[i].depth() >= min_adepth)) {
+        if (pct >= pct_depth && qpct >= pct_qdepth && (p.Calls[i].depth() >= min_adepth)) {
             if (bpct < pct_balance) {
                 int fwd_adj=0, rev_adj=0;
                 // f=b*(f+r); r=f/b-f; adj=r-(f/b-f)
@@ -1452,119 +1453,123 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
             if ((bpct >= pct_balance) || (p.Calls[i].depth()<4)) {
                 // reads come from diverse positions
                 if (p.Calls[i].diversity >= min_diversity) {
-                    if (p.Calls[i].base == '+' || p.Calls[i].base == '-') {
-                        // yuk ... time to think about a possible indel call
-                        if (p.Calls[i].depth() >= min_idepth) {
-                            // should really pick more than 1
-                            // but need to allow "similar" indels to pile up
-                            // should group into distinct bins, using some homology thing
-                            sort(p.Calls[i].seqs.begin(), p.Calls[i].seqs.end());
-                            string prev, maxs;
-                            int pcnt=0, maxc=0, j;
-                            for (j=0;j<p.Calls[i].seqs.size();++j) {
-                                if (prev == p.Calls[i].seqs[j]) {
-                                    ++pcnt;
-                                } else {
-                                    if (pcnt > maxc) {
-                                        maxs=prev;
-                                        maxc=pcnt;
-                                    }
-                                    prev=p.Calls[i].seqs[j];
-                                    pcnt=1;
-                                }
-                            }
-                            if (pcnt > maxc) {
-                                maxs=prev;
-                                maxc=pcnt;
-                            }
-                            if (maxc >= min_idepth && maxc >= min_adepth) {
-                                // only calls 1 indel at a given position
-                                if ((repeat_filter == 0) || (p.RepeatCount < repeat_filter)) {
-                                    // maybe use rms here... see if it helps
-                                    double mean_qual = p.Calls[i].qual/(double)p.Calls[i].depth();
-                                    double err_rate = mean_qual < max_phred ? pow(10,-mean_qual/10.0) : global_error_rate;
-                                    // expected number of non-reference = error_rate*depth
-                                    double pval=(p.Depth*err_rate==0)?0:gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
-                                    double padj=total_locii ? pval*total_locii : pval;           // multiple-testing adjustment
-
-                                    if (alpha>=1 || padj <= alpha) {
-                                        vfinal final(p.Calls[i]);
-
-                                        double mq_padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report pval as better than the total mapping quality
-                                        if (debug_xpos) fprintf(stderr,"xpos-debug-pval\tbase:%c, err:%g, pval:%g, padj:%g, mq_padj:%g, mq_sum:%d\n", p.Calls[i].base, err_rate, pval, padj, mq_padj, p.Calls[i].mq_sum);
-
-                                        if (mq_padj > 1) mq_padj=1;
-
-                                        if (need_out == -1) 
-                                            need_out = i;
-
-                                        //                                    printf("FINAL: depth:%d base: %s\n", (int) maxc, maxs.c_str());
-                                        final.padj=mq_padj;
-                                        final.max_idl_cnt=maxc;
-                                        final.max_idl_seq=maxs;
-                                        final_calls.push_back(final);
+                    if (p.Calls[i].agreement >= min_agreement) {
+                        if (p.Calls[i].base == '+' || p.Calls[i].base == '-') {
+                            // yuk ... time to think about a possible indel call
+                            if (p.Calls[i].depth() >= min_idepth) {
+                                // should really pick more than 1
+                                // but need to allow "similar" indels to pile up
+                                // should group into distinct bins, using some homology thing
+                                sort(p.Calls[i].seqs.begin(), p.Calls[i].seqs.end());
+                                string prev, maxs;
+                                int pcnt=0, maxc=0, j;
+                                for (j=0;j<p.Calls[i].seqs.size();++j) {
+                                    if (prev == p.Calls[i].seqs[j]) {
+                                        ++pcnt;
                                     } else {
-                                        skipped_alpha+=p.Calls[i].depth();
+                                        if (pcnt > maxc) {
+                                            maxs=prev;
+                                            maxc=pcnt;
+                                        }
+                                        prev=p.Calls[i].seqs[j];
+                                        pcnt=1;
                                     }
-                                    // implicitly skip all the ohter indel calls at the same locus
-                                    skipped_indel+=p.Calls[i].depth()-maxc;
+                                }
+                                if (pcnt > maxc) {
+                                    maxs=prev;
+                                    maxc=pcnt;
+                                }
+                                if (maxc >= min_idepth && maxc >= min_adepth) {
+                                    // only calls 1 indel at a given position
+                                    if ((repeat_filter == 0) || (p.RepeatCount < repeat_filter)) {
+                                        // maybe use rms here... see if it helps
+                                        double mean_qual = p.Calls[i].qual/(double)p.Calls[i].depth();
+                                        double err_rate = mean_qual < max_phred ? pow(10,-mean_qual/10.0) : global_error_rate;
+                                        // expected number of non-reference = error_rate*depth
+                                        double pval=(p.Depth*err_rate==0)?0:gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
+                                        double padj=total_locii ? pval*total_locii : pval;           // multiple-testing adjustment
+
+                                        if (alpha>=1 || padj <= alpha) {
+                                            vfinal final(p.Calls[i]);
+
+                                            double mq_padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report pval as better than the total mapping quality
+                                            if (debug_xpos) fprintf(stderr,"xpos-debug-pval\tbase:%c, err:%g, pval:%g, padj:%g, mq_padj:%g, mq_sum:%d\n", p.Calls[i].base, err_rate, pval, padj, mq_padj, p.Calls[i].mq_sum);
+
+                                            if (mq_padj > 1) mq_padj=1;
+
+                                            if (need_out == -1) 
+                                                need_out = i;
+
+                                            //                                    printf("FINAL: depth:%d base: %s\n", (int) maxc, maxs.c_str());
+                                            final.padj=mq_padj;
+                                            final.max_idl_cnt=maxc;
+                                            final.max_idl_seq=maxs;
+                                            final_calls.push_back(final);
+                                        } else {
+                                            skipped_alpha+=p.Calls[i].depth();
+                                        }
+                                        // implicitly skip all the ohter indel calls at the same locus
+                                        skipped_indel+=p.Calls[i].depth()-maxc;
+                                    } else {
+                                        skipped_repeat+=p.Calls[i].depth();
+                                    }
                                 } else {
-                                    skipped_repeat+=p.Calls[i].depth();
+                                    skipped_indel+=p.Calls[i].depth();
                                 }
                             } else {
                                 skipped_indel+=p.Calls[i].depth();
                             }
                         } else {
-                            skipped_indel+=p.Calls[i].depth();
-                        }
-                    } else {
-                        if (p.Calls[i].base == '*' && (
-                                    ((repeat_filter > 0) && (p.RepeatCount >= repeat_filter)) || 
-                                    (p.Calls[i].depth() < min_idepth)
-                                    )) {
-                            skipped_indel+=p.Calls[i].depth();
-                        } else {
-                            // subtract inserts from reference .. perhaps > 0 is correct here....
-                            if (p.Calls[i].is_ref && (ins_rev+ins_fwd) > max(min_idepth,min_adepth)) {
-                                p.Calls[i].fwd-=ins_fwd;
-                                p.Calls[i].rev-=ins_rev;
-                            }
+                            if (p.Calls[i].base == '*' && (
+                                        ((repeat_filter > 0) && (p.RepeatCount >= repeat_filter)) || 
+                                        (p.Calls[i].depth() < min_idepth)
+                                        )) {
+                                skipped_indel+=p.Calls[i].depth();
+                            } else {
+                                // subtract inserts from reference .. perhaps > 0 is correct here....
+                                if (p.Calls[i].is_ref && (ins_rev+ins_fwd) > max(min_idepth,min_adepth)) {
+                                    p.Calls[i].fwd-=ins_fwd;
+                                    p.Calls[i].rev-=ins_rev;
+                                }
 
-                            double mean_qual = p.Calls[i].qual/(double)p.Calls[i].depth();
+                                double mean_qual = p.Calls[i].qual/(double)p.Calls[i].depth();
 
-                            /*
-                               if ( (repeat_filter > 0) && (p.RepeatCount >= repeat_filter) ) {
-                               p.Calls[i].fwd-=p.Calls[i].tail_fwd; 
-                               p.Calls[i].rev-=p.Calls[i].tail_rev;
-                               skipped_tail_hom+=p.Calls[i].tail_fwd+p.Calls[i].tail_rev;
-                               }
-                             */
-                            if (p.Calls[i].depth() >= min_adepth && p.Calls[i].depth() > 0) {
-                                double err_rate = mean_qual < max_phred ? pow(10,-mean_qual/10.0) : global_error_rate;
-                                // expected number of non-reference bases at this position is error_rate*depth
-                                double pval=(p.Depth*err_rate==0)?0:gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
-                                double padj=total_locii ? pval*total_locii : pval;           // multiple-testing adjustment
+                                /*
+                                   if ( (repeat_filter > 0) && (p.RepeatCount >= repeat_filter) ) {
+                                   p.Calls[i].fwd-=p.Calls[i].tail_fwd; 
+                                   p.Calls[i].rev-=p.Calls[i].tail_rev;
+                                   skipped_tail_hom+=p.Calls[i].tail_fwd+p.Calls[i].tail_rev;
+                                   }
+                                 */
+                                if (p.Calls[i].depth() >= min_adepth && p.Calls[i].depth() > 0) {
+                                    double err_rate = mean_qual < max_phred ? pow(10,-mean_qual/10.0) : global_error_rate;
+                                    // expected number of non-reference bases at this position is error_rate*depth
+                                    double pval=(p.Depth*err_rate==0)?0:gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
+                                    double padj=total_locii ? pval*total_locii : pval;           // multiple-testing adjustment
 
-                                if (alpha>=1 || padj <= alpha) {
-                                    double mq_padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report as better than the mapping quality
+                                    if (alpha>=1 || padj <= alpha) {
+                                        double mq_padj=max(total_locii*pow(10,-p.Calls[i].mq_sum/10.0),padj);      // never report as better than the mapping quality
 
-                                    if (mq_padj > 1) mq_padj=1;
+                                        if (mq_padj > 1) mq_padj=1;
 
-                                    if (debug_xpos) fprintf(stderr,"xpos-debug-pval\tbase:%c, err:%g, pval:%g, padj:%g, mq_padj:%g, mq_sum:%d\n", p.Calls[i].base, err_rate, pval, padj, mq_padj, p.Calls[i].mq_sum);
+                                        if (debug_xpos) fprintf(stderr,"xpos-debug-pval\tbase:%c, err:%g, pval:%g, padj:%g, mq_padj:%g, mq_sum:%d\n", p.Calls[i].base, err_rate, pval, padj, mq_padj, p.Calls[i].mq_sum);
 
-                                    if (!p.Calls[i].is_ref || debug_xpos || output_ref) {
-                                        if (need_out == -1)
-                                            need_out = i;
+                                        if (!p.Calls[i].is_ref || debug_xpos || output_ref) {
+                                            if (need_out == -1)
+                                                need_out = i;
+                                        }
+                                        vfinal final(p.Calls[i]);
+                                        final.padj=mq_padj;
+                                        final_calls.push_back(final);
+                                    } else {
+                                        skipped_alpha+=p.Calls[i].depth();
                                     }
-                                    vfinal final(p.Calls[i]);
-                                    final.padj=mq_padj;
-                                    final_calls.push_back(final);
-                                } else {
-                                    skipped_alpha+=p.Calls[i].depth();
                                 }
                             }
                         }
-                    }
+                    } else {
+                        skipped_agreement+=p.Calls[i].depth();
+                    } 
                 } else {
                     skipped_diversity+=p.Calls[i].depth();
                 } 
@@ -1572,8 +1577,8 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
                 skipped_balance+=p.Calls[i].depth();
             }
         } else {
-                // depth is too low now.... technically you can just add all the rest of the calls to skipped_depth without checking
-                skipped_depth+=p.Calls[i].depth();
+            // depth is too low now.... technically you can just add all the rest of the calls to skipped_depth without checking
+            skipped_depth+=p.Calls[i].depth();
         }
     }
 
@@ -1623,16 +1628,16 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
             for (i=0;i<final_calls.size();++i) {
                vfinal &f=final_calls[i];
                if (f.is_indel()) {
-                    pil += string_format("\t%c%s:%d,%d,%.1e",f.pcall->base,f.max_idl_seq.c_str(),f.max_idl_cnt,f.pcall->qual/f.pcall->depth(),f.padj);
+                    pil += string_format("\t%c%s:%d,%d,%.1e,%.1g,%.1g",f.pcall->base,f.max_idl_seq.c_str(),f.max_idl_cnt,f.pcall->qual/f.pcall->depth(),f.padj, f.pcall->diversity, f.pcall->agreement);
                } else {
-                    pil += string_format("\t%c:%d,%d,%.1e",f.pcall->base,f.pcall->depth(),f.pcall->qual/f.pcall->depth(),f.padj);
+                    pil += string_format("\t%c:%d,%d,%.1e,%.1g,%.1g",f.pcall->base,f.pcall->depth(),f.pcall->qual/f.pcall->depth(),f.padj, f.pcall->diversity, f.pcall->agreement);
                }
             }
-            fprintf(var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_alpha+skipped_depth+skipped_balance+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, UseAnnot?(p.InTarget ? "\t1" : "\t0"):"", pil.c_str());
+            fprintf(var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_diversity+skipped_agreement+skipped_alpha+skipped_depth+skipped_balance+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, UseAnnot?(p.InTarget ? "\t1" : "\t0"):"", pil.c_str());
 
             if (tgt_var_f) {
                 if (p.InTarget) {
-                    fprintf(tgt_var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_alpha+skipped_depth+skipped_balance+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, pil.c_str());
+                    fprintf(tgt_var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_diversity+skipped_agreement+skipped_alpha+skipped_depth+skipped_balance+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, pil.c_str());
                 }
             }
         }
@@ -1676,7 +1681,7 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
 
         if (eav_f) {
 //            printf(eav_f,"chr\tpos\tref\tdepth\tnum_states\ttop_consensus\ttop_freq\tvar_base\tvar_depth\tvar_qual\tvar_strands\tforward_strands\treverse_strands\n");
-            string top_cons, var_base, var_depth, var_qual, var_strands, forward, reverse;
+            string top_cons, var_base, var_depth, var_qual, var_strands, forward, reverse, diversity, agreement;
            
             float padj=final_calls[0].padj;
             if (final_calls[0].pcall->is_ref && final_calls.size() > 1) {
@@ -1706,8 +1711,12 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
                 forward+= string_format("%d",f.pcall->fwd);
                 if (i > 0) reverse += ";";
                 reverse+= string_format("%d",f.pcall->rev);
+                if (i > 0) agreement += ";";
+                agreement+= string_format("%g",f.pcall->agreement);
+                if (i > 0) diversity += ";";
+                diversity+= string_format("%g",f.pcall->diversity);
             }
-            fprintf(eav_f,"%s\t%d\t%c\t%d\t%d\t%s\t%2.2f\t%s\t%s\t%s\t%s\t%s\t%s\t%.1e%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, (int) final_calls.size(),top_cons.c_str(), pct_allele, var_base.c_str(), var_depth.c_str(), var_qual.c_str(), var_strands.c_str(), forward.c_str(), reverse.c_str(), padj, UseAnnot?(p.InTarget?"\t1":"\t0"):"");
+            fprintf(eav_f,"%s\t%d\t%c\t%d\t%d\t%s\t%2.2f\t%s\t%s\t%s\t%s\t%s\t%s\t%.1e\t%s\t%s%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, (int) final_calls.size(),top_cons.c_str(), pct_allele, var_base.c_str(), var_depth.c_str(), var_qual.c_str(), var_strands.c_str(), forward.c_str(), reverse.c_str(), padj, diversity.c_str(), agreement.c_str(), UseAnnot?(p.InTarget?"\t1":"\t0"):"");
         }
 
 		if (debug_xpos) {
@@ -1717,8 +1726,9 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
 		    fprintf(stderr,"xpos-skip-bal\t%d\n",skipped_balance);
 		    fprintf(stderr,"xpos-skip-depth\t%d\n",skipped_depth);
 		    fprintf(stderr,"xpos-skip-indel\t%d\n",skipped_indel);
-//		    fprintf(stderr,"xpos-skip-tail-imbalance\t%d\n",skipped_tail_hom);
 		    fprintf(stderr,"xpos-skip-repeat\t%d\n",skipped_repeat);
+		    fprintf(stderr,"xpos-skip-diversity\t%d\n",skipped_diversity);
+		    fprintf(stderr,"xpos-skip-agreement\t%d\n",skipped_agreement);
 		    fprintf(stderr,"xpos-skip-alpha\t%d\n",skipped_alpha);
             if (repeat_filter > 0) {
                 fprintf(stderr,"repeat-count\t%d\n",p.RepeatCount);
