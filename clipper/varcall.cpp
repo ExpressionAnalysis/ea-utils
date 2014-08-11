@@ -152,11 +152,11 @@ public:
 
 class vcall {
 public:
-    vcall() {base='\0'; mn_qual=mq0=fwd=rev=qual=is_ref=qual_ssq=mq_sum=mq_ssq=tail_rev=tail_fwd=fwd_q=rev_q=0; diversity=0.0;}
+    vcall() {base='\0'; mn_qual=mq0=fwd=rev=qual=is_ref=qual_ssq=mq_sum=mq_ssq=tail_rev=tail_fwd=fwd_q=rev_q=0; agreement=diversity=0.0;}
     char base;
 	bool is_ref;
     int qual, fwd, rev, mq0, mn_qual, qual_ssq, mq_sum, mq_ssq, tail_rev, tail_fwd, fwd_q, rev_q;
-    double diversity;
+    double diversity, agreement;
 	vector <string> seqs;
     int depth() const {return fwd+rev;}
     int mq_rms() const {return sqrt(mq_ssq/depth());}
@@ -287,6 +287,7 @@ int debug_xpos=0;
 int min_depth=1;
 int min_mapq=0;
 double min_diversity=0.25;     // only skip huge piles in one spot... even a little diversity is OK
+double min_agreement=0.25;     // only skip when like-depth variation wildly disagrees
 int min_qual=3;
 int repeat_filter=7;
 double artifact_filter=1;
@@ -351,7 +352,7 @@ int main(int argc, char **argv) {
 #define MAX_F 20
     const char *format_list[MAX_F]={"var", "eav", "noise", "varsum", NULL};
 
-	while ( (c = getopt_long(argc, argv, "?sv0VBhe:m:N:x:f:p:a:g:q:Q:i:o:D:R:b:L:S:F:A:",NULL,NULL)) != -1) {
+	while ( (c = getopt_long(argc, argv, "?sv0VBhe:m:N:x:f:p:a:g:q:Q:i:o:D:R:b:L:S:F:A:G:",NULL,NULL)) != -1) {
 		switch (c) {
 			case 'h': usage(stdout); return 0;
 			case 'm': umindepth=ok_atoi(optarg); break;
@@ -365,7 +366,8 @@ int main(int argc, char **argv) {
 			case 'D': artifact_filter=atof(optarg);break;
 			case 'i': uminidepth=ok_atoi(optarg);break;
 			case 'd': min_diversity=atof(optarg); break;
-			case '0': min_qual=0; umindepth=0; min_mapq=0; repeat_filter=0; uminadepth=0; artifact_filter=0; uminidepth=0; min_diversity=0; alpha=1; pct_balance=0; upctqdepth=0; break;
+			case 'G': min_agreement=atof(optarg); break;
+			case '0': min_qual=0; umindepth=0; min_mapq=0; repeat_filter=0; uminadepth=0; artifact_filter=0; uminidepth=0; min_diversity=0; alpha=1; pct_balance=0; upctqdepth=0; min_agreement=0; break;
 			case 'x': {
 					debug_xchr=optarg;
 					char *p=strrchr(debug_xchr, ':');
@@ -1097,20 +1099,59 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 		Depth+=Calls[i].depth();
 	}
 
+//    bool quit=0;
 	for (i=0;i<5 && i < Calls.size();++i) {		// total depth (exclude inserts for tot depth, otherwise they are double-counted)
         if (Calls[i].depth()>0) {
             double expected=Calls[i].depth()/rds.MeanReadLen();
+            double p2=(Calls[i].depth()+depthbypos.size())/(double)(Depth+2*depthbypos.size());
             double total_v=0;
             double diff;
+            double momentum_den=0;
+            double p1;
             int j;
+
+/*
+            if(Depth>100 && Calls[i].depth() < 100) {
+                printf("exp: %g, depth: %d, cdep: %d, p2: %g\nv=c(", expected, Depth, Calls[i].depth(), p2);
+                for (j=0;j<depthbyposbycall.size();++j) {
+                    printf("%d,", depthbyposbycall[j].call[i]);
+                }
+                printf(")\nd=c(");
+                for (j=0;j<depthbyposbycall.size();++j) {
+                    printf("%d,", depthbypos[j]);
+                }
+                printf(")\n");
+            }
+
+*/
+            int poscnt=0;
             for (j=0;j<depthbyposbycall.size();++j) {
                 diff=floor(fabs(depthbyposbycall[j].call[i]-expected));
                 total_v+=diff*diff;
+                p1=((depthbyposbycall[j].call[i]+1)/((double)depthbypos[j]+2));
+                momentum_den+=p1*(1-p1)*(depthbypos[j]+2);
+                if (depthbyposbycall[j].call[i] > 0) {
+                    ++poscnt;
+                }
             }
             double shift_v = max(0, total_v-2*Calls[i].depth());
             Calls[i].diversity = max(0,1-shift_v/(pow(Calls[i].depth()-expected,2)-2*Calls[i].depth()));
+            if (poscnt==1) Calls[i].diversity = 0;
+
+            double mom_od=(p2*(1-p2)*(Depth+2*depthbypos.size()))/momentum_den-1;
+            Calls[i].agreement = max(0,1-mom_od);
+
+/*
+            if(Depth>100 && Calls[i].depth() < 100) {
+                printf("num %g, den %g\n", (p2*(1-p2)*(Depth+2*depthbypos.size())), momentum_den);
+                printf(", Agree: %g", Calls[i].agreement);
+                printf(", Divers: %g\n", Calls[i].diversity);
+                quit=1;
+            }
+*/
         }
 	}
+//    if(quit) die("\nDIED\n");
 
 	TotQual=0;
 	for (i=0;i<5 && i < Calls.size();++i) {		// total depth (exclude inserts for tot depth, otherwise they are double-counted)
@@ -1325,7 +1366,7 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
             // silly 15 decimals to match R's default output ... better off with the C default
             static char cse_buf[8192]; 
             #define MEANQ(base,dir) (p.Calls[base].dir?(p.Calls[base].dir##_q/(double)p.Calls[base].dir):0)
-            sprintf(cse_buf,"%s\t%d\t%c\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%s\t%g\t%g\t%g\t%g\n",p.Chr.c_str(), p.Pos, toupper(p.Base)
+            sprintf(cse_buf,"%s\t%d\t%c\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%s\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%g\n",p.Chr.c_str(), p.Pos, toupper(p.Base)
                     , p.Calls[T_A].fwd, p.Calls[T_C].fwd, p.Calls[T_G].fwd, p.Calls[T_T].fwd
                     , p.Calls[T_A].rev, p.Calls[T_C].rev, p.Calls[T_G].rev, p.Calls[T_T].rev
                     , MEANQ(T_A,fwd), MEANQ(T_C,fwd), MEANQ(T_G,fwd), MEANQ(T_T,fwd)
@@ -1335,6 +1376,10 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
                     , p.Calls[T_C].diversity
                     , p.Calls[T_G].diversity
                     , p.Calls[T_T].diversity
+                    , p.Calls[T_A].agreement
+                    , p.Calls[T_C].agreement
+                    , p.Calls[T_G].agreement
+                    , p.Calls[T_T].agreement
             );
             fputs(cse_buf, cse_f);
             // cse requires separate output for on-target (instead of another column)
