@@ -281,7 +281,7 @@ double pct_qdepth=0;
 double global_error_rate=0;
 double max_phred;
 int total_locii=-1;
-double pct_balance=0;
+double pct_balance=1;
 char *debug_xchr=NULL;
 int debug_xpos=0;
 int min_depth=1;
