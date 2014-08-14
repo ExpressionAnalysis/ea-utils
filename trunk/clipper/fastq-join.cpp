@@ -79,7 +79,7 @@ int main (int argc, char **argv) {
 		case 'x': allow_ex = true; break;
 		case 'p': pctdiff = atoi(optarg); break;
 		case 'R': norevcomp = true; break;
-		case 'd': debug = 1; break;
+		case 'd': ++debug; break;
                 case 'v':
                         if (strlen(optarg)>1) {
                                 fprintf(stderr, "Option -v requires a single character argument");
@@ -284,9 +284,6 @@ int main (int argc, char **argv) {
 		if (besto > 0) {
 			++joincnt;
 
-            int l=besto/2;                  // discard from left
-            int r=besto-(besto/2);                  // discard from right
-
 			tlen+=olen;
 			tlensq+=olen*olen;
 
@@ -328,31 +325,32 @@ int main (int argc, char **argv) {
 			for (i = 0; i < besto; ++i ) {
 				int li = fq[0].seq.n-besto+i;
 				int ri = i;
+                if (debug>=2) printf("%c %c / %c %c / ", fq[0].seq.s[li], rc.seq.s[ri], fq[0].qual.s[li], rc.qual.s[ri]);
 				if (fq[0].seq.s[li] == rc.seq.s[ri]) {
 					fq[0].qual.s[li] = max(fq[0].qual.s[li], rc.qual.s[ri]);
                     // bounded improvement in quality, since there's no independence
-					rc.qual.s[ri] = max(fq[0].qual.s[li], rc.qual.s[ri])+min(4,min(fq[0].qual.s[li],rc.qual.s[ri]));
+					// fq[0].qual.s[ri] = max(fq[0].qual.s[li], rc.qual.s[ri])+min(3,min(fq[0].qual.s[li],rc.qual.s[ri])-33);
 				} else {
 					// use the better-quality read
                     // this approximates the formula: E = min(0.5,[(1-e2/2) * e1] / [(1-e1) * e2/2 + (1-e2/2) * e1])
 					if (fq[0].qual.s[li] > rc.qual.s[ri]) {
-						rc.seq.s[ri] = fq[0].seq.s[li];
                         // reduction in quality, based on phred-difference
-					    rc.qual.s[ri] = min(fq[0].qual.s[li],max(fq[0].qual.s[li]-rc.qual.s[ri],3));
+					    fq[0].qual.s[li] = 33+min(fq[0].qual.s[li],max(fq[0].qual.s[li]-rc.qual.s[ri],3));
 					} else {
 						fq[0].seq.s[li] = rc.seq.s[ri];
                         // reduction in quality, based on phred-difference
-					    fq[0].qual.s[li] = min(rc.qual.s[ri],max(rc.qual.s[ri]-fq[0].qual.s[li],3));
+					    fq[0].qual.s[li] = 33+min(rc.qual.s[ri],max(rc.qual.s[ri]-fq[0].qual.s[li],3));
 					}
 				}
+                if (debug>=2) printf("%c %c\n", fq[0].seq.s[li], fq[0].qual.s[li]);
 			}
 
-			fwrite(fq[0].seq.s,1,fq[0].seq.n-l,f);
-			fputs(rc.seq.s+r,f);
+			fwrite(fq[0].seq.s,1,fq[0].seq.n,f);
+			fputs(rc.seq.s+besto,f);
 			fputc('\n',f);
 			fputs(fq[0].com.s,f);
-			fwrite(fq[0].qual.s,1,fq[0].qual.n-l,f);
-			fputs(rc.qual.s+r,f);
+			fwrite(fq[0].qual.s,1,fq[0].qual.n,f);
+			fputs(rc.qual.s+besto,f);
 			fputc('\n',f);
 			fmate=fout[4];
 
