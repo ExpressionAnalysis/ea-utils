@@ -345,15 +345,35 @@ int main(int argc, char **argv) {
 	int do_varcall=0;
 
     char *out_prefix = NULL;
+    bool pcr_annot = false;
     char *target_annot = NULL;
     char *read_stats = NULL;
 
 
+// list of default output formats used when -o is specified
 #define MAX_F 20
     const char *format_list[MAX_F]={"var", "eav", "noise", "varsum", NULL};
 
-	while ( (c = getopt_long(argc, argv, "?sv0VBhe:m:N:x:f:p:a:g:q:Q:i:o:D:R:b:L:S:F:A:G:",NULL,NULL)) != -1) {
+// option characters... use \1, \2... for long-only
+
+    #define OPT_PCR_ANNOT '\1'
+    #define OPT_FILTER_ANNOT 'A'
+
+// long options
+    static struct option long_options[] = {
+       {"pcr-annot", 1, 0, OPT_PCR_ANNOT},
+       {"filter-annot", 1, 0, OPT_FILTER_ANNOT},
+       {"repeat-filter", 1, 0, 'R'},
+       {"agreement", 1, 0, 'G'},
+       {"diversity", 1, 0, 'd'},
+       {"version", 0, 0, 'V'},
+       {0, 0, 0, 0}
+    };
+
+	while ( (c = getopt_long(argc, argv, "?sv0VBhe:m:N:x:f:p:a:g:q:Q:i:o:D:R:b:L:S:F:A:G:",long_options,NULL)) != -1) {
 		switch (c) {
+			case OPT_PCR_ANNOT: target_annot=optarg; pcr_annot=true; break;
+			case OPT_FILTER_ANNOT: target_annot=optarg; pcr_annot=false; break;
 			case 'h': usage(stdout); return 0;
 			case 'm': umindepth=ok_atoi(optarg); break;
 			case 'q': min_qual=ok_atoi(optarg); break;
@@ -361,7 +381,6 @@ int main(int argc, char **argv) {
 			case 'Q': min_mapq=ok_atoi(optarg); break;
 			case 'V': printf("Version: %s.%d\n", VERSION, SVNREV); exit(0); break;
 			case 'R': repeat_filter=ok_atoi(optarg); break;
-			case 'A': target_annot=optarg; break;
 			case 'a': uminadepth=ok_atoi(optarg);break;
 			case 'D': artifact_filter=atof(optarg);break;
 			case 'i': uminidepth=ok_atoi(optarg);break;
@@ -1106,7 +1125,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
             double p2=(Calls[i].depth()+depthbypos.size())/(double)(Depth+2*depthbypos.size());
             double total_v=0;
             double diff;
-            double momentum_den=0;
+            double moment_den=0;
             double p1;
             int j;
 
@@ -1129,7 +1148,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
                 diff=floor(fabs(depthbyposbycall[j].call[i]-expected));
                 total_v+=diff*diff;
                 p1=((depthbyposbycall[j].call[i]+1)/((double)depthbypos[j]+2));
-                momentum_den+=p1*(1-p1)*(depthbypos[j]+2);
+                moment_den+=p1*(1-p1)*(depthbypos[j]+2);
                 if (depthbyposbycall[j].call[i] > 0) {
                     ++poscnt;
                 }
@@ -1138,12 +1157,12 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
             Calls[i].diversity = max(0,1-shift_v/(pow(Calls[i].depth()-expected,2)-2*Calls[i].depth()));
             if (poscnt==1) Calls[i].diversity = 0;
 
-            double mom_od=(p2*(1-p2)*(Depth+2*depthbypos.size()))/momentum_den-1;
+            double mom_od=(p2*(1-p2)*(Depth+2*depthbypos.size()))/moment_den-1;
             Calls[i].agreement = max(0,1-mom_od);
 
 /*
             if(Depth>100 && Calls[i].depth() < 100) {
-                printf("num %g, den %g\n", (p2*(1-p2)*(Depth+2*depthbypos.size())), momentum_den);
+                printf("num %g, den %g\n", (p2*(1-p2)*(Depth+2*depthbypos.size())), moment_den);
                 printf(", Agree: %g", Calls[i].agreement);
                 printf(", Divers: %g\n", Calls[i].diversity);
                 quit=1;
@@ -1628,9 +1647,9 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
             for (i=0;i<final_calls.size();++i) {
                vfinal &f=final_calls[i];
                if (f.is_indel()) {
-                    pil += string_format("\t%c%s:%d,%d,%.1e,%.1g,%.1g",f.pcall->base,f.max_idl_seq.c_str(),f.max_idl_cnt,f.pcall->qual/f.pcall->depth(),f.padj, f.pcall->diversity, f.pcall->agreement);
+                    pil += string_format("\t%c%s:%d,%d,%.1e,%.2g,%.2g",f.pcall->base,f.max_idl_seq.c_str(),f.max_idl_cnt,f.pcall->qual/f.pcall->depth(),f.padj, f.pcall->diversity, f.pcall->agreement);
                } else {
-                    pil += string_format("\t%c:%d,%d,%.1e,%.1g,%.1g",f.pcall->base,f.pcall->depth(),f.pcall->qual/f.pcall->depth(),f.padj, f.pcall->diversity, f.pcall->agreement);
+                    pil += string_format("\t%c:%d,%d,%.1e,%.2g,%.2g",f.pcall->base,f.pcall->depth(),f.pcall->qual/f.pcall->depth(),f.padj, f.pcall->diversity, f.pcall->agreement);
                }
             }
             fprintf(var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_diversity+skipped_agreement+skipped_alpha+skipped_depth+skipped_balance+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, UseAnnot?(p.InTarget ? "\t1" : "\t0"):"", pil.c_str());
@@ -1858,7 +1877,7 @@ void usage(FILE *f) {
 "Options (later options override earlier):\n"
 "\n"
 "-s          Calculate statistics\n"
-"-v          Calculate variants bases on supplied parameters (see -S)\n"
+"-v|version  Calculate variants bases on supplied parameters (see -S)\n"
 "-f          Reference fasta (required if using bams, ignored otherwise)\n"
 "-m          Min locii depth (1)\n"
 "-a          Min allele depth (2)\n"
@@ -1867,7 +1886,8 @@ void usage(FILE *f) {
 "-Q          Min mapping quality (0)\n"
 "-b          Min pct balance (strand/total) (0)\n"
 "-D FLOAT    Max duplicate read fraction (depth/length per position) (1)\n"
-"-d FLOAT    Minimum diversity (CV from optimal depth) (0.5)\n"
+"-d FLOAT    Minimum diversity (CV from optimal depth) (0.25)\n"
+"-G FLOAT    Minimum agreement (Weighted CV of positional variation) (0.25)\n"
 "-0          Zero out all filters, set e-value filter to 1, report everything\n"
 "-B          If running from a BAM, turn off BAQ correction (false)\n"
 "-R          Homopolymer repeat indel filtering (8)\n"
@@ -1875,11 +1895,18 @@ void usage(FILE *f) {
 "-g FLOAT    Global minimum error rate (default: assume phred is ok)\n"
 "-l INT      Number of locii in total pileup used for bonferroni (1 mil)\n"
 "-x CHR:POS  Output this pos only, then quit\n"
-"-N FIL      Output noise stats to FIL\n"
-"-S FIL      Read in statistics and params from a previous run with -s (do this!)\n"
+"-N FILE     Output noise stats to FIL\n"
+"-S FILE     Read in statistics and params from a previous run with -s (do this!)\n"
 "-A ANNOT    Calculate in-target stats using the annotation file (requires -o)\n"
 "-o PREFIX   Output prefix (note: overlaps with -N)\n"
 "-F files    List of file types to output (var, varsum, eav, vcf)\n"
+"\n"
+"Extended Options\n"
+"\n"
+"--pcr-annot   BED      Only include reads adhering to the expected amplicons\n"
+"--stranded    TYPE     Can be FR (the default), FF, FR.  Used with pcr-annot\n"
+"--diversity|d FLOAT    Alias for -d\n"
+"--agreement|G FLOAT    Alias for -G\n"
 "\n"
 "Input files\n"
 "\n"
@@ -2056,4 +2083,5 @@ bool Faidx::Fetch(char *buf, const Faient *ent, int pos_from, int pos_to) {
     }
     return l==len;
 }
+
 
