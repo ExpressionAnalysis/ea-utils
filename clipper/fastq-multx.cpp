@@ -1093,7 +1093,7 @@ void pickbest(const void *nodep, const VISIT which, const int depth)
 {
 	if (which==endorder || which==leaf) {
 		bnode *ent = *(bnode **) nodep;
-		 printf("HERE!! %s, %d, %d\n", ent->seq, ent->cnt, pickmax);
+//		 printf("HERE!! %s, %d, %d\n", ent->seq, ent->cnt, pickmax);
 		// allow one sample to be as much as 1/10 another, possibly too conservative
 		if (ent->cnt > pickmax && bcnt < MAX_BARCODE_NUM) {
 			bc[bcnt].seq.s=ent->seq;
