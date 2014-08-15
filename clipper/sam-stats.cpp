@@ -810,8 +810,34 @@ void sstats::dostats(string name, int rlen, int bits, const string &ref, int pos
 	if (trackdup) {
 		size_t p;
         // illumina mode... check for a space in the name, and ignore stuff after it
-		if ((p = name.find_first_of(' '))!=string::npos) 
+        // @HWI-ST1131:111228:C0B0NACXX:2:1101:1230:2118 1:N:0
+
+        /// most aligners remove the space... but not all
+		if (((p = name.find_first_of(' '))!=string::npos) ) {
 			name.resize(p);
+        }
+
+        /// remove up to flowcell serial number... in case this is a mixture
+        if (((p = name.find_first_of(':'))!=string::npos) ) {
+            if (((p = name.find_first_of(':', p+1))!=string::npos) ) {
+                name=name.substr(p+1);
+                // D0H4MACXX:3:2307:8426:193536
+                if (((p = name.find_first_of(':'))!=string::npos) ) {
+                    if (((p = name.find_first_of(':', p+1))!=string::npos) ) {
+                        if (isdigit(name[p+1])) {
+                            struct id_t { uint16_t i1, i2; uint32_t i3; };
+                            if (((name.length()-p-1)-1) > (sizeof(struct id_t)+1)) {
+                                struct id_t id;
+                                if (sscanf(name.data()+p+1,"%hu:%hu:%u", &id.i1, &id.i2, &id.i3) == 3) {
+                                    * (struct id_t *) (void *) (name.data()+p+1) = id;
+                                    name.resize(p+1+sizeof(id_t));
+                                }
+                            }
+                        }
+                    }
+                } 
+            }
+        }
 
         // count dups for that id
 		int x=++dups[name];
