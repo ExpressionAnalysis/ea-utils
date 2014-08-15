@@ -93,7 +93,7 @@ void pickbest(const void *nodep, const VISIT which, const int depth);
 int bnodecomp(const void *a, const void *b) {return strcmp(((bnode*)a)->seq,((bnode*)b)->seq);};
 static float pickmaxpct=0.10;
 void getbcfromheader(struct fq *fqin, struct fq *bc, char **s2=NULL, int *ns2=NULL);
-void getbcfromheader(char *s, int *ns, char **s2=NULL, int *ns2=NULL);
+void getbcfromheader(char *s, int *ns, char **q=NULL, char **s2=NULL, int *ns2=NULL);
 
 int ignore;
 size_t ignore_st;
@@ -288,6 +288,7 @@ int main (int argc, char **argv) {
             char *q = NULL; size_t nq = 0;
 			double tots=0, totsq=0;
 		    char *s2 = NULL; int ns2=0;
+            char *ignore_s=NULL;
 	
 			stat(in[i], &st);
 
@@ -299,17 +300,12 @@ int main (int argc, char **argv) {
 
                 if (bcinheader) {
                     // read in 3 more lines (seq, comment, qual) and ignore them
-                    ignore=getline(&q, &ignore_st, fin[i]);
-                    ignore=getline(&q, &ignore_st, fin[i]);
-                    nq=getline(&q, &ignore_st, fin[i]);
-                    getbcfromheader(s, &ns, &s2, &ns2);
-                    if (nq < ns) {
-                        q=(char*)realloc(q,ns+1);
-                        nq=ns;
-                    }
-                    memset(q,'h',ns);
-                    q[nq=ns]='\0';
-                }  else {
+                    ignore=getline(&ignore_s, &ignore_st, fin[i]);
+                    ignore=getline(&ignore_s, &ignore_st, fin[i]);
+                    ignore=getline(&ignore_s, &ignore_st, fin[i]);
+                    getbcfromheader(s, &ns, &q, &s2, &ns2);
+                    nq=ns;
+               }  else {
                     // read in 3 more lines (seq, comment, qual)
                     if ((ns=getline(&s, &na, fin[i])) <=0)
                         break;
@@ -547,7 +543,9 @@ int main (int argc, char **argv) {
                     ignore=getline(&q, &ignore_st, fin[i]);
                     ignore=getline(&q, &ignore_st, fin[i]);
                     ignore=getline(&q, &ignore_st, fin[i]);
+                    /// no dual barcode detection allowed
                     getbcfromheader(s, &ns);
+                    printf("bc is %s\n", s);
             } else {
                 if ((ns=getline(&s, &na, gin)) <=0)
                     break;
@@ -592,7 +590,8 @@ int main (int argc, char **argv) {
                 ignore=getline(&q, &ignore_st, fin[i]);
                 ignore=getline(&q, &ignore_st, fin[i]);
                 ignore=getline(&q, &ignore_st, fin[i]);
-                getbcfromheader(s, &ns);
+                getbcfromheader(s, &ns, &q);
+                printf("bc is %s\n", s);
             } else {
                 if ((ns=getline(&s, &na, gin)) <=0)
                     break;
@@ -600,9 +599,8 @@ int main (int argc, char **argv) {
                 ignore=getline(&q, &ignore_st, gin);
                 if (getline(&q, &ignore_st, gin) != ns)
                     break;
+			    s[--ns]='\0'; q[ns]='\0';
             }
-
-			s[--ns]='\0'; q[ns]='\0';
 
 			if (st.st_size > (sampcnt * 500) && poorqual(i, ns, s, q)) 
 				continue;
@@ -890,14 +888,15 @@ int main (int argc, char **argv) {
         }
 
 		if (debug) {
-			fq[0].id.s[fq[0].id.n-1] = '\0';
+			if (!bcinheader) fq[0].id.s[fq[0].id.n-1] = '\0';
 			fprintf(stderr, "id: %s, seq: %s %d", fq[0].id.s, fq[0].seq.s, fq[0].seq.n);
 			if (dual) fprintf(stderr, ", sdual: %s %d", fq[1].seq.s, fq[1].seq.n);
-			fq[0].id.s[fq[0].id.n] = '\n';
+			if (!bcinheader) fq[0].id.s[fq[0].id.n] = '\n';
 			if (debug > 1) printf("\n");
 		}
 
         if (quality > 0) {
+            // low quality base = 'N'
             for (i=0;i<fq[0].seq.n;++i) {
                 if (fq[0].qual.s[i]<quality) {
                     fq[0].seq.s[i]='N';
@@ -1094,7 +1093,7 @@ void pickbest(const void *nodep, const VISIT which, const int depth)
 {
 	if (which==endorder || which==leaf) {
 		bnode *ent = *(bnode **) nodep;
-		// printf("HERE!! %s, %d, %d\n", ent->seq, ent->cnt, pickmax);
+		 printf("HERE!! %s, %d, %d\n", ent->seq, ent->cnt, pickmax);
 		// allow one sample to be as much as 1/10 another, possibly too conservative
 		if (ent->cnt > pickmax && bcnt < MAX_BARCODE_NUM) {
 			bc[bcnt].seq.s=ent->seq;
@@ -1144,6 +1143,7 @@ void usage(FILE *f) {
 "-l BCFIL    Determine barcodes from any read, using BCFIL as a master list\n"
 "-L BCFIL    Determine barcodes from <read1.fq>, using BCFIL as a master list\n"
 "-B BCFIL    Use barcodes from BCFIL, no determination step, codes in <read1.fq>\n"
+"-H          Use barcodes from illumina's header, instead of a read\n"
 "-b          Force beginning of line (5') for barcode matching\n"
 "-e          Force end of line (3') for batcode matching\n"
 "-t NUM      Divide threshold for auto-determine by factor NUM (1), > 1 = more sensitive\n"
@@ -1159,18 +1159,24 @@ void usage(FILE *f) {
 
 void getbcfromheader(struct fq *fq, struct fq *bc, char **s2, int *ns2) {
     // reallocate bc to match fq
+    // warning... result has no newline!
+
+    // copy id to sequence
     bc->seq.s=(char *)realloc(bc->seq.s,fq->id.n+1);
     strncpy(bc->seq.s,fq->id.s,fq->id.n+1);
     bc->seq.n=fq->id.n;
     bc->seq.a=fq->id.n+1;
-    getbcfromheader(bc->seq.s, &(bc->seq.n), s2, ns2);
-    bc->qual.s=(char *)realloc(bc->qual.s,bc->seq.n);
-    memset(bc->qual.s,'h',bc->seq.n);
+
+
+    // this extracts the new sequence
+    getbcfromheader(bc->seq.s, &(bc->seq.n), &(bc->qual.s), s2, ns2);
     bc->qual.n=bc->seq.n;
+
+//printf("DEBUG: seq is %s, length is %d\n", bc->seq.s, bc->seq.n);
 }
 
 // looks for barcode in s, totally replaces s with barcode only, sets ns to length
-void getbcfromheader(char *s, int *ns, char **s2, int *ns2) {
+void getbcfromheader(char *s, int *ns, char **q, char **s2, int *ns2) {
     char *p=strchr(s, ' ');
     if (!p) {
         fprintf(stderr,"Barcode not in header: %s.\n", s);
@@ -1182,15 +1188,25 @@ void getbcfromheader(char *s, int *ns, char **s2, int *ns2) {
         p=t+1;
     }
 
+    // remove newline
     if (s[*ns-1] == '\n') {
+        if (s[*ns-1] == '\r') {
+            --*ns;
+        }
         --*ns;
         s[*ns]='\0';
     }
 
+    // result has no newline
     *ns-=(p-s);
-    memmove(s,p+1,*ns);
-    s=p;
+    memmove(s,p,*ns);
     s[*ns]='\0';
+
+    if (q) {
+        *q=(char*)realloc(*q,(*ns)+1);
+        memset(*q,'h',*ns);
+        (*q)[*ns]='\0';
+    }
 
     if (p=strchr(s,'+')) {
         *p='\0';
