@@ -180,8 +180,9 @@ bool sortreffirst (const vfinal &i,const vfinal &j) {return (i.pcall->is_ref&&!j
 class Read {
 public:
     int MapQ;
+    int Pos;
     string Seq;
-    Read() {MapQ=0;};
+    Read() {MapQ=Pos=0;};
 };
 
 class PileupReads {
@@ -212,7 +213,7 @@ public:
     int RepeatCount;
     char RepeatBase;
 
-	PileupSummary(char *line, PileupReads &reads);
+	PileupSummary(char *line, PileupReads &reads, tidx *annot=NULL, char annot_type='\0');
     PileupSummary() { Base = '\0'; Pos=-1; };
 };
 
@@ -226,7 +227,7 @@ class PileupVisitor {
         
         PileupReads Reads;
         PileupVisitor() {InputType ='\0';}
-		void Parse(char *dat) {PileupSummary p(dat, Reads); Visit(p);};
+		void Parse(char *dat) {PileupSummary p(dat, Reads, UseAnnot ? &AnnotDex : NULL, AnnotType); Visit(p);};
         void LoadAnnot(const char *annot_file);
 		virtual void Visit(PileupSummary &dat)=0;
 		virtual void Finish()=0;
@@ -449,7 +450,7 @@ int main(int argc, char **argv) {
 
         varsum_f = openordie(string_format("%s.varsum.tmp", out_prefix).c_str(), "w");
 
-        if (target_annot) {
+        if (target_annot && !pcr_annot) {
             // targted only output
             tgt_var_f = openordie(string_format("%s.tgt.var.tmp", out_prefix).c_str(), "w");
             fprintf(tgt_var_f,"%s\t%s\t%s\t%s\t%s\t%s\t%s\n","chr", "pos", "ref", "depth", "skip", "pct", "...");
@@ -467,7 +468,7 @@ int main(int argc, char **argv) {
             cse_f = openordie(string_format("%s.cse.tmp", out_prefix).c_str(), "w");
             faidx.Load(ref);
             // targted only output
-            if (target_annot) 
+            if (target_annot && ! pcr_annot) 
                 tgt_cse_f = openordie(string_format("%s.tgt.cse.tmp", out_prefix).c_str(), "w");
         }
     } else {
@@ -638,7 +639,7 @@ int main(int argc, char **argv) {
     if (total_locii==0) total_locii=1;          // no adjustment
 
     if (eav_f) {
-        fprintf(eav_f,"chr\tpos\tref\tdepth\tnum_states\ttop_consensus\ttop_freq\tvar_base\tvar_depth\tvar_qual\tvar_strands\tforward_strands\treverse_strands\t%cval\tdiversity\tagreement\t%s\n", (total_locii>1?'e':'p'), target_annot?"\tin_target":"");
+        fprintf(eav_f,"chr\tpos\tref\tdepth\tnum_states\ttop_consensus\ttop_freq\tvar_base\tvar_depth\tvar_qual\tvar_strands\tforward_strands\treverse_strands\t%cval\tdiversity\tagreement\t%s\n", (total_locii>1?'e':'p'), (target_annot && !pcr_annot) ?"\tin_target":"");
     }
 
 	if (do_varcall) {
@@ -895,7 +896,7 @@ class q_calls {public: q_calls() {meminit(call);} int call[8];};
 vector<int> depthbypos;
 vector<q_calls> depthbyposbycall;
 
-PileupSummary::PileupSummary(char *line, PileupReads &rds) {
+PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atype) {
 
 	vector<char *> d=split(line, '\t');
 
@@ -937,6 +938,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 			++cur_p;
             Read x;
             x.MapQ = *cur_p-phred;
+            x.Pos = Pos;
             ++cur_p;
             if (read_i != rds.ReadList.end()) {
                 ++read_i;
@@ -948,10 +950,12 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
             warn("warning\tread start without '^', partial pileup: '%s'\n", cur_p);
             Read x;
             x.MapQ = -1;
+            x.Pos = -1;
             read_i=rds.ReadList.insert(read_i,x);
         }
 
-        int pia = read_i->Seq.length()+1;
+        // position of read relative to my position
+        int pia = read_i->Pos >= 0 ? Pos-read_i->Pos : 0;
 		if (pia >= depthbypos.size()) {
 			depthbypos.resize(pia+1);
 			depthbyposbycall.resize(pia+1);
@@ -1117,6 +1121,16 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds) {
 	for (i=0;i<5 && i < Calls.size();++i) {		// total depth (exclude inserts for tot depth, otherwise they are double-counted)
 		Depth+=Calls[i].depth();
 	}
+
+    if (debug_xpos) {
+        if (Pos == debug_xpos && !strcmp(debug_xchr,Chr.data())) {
+            fprintf(stderr,"xpos-depth-list\t");
+            for (i=0;i<depthbypos.size();++i) {
+                fprintf(stderr,"%d,", depthbypos[i]);
+            }
+            fprintf(stderr,"\n");
+        }
+    }
 
 //    bool quit=0;
 	for (i=0;i < Calls.size();++i) {		// total depth (exclude inserts for tot depth, otherwise they are double-counted)
