@@ -66,7 +66,7 @@ void usage(FILE *f);
     #define debug(s,...)
 #endif
 #undef warn
-#define warn(s,...) ++errs; fprintf(stderr,s,##__VA_ARGS__)
+#define warn(s,...) (++errs, fprintf(stderr,s,##__VA_ARGS__))
 #define die(s,...) (fprintf(stderr,s,##__VA_ARGS__), exit(1))
 #define stat_out(s,...) fprintf(stat_fout,s,##__VA_ARGS__)
 #define stdev(cnt, sum, ssq) sqrt((((double)cnt)*ssq-pow((double)sum,2)) / ((double)cnt*((double)cnt-1)))
@@ -206,6 +206,7 @@ public:
     bool InTarget;
 
     int SkipN;
+    int SkipAmp;
     int SkipDupReads;
     int SkipMinMapq;
     int SkipMinQual;
@@ -221,7 +222,7 @@ class PileupVisitor {
     public:
         char InputType;
 
-        bool UseAnnot;
+        int UseAnnot;
         tidx AnnotDex;          // start/stop index file
         char AnnotType;         // b (bed) or g (gtf - preferred)
         
@@ -256,12 +257,13 @@ class VarCallVisitor : public PileupVisitor {
 
     public:
     int WinMax;
-    VarCallVisitor() : PileupVisitor() {SkippedDepth=0;WinMax=0;Hets=0;Homs=0;Locii=0;};
+    VarCallVisitor() : PileupVisitor() {SkippedAnnot=0;SkippedDepth=0;WinMax=0;Hets=0;Homs=0;Locii=0;};
 
     void Visit(PileupSummary &dat);
     void Finish();
 
 	int SkippedDepth;
+	int SkippedAnnot;
 	int Locii;
 	int Hets;
 	int Homs;
@@ -332,6 +334,7 @@ int str_in(const char *needle, const char **haystack) {
 
 
 Faidx faidx;
+bool pcr_annot = false;
 
 int main(int argc, char **argv) {
 	char c;
@@ -346,7 +349,6 @@ int main(int argc, char **argv) {
 	int do_varcall=0;
 
     char *out_prefix = NULL;
-    bool pcr_annot = false;
     char *target_annot = NULL;
     char *read_stats = NULL;
 
@@ -446,7 +448,7 @@ int main(int argc, char **argv) {
 
         var_f = openordie(string_format("%s.var.tmp", out_prefix).c_str(), "w");
 
-        fprintf(var_f,"%s\t%s\t%s\t%s\t%s\t%s\t%s%s\n","chr", "pos", "ref", "depth", "skip", "pct", target_annot ? "target\t" : "", "...");
+        fprintf(var_f,"%s\t%s\t%s\t%s\t%s\t%s\t%s%s\n","chr", "pos", "ref", "depth", "skip", "pct", (target_annot&&!pcr_annot) ? "target\t" : "", "...");
 
         varsum_f = openordie(string_format("%s.varsum.tmp", out_prefix).c_str(), "w");
 
@@ -701,6 +703,7 @@ int main(int argc, char **argv) {
         fprintf(varsum_f,"hom calls\t%d\n", vcall.Homs);
         fprintf(varsum_f,"het calls\t%d\n", vcall.Hets);
         fprintf(varsum_f,"locii below depth\t%d\n", vcall.SkippedDepth);
+        fprintf(varsum_f,"locii outside annot\t%d\n", vcall.SkippedAnnot);
 
         if (out_prefix) {
             // close it all
@@ -889,12 +892,15 @@ void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref) {
 
 bool hitoloint (int i,int j) { return (i>j);}
 
-int track_readlen[10000];
-
-
 class q_calls {public: q_calls() {meminit(call);} int call[8];};
 vector<int> depthbypos;
 vector<q_calls> depthbyposbycall;
+typedef struct  {
+    string Chr;
+    int Beg;
+    int End;
+} ChrRange;
+
 
 PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atype) {
 
@@ -913,6 +919,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
 	Depth = atoi(d[3]);
 	SkipDupReads = 0;
 	SkipN = 0;
+	SkipAmp = 0;
 	SkipMinQual = 0;
 	SkipMinMapq = 0;
 	RepeatCount = 0;
@@ -930,6 +937,38 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
     memset(depthbyposbycall.data(),0,depthbyposbycall.size()*sizeof(depthbyposbycall[0]));
 
     int eor=0;
+
+    // list of amplicon range objects
+    vector<ChrRange> amps;
+
+    if (pcr_annot && adex) {
+        const std::vector <long int> * v = &(adex->lookup(Chr.data(), Pos + (atype=='b' ? -1 : 0)));
+        string s = adex->lookup(Chr.data(), Pos + (atype=='b' ? -1 : 0), "^");
+        if (s.length()) {
+            vector<char *> a=split((char *)s.data(), '^');
+            // skip leading entry...
+            for(i=1;i<a.size();++i) {
+                vector<char *> f=split(a[i], '\t');
+                // create new range object
+                if (f.size() >= 3) {
+                    ChrRange amp;
+                    amp.Chr=f[0];
+                    amp.Beg=atoi(f[1]);
+                    amp.End=atoi(f[2]);
+                    if (atype=='b') {
+                        ++amp.Beg;
+                    } 
+                    if ((amp.End < amp.Beg) || !amp.Beg) {
+                        die("Annotation file must be in bed or gtf format, or at least a 1-based inclusive set of ranges\n"); 
+                    }
+//                    warn("AMP: %s:%d-%d\n",amp.Chr.data(),amp.Beg,amp.End);
+                    amps.push_back(amp);
+                }
+            }
+        }
+    }
+
+    int j;
 	for (i=0;i<Depth;++i,++read_i) {
 		bool sor=0;
 
@@ -954,6 +993,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
             read_i=rds.ReadList.insert(read_i,x);
         }
 
+
         // position of read relative to my position
         int pia = read_i->Pos >= 0 ? Pos-read_i->Pos : 0;
 		if (pia >= depthbypos.size()) {
@@ -961,7 +1001,6 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
 			depthbyposbycall.resize(pia+1);
 		}
 		depthbypos[pia]++;
-
 
 		if (sor) 
 			++NumReads;
@@ -983,12 +1022,32 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
 		}
 
 		bool skip = 0;
+        bool ampok = !pcr_annot || !adex;
 
-        // probably should not be adding anything here... but the old code added 1 and floored... new code adds .5 and rounds... which is comparable
-        // really.. should just be adding zero, the reason the old code had it was because of a lack of max()
-		if (c == 'N') {
+        if (!ampok) {
+            for (j=0;j<amps.size();++j) {
+                int apos = read_i->Pos + rds.MeanReadLen() + 1;
+                int bpos = read_i->Pos + rds.MeanReadLen();
+                int cpos = read_i->Pos + rds.MeanReadLen() - 1;
+                if (apos == amps[j].End || bpos == amps[j].End || cpos == amps[j].End) {
+                    ampok=1;
+                }
+                if (read_i->Pos == amps[j].Beg) {
+                    ampok=1;
+                    break;
+                }
+            }
+        }
+
+		if (!ampok) {
+//            warn("SKIP: %d-%d, %c\n", read_i->Pos, (int)(read_i->Pos+rds.MeanReadLen()), o);
+            ++SkipAmp;
+            skip=1;
+		} else if (c == 'N') {
 			++SkipN;
 			skip=1;
+            // probably should not be adding anything here... but the old code added 1 and floored... new code adds .5 and rounds... which is comparable
+            // really.. should just be adding zero, the reason the old code had it was because of a lack of max()
 		} else if (artifact_filter > 0 && (depthbypos[pia] > max(1,rand_round(0.5+artifact_filter * (Depth/rds.MeanReadLen()))))) {
 			++SkipDupReads;
 			skip=1;
@@ -1350,6 +1409,7 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
             fprintf(stderr,"xpos-skip-depth\t%d < %d\n",p.Depth, min_depth);
 		    fprintf(stderr,"xpos-skip-dup\t%d\n",p.SkipDupReads);
 		    fprintf(stderr,"xpos-skip-n\t%d\n",p.SkipN);
+		    fprintf(stderr,"xpos-skip-amp\t%d\n",p.SkipAmp);
 		    fprintf(stderr,"xpos-skip-mapq\t%d\n",p.SkipMinMapq);
 		    fprintf(stderr,"xpos-skip-qual\t%d\n",p.SkipMinQual);
         }
@@ -1362,6 +1422,15 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
         const std::vector <long int> * v = &(AnnotDex.lookup(p.Chr.data(), p.Pos + (AnnotType=='b' ? -1 : 0)));
         if (v && v->size()) {
             p.InTarget=1;
+        }
+        if (pcr_annot) {
+            if (!p.InTarget) {
+                ++SkippedAnnot;
+                return;
+            }
+            // mode 2 ... ?   never happens... since you skip, right .. but if the code changes
+            // you'll need to keep track of this other way of using annotations
+            UseAnnot=2;
         }
     }
 
@@ -1666,11 +1735,11 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
                     pil += string_format("\t%c:%d,%d,%.1e,%.2g,%.2g",f.pcall->base,f.pcall->depth(),f.pcall->qual/f.pcall->depth(),f.padj, f.pcall->diversity, f.pcall->agreement);
                }
             }
-            fprintf(var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_diversity+skipped_agreement+skipped_alpha+skipped_depth+skipped_balance+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, UseAnnot?(p.InTarget ? "\t1" : "\t0"):"", pil.c_str());
+            fprintf(var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_diversity+skipped_agreement+skipped_alpha+skipped_depth+skipped_balance+p.SkipAmp+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, UseAnnot==1?(p.InTarget ? "\t1" : "\t0"):"", pil.c_str());
 
             if (tgt_var_f) {
                 if (p.InTarget) {
-                    fprintf(tgt_var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_diversity+skipped_agreement+skipped_alpha+skipped_depth+skipped_balance+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, pil.c_str());
+                    fprintf(tgt_var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_diversity+skipped_agreement+skipped_alpha+skipped_depth+skipped_balance+p.SkipAmp+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, pil.c_str());
                 }
             }
         }
@@ -1749,7 +1818,7 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
                 if (i > 0) diversity += ";";
                 diversity+= string_format("%g",f.pcall->diversity);
             }
-            fprintf(eav_f,"%s\t%d\t%c\t%d\t%d\t%s\t%2.2f\t%s\t%s\t%s\t%s\t%s\t%s\t%.1e\t%s\t%s%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, (int) final_calls.size(),top_cons.c_str(), pct_allele, var_base.c_str(), var_depth.c_str(), var_qual.c_str(), var_strands.c_str(), forward.c_str(), reverse.c_str(), padj, diversity.c_str(), agreement.c_str(), UseAnnot?(p.InTarget?"\t1":"\t0"):"");
+            fprintf(eav_f,"%s\t%d\t%c\t%d\t%d\t%s\t%2.2f\t%s\t%s\t%s\t%s\t%s\t%s\t%.1e\t%s\t%s%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, (int) final_calls.size(),top_cons.c_str(), pct_allele, var_base.c_str(), var_depth.c_str(), var_qual.c_str(), var_strands.c_str(), forward.c_str(), reverse.c_str(), padj, diversity.c_str(), agreement.c_str(), UseAnnot==1?(p.InTarget?"\t1":"\t0"):"");
         }
 
 		if (debug_xpos) {
@@ -1791,6 +1860,7 @@ void PileupVisitor::LoadAnnot(const char *path) {
     if (!strcmp(fext(path), ".gtf"))  
         AnnotType='g';
 
+
     if (!AnnotType) { 
         // try to detect it?
         line l; meminit(l);
@@ -1798,13 +1868,14 @@ void PileupVisitor::LoadAnnot(const char *path) {
         while(read_line(f, l)>0) {
             vector<char *> d=split(l.s, '\t');
             if (d.size() >= 7) {
-                AnnotType = (*d[5]=='+' || *d[5] == '-') ? 'b' : '\0';  
-                AnnotType = (*d[6]=='+' || *d[6] == '-') ? 'g' : AnnotType;
+                AnnotType = (*d[5]=='+' || *d[5] == '-') ? 'b' : AnnotType;
+
+                if (!AnnotType)  
+                    AnnotType = (*d[6]=='+' || *d[6] == '-') ? 'g' : AnnotType;
             }
             break;
         }
-        if (AnnotType)
-            warn("detect annot\t%c\n", AnnotType);
+        warn("detect-annot\t%s\n", AnnotType == 'g' ? "gtf" : AnnotType == 'b' ? "bed" : "unknown");
     }
 
     fclose(f);
@@ -2020,12 +2091,13 @@ double quantile(const std::vector<double> &vec, double p) {
 
 std::vector<char *> split(char* str,const char* delim)
 {
-    char* token = strtok(str,delim);
+    char *sav;
+    char* token = strtok_r(str,delim, &sav);
     std::vector<char *> result;
     while(token != NULL)
     {
         result.push_back(token);
-        token = strtok(NULL,delim);
+        token = strtok_r(NULL,delim, &sav);
     }
     return result;
 }
