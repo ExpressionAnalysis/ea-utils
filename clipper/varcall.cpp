@@ -1195,11 +1195,13 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
 	for (i=0;i < Calls.size();++i) {		// total depth (exclude inserts for tot depth, otherwise they are double-counted)
         if (Calls[i].depth()>0) {
             double expected=Calls[i].depth()/rds.MeanReadLen();
-            double p2=(Calls[i].depth()+depthbypos.size())/(double)(Depth+2*depthbypos.size());
+            double p2=(Calls[i].depth()+2*expected*depthbypos.size())/(double)(Depth+2*depthbypos.size());
             double total_v=0;
             double diff;
             double moment_den=0;
             double p1;
+            double pdiff;
+            double cube_v=0;
             int j;
 
 /*
@@ -1218,20 +1220,23 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
 */
             int poscnt=0;
             for (j=0;j<depthbyposbycall.size();++j) {
+                // diversity calc
                 diff=floor(fabs(depthbyposbycall[j].call[i]-expected));
                 total_v+=diff*diff;
-                p1=((depthbyposbycall[j].call[i]+1)/((double)depthbypos[j]+2));
-                moment_den+=p1*(1-p1)*(depthbypos[j]+2);
                 if (depthbyposbycall[j].call[i] > 0) {
                     ++poscnt;
                 }
+
+                p1=((depthbyposbycall[j].call[i]+expected*2)/((double)depthbypos[j]+2));
+                pdiff=fabs(p1-p2);
+                cube_v += max(depthbypos[j]*pdiff*pdiff*pdiff-.25,0);
             }
             double shift_v = max(0, total_v-2*Calls[i].depth());
             Calls[i].diversity = max(0,1-shift_v/(pow(Calls[i].depth()-expected,2)-2*Calls[i].depth()));
             if (poscnt==1) Calls[i].diversity = 0;
 
-            double mom_od=(p2*(1-p2)*(Depth+2*depthbypos.size()))/moment_den-1;
-            Calls[i].agreement = max(0,1-mom_od);
+            double wt4_od=pow(cube_v/((double)(Depth+2*depthbypos.size())),1.0/3.0)/1.5;
+            Calls[i].agreement = max(0,1-wt4_od);
 
 /*
             if(Depth>100 && Calls[i].depth() < 100) {
