@@ -1248,26 +1248,23 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
 
                 p1=((depthbyposbycall[j].call[i]+all_pct*2)/((double)depthbypos[j]+2));
                 pdiff=fabs(p1-p2);
-
+/*
                 if (Pos == debug_xpos && !strcmp(debug_xchr,Chr.data())) {
-                    warn("base:%c, depth:%d, dbc:%d, p1: %g, pdiff: %g, maxc: %g\n", Calls[i].base, depthbypos[j], depthbyposbycall[j].call[i], p1, pdiff,  max(depthbypos[j]*pdiff*pdiff*pdiff-.25,0));
+                    warn("base:%c, depth:%d, dbc:%d, p1: %g, pdiff: %g, maxc: %g, all_pct: %g\n", Calls[i].base, depthbypos[j], depthbyposbycall[j].call[i], p1, pdiff,  max(depthbypos[j]*pdiff*pdiff*pdiff-all_pct,0), all_pct);
                 }
-
+*/
                 cube_v += max(depthbypos[j]*pdiff*pdiff*pdiff-all_pct,0);
             }
             double shift_v = max(0, total_v-2*Calls[i].depth());
             Calls[i].diversity = max(0,1-shift_v/(pow(Calls[i].depth()-expected,2)-2*Calls[i].depth()));
             if (poscnt==1) Calls[i].diversity = 0;
 
-            if (Pos == debug_xpos && !strcmp(debug_xchr,Chr.data())) {
-                warn("base:%c, cube_v:%g, deno:%g\n", Calls[i].base, cube_v, ((double)(Depth+2*depthbypos.size())));
-            }
-
             double wt4_od=pow(cube_v/((double)(Depth+2*depthbypos.size())),1.0/3.0)/all_pct;
             Calls[i].agreement = max(0,1-wt4_od);
 
             if (debug_xpos) {
                 if (Pos == debug_xpos && !strcmp(debug_xchr,Chr.data())) {
+                    if (debug_level > 2) warn("base:%c, cube_v:%g, deno:%g\n", Calls[i].base, cube_v, ((double)(Depth+2*depthbypos.size())));
                     fprintf(stderr,"xpos-agree-%c\t%g\n",Calls[i].base, Calls[i].agreement);
                     fprintf(stderr,"xpos-diver-%c\t%g\n",Calls[i].base, Calls[i].diversity);
                 }
