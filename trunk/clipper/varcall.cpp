@@ -1188,6 +1188,18 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
                 fprintf(stderr,"%d,", depthbypos[i]);
             }
             fprintf(stderr,"\n");
+
+/*
+            for (i=0;i < Calls.size();++i) {		// total depth (exclude inserts for tot depth, otherwise they are double-counted)
+                if (Calls[i].depth()>0) {
+                    fprintf(stderr,"xpos-depth-list-%c\t",Calls[i].base);
+                    for (j=0;j<depthbyposbycall.size();++j) {
+                        fprintf(stderr,"%d,", depthbyposbycall[j].call[i]);
+                    }
+                    fprintf(stderr,"\n");
+                }
+            } 
+*/
         }
     }
 
@@ -1195,7 +1207,8 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
 	for (i=0;i < Calls.size();++i) {		// total depth (exclude inserts for tot depth, otherwise they are double-counted)
         if (Calls[i].depth()>0) {
             double expected=Calls[i].depth()/rds.MeanReadLen();
-            double p2=(Calls[i].depth()+2*expected*depthbypos.size())/(double)(Depth+2*depthbypos.size());
+            double all_pct=Calls[i].depth()/(double)Depth;
+            double p2=(Calls[i].depth()+2*all_pct*depthbypos.size())/(double)(Depth+2*depthbypos.size());
             double total_v=0;
             double diff;
             double moment_den=0;
@@ -1227,16 +1240,32 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
                     ++poscnt;
                 }
 
-                p1=((depthbyposbycall[j].call[i]+expected*2)/((double)depthbypos[j]+2));
+                p1=((depthbyposbycall[j].call[i]+all_pct*2)/((double)depthbypos[j]+2));
                 pdiff=fabs(p1-p2);
+/*
+                if (Pos == debug_xpos && !strcmp(debug_xchr,Chr.data())) {
+                    warn("base:%c, depth:%d, dbc:%d, p1: %g, pdiff: %g, maxc: %g\n", Calls[i].base, depthbypos[j], depthbyposbycall[j].call[i], p1, pdiff,  max(depthbypos[j]*pdiff*pdiff*pdiff-.25,0));
+                }
+*/
                 cube_v += max(depthbypos[j]*pdiff*pdiff*pdiff-.25,0);
             }
             double shift_v = max(0, total_v-2*Calls[i].depth());
             Calls[i].diversity = max(0,1-shift_v/(pow(Calls[i].depth()-expected,2)-2*Calls[i].depth()));
             if (poscnt==1) Calls[i].diversity = 0;
-
+/*
+            if (Pos == debug_xpos && !strcmp(debug_xchr,Chr.data())) {
+                warn("base:%c, cube_v:%g, deno:%g\n", Calls[i].base, cube_v, ((double)(Depth+2*depthbypos.size())));
+            }
+*/
             double wt4_od=pow(cube_v/((double)(Depth+2*depthbypos.size())),1.0/3.0)/1.5;
             Calls[i].agreement = max(0,1-wt4_od);
+
+            if (debug_xpos) {
+                if (Pos == debug_xpos && !strcmp(debug_xchr,Chr.data())) {
+                    fprintf(stderr,"xpos-agree-%c\t%g\n",Calls[i].base, Calls[i].agreement);
+                    fprintf(stderr,"xpos-diver-%c\t%g\n",Calls[i].base, Calls[i].diversity);
+                }
+            }
 
 /*
             if(Depth>100 && Calls[i].depth() < 100) {
@@ -1675,6 +1704,9 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
                             }
                         }
                     } else {
+		                if (debug_xpos) {
+                            warn("xpos-skipped-agree-%c\t%g\n", p.Calls[i].base, p.Calls[i].agreement);
+                        }
                         skipped_agreement+=p.Calls[i].depth();
                     } 
                 } else {
