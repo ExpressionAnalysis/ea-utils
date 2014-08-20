@@ -204,6 +204,7 @@ public:
     int NumReads;
     vector<vcall> Calls;
     bool InTarget;
+    int Regions;
 
     int SkipN;
     int SkipAmp;
@@ -454,7 +455,7 @@ int main(int argc, char **argv) {
 
         var_f = openordie(string_format("%s.var.tmp", out_prefix).c_str(), "w");
 
-        fprintf(var_f,"%s\t%s\t%s\t%s\t%s\t%s\t%s%s\n","chr", "pos", "ref", "depth", "skip", "pct", (target_annot&&!pcr_annot) ? "target\t" : "", "...");
+        fprintf(var_f,"%s\t%s\t%s\t%s\t%s\t%s\t%s%s\n","chr", "pos", "ref", "depth", "skip", "pct", (target_annot&&!pcr_annot) ? "target\t" : pcr_annot ? "regions\t" : "", "...");
 
         varsum_f = openordie(string_format("%s.varsum.tmp", out_prefix).c_str(), "w");
 
@@ -647,7 +648,7 @@ int main(int argc, char **argv) {
     if (total_locii==0) total_locii=1;          // no adjustment
 
     if (eav_f) {
-        fprintf(eav_f,"chr\tpos\tref\tdepth\tnum_states\ttop_consensus\ttop_freq\tvar_base\tvar_depth\tvar_qual\tvar_strands\tforward_strands\treverse_strands\t%cval\tdiversity\tagreement\t%s\n", (total_locii>1?'e':'p'), (target_annot && !pcr_annot) ?"\tin_target":"");
+        fprintf(eav_f,"chr\tpos\tref\tdepth\tnum_states\ttop_consensus\ttop_freq\tvar_base\tvar_depth\tvar_qual\tvar_strands\tforward_strands\treverse_strands\t%cval\tdiversity\tagreement\t%s\n", (total_locii>1?'e':'p'), (target_annot&&!pcr_annot) ? "in_target\t" : pcr_annot ? "regions\t" : "");
     }
 
 	if (do_varcall) {
@@ -697,7 +698,7 @@ int main(int argc, char **argv) {
             fprintf(vcf_f, "%s\n", "##fileformat=VCFv4.1");
         }
         if (cse_f) {
-            fprintf(cse_f, "Chr\tPos\tRef\tA\tC\tG\tT\ta\tc\tg\tt\tAq\tCq\tGq\tTq\taq\tcq\tgq\ttq\tRefAllele\tAd\tCd\tGd\tTd\tAg\tCg\tGg\tTg\n");
+            fprintf(cse_f, "Chr\tPos\tRef\tA\tC\tG\tT\ta\tc\tg\tt\tAq\tCq\tGq\tTq\taq\tcq\tgq\ttq\tRefAllele\tAd\tCd\tGd\tTd\tAg\tCg\tGg\tTg%s\n", pcr_annot ? "\tRegions" : "");
         }
 
 		parse_bams(vcall, in_n, in, ref);
@@ -932,6 +933,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
 	RepeatBase = '\0';
 	NumReads = 0;
     InTarget = 0;
+    Regions = 0;
 
 	int i;
 
@@ -948,10 +950,10 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
     vector<ChrRange> amps;
 
     if (pcr_annot && adex) {
-        const std::vector <long int> * v = &(adex->lookup(Chr.data(), Pos + (atype=='b' ? -1 : 0)));
         string s = adex->lookup(Chr.data(), Pos + (atype=='b' ? -1 : 0), "^");
         if (s.length()) {
             vector<char *> a=split((char *)s.data(), '^');
+            Regions=a.size()-1;
             // skip leading entry...
             for(i=1;i<a.size();++i) {
                 vector<char *> f=split(a[i], '\t');
@@ -1478,12 +1480,17 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
 	if (p.Calls.size() > 6) 
 		p.Calls.resize(7);	// toss N's before sort
 
+    static char regions[64] = "";
+    if (pcr_annot) {
+        sprintf(regions, "\t%d", p.Regions); 
+    } 
+
     // OUTPUT CSE BEFORE REORDRED BASES!
     if (cse_f) {
         if (p.Calls.size() < 4) 
             p.Calls.resize(4);	// cse needs 4 calls
     
-        char ref21[22];
+        static char ref21[22];
         if (windex==10 && Win.size()==21) {
             bool needfai=0;
             for (i=windex-10;i<21;++i) {
@@ -1505,7 +1512,7 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
             // silly 15 decimals to match R's default output ... better off with the C default
             static char cse_buf[8192]; 
             #define MEANQ(base,dir) (p.Calls[base].dir?(p.Calls[base].dir##_q/(double)p.Calls[base].dir):0)
-            sprintf(cse_buf,"%s\t%d\t%c\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%s\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%g\n",p.Chr.c_str(), p.Pos, toupper(p.Base)
+           sprintf(cse_buf,"%s\t%d\t%c\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%s\t%g\t%g\t%g\t%g\t%g\t%g\t%g\t%g%s\n",p.Chr.c_str(), p.Pos, toupper(p.Base)
                     , p.Calls[T_A].fwd, p.Calls[T_C].fwd, p.Calls[T_G].fwd, p.Calls[T_T].fwd
                     , p.Calls[T_A].rev, p.Calls[T_C].rev, p.Calls[T_G].rev, p.Calls[T_T].rev
                     , MEANQ(T_A,fwd), MEANQ(T_C,fwd), MEANQ(T_G,fwd), MEANQ(T_T,fwd)
@@ -1519,6 +1526,7 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
                     , p.Calls[T_C].agreement
                     , p.Calls[T_G].agreement
                     , p.Calls[T_T].agreement
+                    , regions
             );
             fputs(cse_buf, cse_f);
             // cse requires separate output for on-target (instead of another column)
@@ -1858,7 +1866,7 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
                 if (i > 0) diversity += ";";
                 diversity+= string_format("%g",f.pcall->diversity);
             }
-            fprintf(eav_f,"%s\t%d\t%c\t%d\t%d\t%s\t%2.2f\t%s\t%s\t%s\t%s\t%s\t%s\t%.1e\t%s\t%s%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, (int) final_calls.size(),top_cons.c_str(), pct_allele, var_base.c_str(), var_depth.c_str(), var_qual.c_str(), var_strands.c_str(), forward.c_str(), reverse.c_str(), padj, diversity.c_str(), agreement.c_str(), UseAnnot==1?(p.InTarget?"\t1":"\t0"):"");
+            fprintf(eav_f,"%s\t%d\t%c\t%d\t%d\t%s\t%2.2f\t%s\t%s\t%s\t%s\t%s\t%s\t%.1e\t%s\t%s%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, (int) final_calls.size(),top_cons.c_str(), pct_allele, var_base.c_str(), var_depth.c_str(), var_qual.c_str(), var_strands.c_str(), forward.c_str(), reverse.c_str(), padj, diversity.c_str(), agreement.c_str(), UseAnnot==1?(p.InTarget?"\t1":"\t0"):regions);
         }
 
 		if (debug_xpos) {
