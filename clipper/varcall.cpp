@@ -1258,7 +1258,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
                 cube_v += max(depthbypos[j]*pdiff*pdiff*pdiff-all_pct,0);
             }
             double shift_v = max(0, total_v-2*Calls[i].depth());
-            Calls[i].diversity = max(0,1-shift_v/(pow(Calls[i].depth()-expected,2)-2*Calls[i].depth()));
+            Calls[i].diversity = max(0,1-shift_v/max(1,(pow(Calls[i].depth()-expected,2)-2*Calls[i].depth())));
             if (poscnt==1) Calls[i].diversity = 0;
 
             double wt4_od=pow(cube_v/((double)(Depth+2*depthbypos.size())),1.0/3.0)/all_pct;
