@@ -614,14 +614,16 @@ int main (int argc, char **argv) {
 				p=s+nr-blen;
 			}
 			p[blen]='\0';
-			if (!ent)		// make a new ent 
+			if (!ent) {		// make a new ent 
 				ent = (bnode *) malloc(sizeof(*ent));
+			    ent->seq=(char*)malloc(blen+1);;
+            }
 
 			if (strchr(p, 'N')||strchr(p, 'n'))
 				continue;
 
 			ent->cnt=0;
-			strcpy(ent->seq=(char*)malloc(strlen(p)+1), p);
+			strcpy(ent->seq, p);
 
 			bnode *fent = * (bnode**)  tsearch(ent, &picktab, bnodecomp);
 
