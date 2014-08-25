@@ -1093,7 +1093,9 @@ int main (int argc, char **argv) {
 						break;
 				}
 
-				for (i=dotrim[f][1];i<(fq[f].seq.n);++i) {
+
+                // trim qual from the end ... stop at what you trimmed from the front!
+				for (i=dotrim[f][1];i<(fq[f].seq.n-dotrim[f][0]);++i) {
 					if (qwin > 1 && (meanqwin(fq[f].qual.s,fq[f].seq.n,fq[f].seq.n-i-1,qwin)-phred) < qthr) {
 						++trimqb[f];
 						istrimq = true;
@@ -1105,7 +1107,9 @@ int main (int argc, char **argv) {
 					} else 
 						break;
 				}
-				if (istrimq) ++trimql[f];
+
+                // denominator
+				if (istrimq) trimql[f]+=1;
 			}
 
 			int bestscore_e = INT_MAX, bestoff_e = 0, bestlen_e = 0; 
