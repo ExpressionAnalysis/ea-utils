@@ -1,0 +1,24 @@
+@1 READ A
+ATATGCTACGTTTGTGACCTAGTCCCGTAC
++
+hhhhh]]hhhhhhhhhhhhhhhhhhhhhhh
+@2 DUPREADA
+ATATGCTACGTTTGTGACCTAGTCCCGTAC
++
+hhhhh]]hhhhhhhhhhhhhhhhhhhhhhh
+@3 READB
+TATAGCCTCTAGCTTGACTCTAGCTAGTCC
++
+hhhhh]]hhhhhhhhhhhhhhhhhhhhhhh
+@4 NOTDUPREADB = OFFBY1
+TATAGACTCTAGCTTGACTCTAGCTAGTCC
++
+hhhhh]]hhhhhhhhhhhhhhhhhhhhhhh
+@3 READB-DUP
+TATAGCCTCTAGCTTGACTCTAGCTAGTCC
++
+hhhhh]]hhhhhhhhhhhhhhhhhhhhhhh
+@4 NOTDUPREADC = OFFBY3
+TACAGCCTCTAGCGTGACTCTAGCCAGTCC
++
+hhhhh]]hhhhhhhhhhhhhhhhhhhhhhh

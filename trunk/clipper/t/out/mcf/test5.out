@@ -1,0 +1,28 @@
+@1 CLIP IS AGTCCCGTAC AT END
+ATATGCTACGTTTGTGACCT
++
+hhhhh]]hhhhhhhhhhhhh
+@2 CLIP AGTCCCGTAC + AAAA's
+ATGTTCGTATATGAGC
++
+hhbhh^^hhhhhhhhh
+@3 CLIP JUST AGTCC if nmin >= 5
+TATAGCCTCTAGCTTGACTCTAGCT
++
+hhhh]]hhhhhhhhhhhhh]hhfff
+@4 CLIP AG at end if nmin >= 2
+ATCTATCTTAGTCATCTTATCTACTATC
++
+hhhhhdchhhhhhhhhhh]hhfggfaab
+@5 CLIP AGT at END if nmin >= 3
+ATATACTTATCTACTTATCTATCTTAA
++
+hhhhh]bhddhhhhhhhhhh]hhffff
+@6 CLIP NOTHING, even though some at front, because mismatch pct too high
+AGTCCTTGGTCTTATCTACTTATCTATCT
++
+hhhhh]bhddhhhhhhhhhh]hhffffga
+@7 CLIP WHOLE SEQENCE
+AGTCCATTACCTTATCTACTTATCTATCT
++
+hhhhh]bhddhhhhhhhhhh]hhffffga

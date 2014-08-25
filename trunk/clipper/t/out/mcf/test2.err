@@ -1,0 +1,62 @@
+Command Line: -l 15 in/mcf/test.fa in/mcf/test2.fq
+Scale used: 2.2
+Invalid FASTQ format : in/mcf/test2.fq
+Phred: 33
+Warning, corrupt quality for sequence: @SQ	SN:chr14	LN:125194864
+Warning, corrupt quality for sequence: @SQ	SN:chrM	LN:16299
+Threshold used: 1 out of 4
+No adapters found, no skewing detected, and no trimming needed.
+Files: 1
+Malformed fastq record (no '+' for comment) at line 1
+Malformed fastq record (no '+' for comment) at line 3
+Malformed fastq record (no '+' for comment) at line 5
+Malformed fastq record (length mismatch) at line 7
+Malformed fastq record (no '+' for comment) at line 9
+Malformed fastq record (length mismatch) at line 11
+Malformed fastq record (length mismatch) at line 13
+Malformed fastq record (length mismatch) at line 15
+Malformed fastq record (length mismatch) at line 17
+Malformed fastq record (length mismatch) at line 19
+Malformed fastq record (length mismatch) at line 21
+Malformed fastq record (length mismatch) at line 23
+Malformed fastq record (length mismatch) at line 25
+Malformed fastq record (length mismatch) at line 27
+Malformed fastq record (length mismatch) at line 29
+Malformed fastq record (length mismatch) at line 31
+Malformed fastq record (length mismatch) at line 33
+Malformed fastq record (length mismatch) at line 35
+Malformed fastq record (length mismatch) at line 37
+Malformed fastq record (length mismatch) at line 39
+Malformed fastq record (length mismatch) at line 41
+Malformed fastq record (length mismatch) at line 43
+Malformed fastq record (length mismatch) at line 45
+Malformed fastq record (length mismatch) at line 47
+Malformed fastq record (length mismatch) at line 49
+Malformed fastq record (length mismatch) at line 51
+Malformed fastq record (length mismatch) at line 53
+Malformed fastq record (no '@' for id) at line 55
+Malformed fastq record (length mismatch) at line 57
+Malformed fastq record (length mismatch) at line 59
+Malformed fastq record (length mismatch) at line 61
+Malformed fastq record (no '@' for id) at line 63
+Malformed fastq record (length mismatch) at line 65
+Malformed fastq record (length mismatch) at line 67
+Malformed fastq record (length mismatch) at line 69
+Malformed fastq record (length mismatch) at line 71
+Malformed fastq record (length mismatch) at line 73
+Malformed fastq record (length mismatch) at line 75
+Malformed fastq record (length mismatch) at line 77
+Malformed fastq record (length mismatch) at line 79
+Malformed fastq record (length mismatch) at line 81
+Malformed fastq record (length mismatch) at line 83
+Malformed fastq record (length mismatch) at line 85
+Malformed fastq record (no '@' for id) at line 87
+Malformed fastq record (length mismatch) at line 89
+Malformed fastq record (length mismatch) at line 91
+Malformed fastq record (length mismatch) at line 93
+Malformed fastq record (length mismatch) at line 95
+Malformed fastq record (length mismatch) at line 97
+Malformed fastq record (length mismatch) at line 99
+Total reads: 50
+Too short after clip: 0
+Errors (in/mcf/test2.fq): 50

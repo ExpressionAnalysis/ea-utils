@@ -1,0 +1,10 @@
+Command Line: -l 15 in/mcf/test.fa in/mcf/test1.fq -o #TMPDIR#/test6.out.gz
+Scale used: 2.2
+Phred: 64
+Threshold used: 1 out of 8
+Adapter clip me (AGTCCCGTAC): counted 2 at the 'end' of 'in/mcf/test1.fq', clip set to 1
+Files: 1
+Total reads: 8
+Too short after clip: 0
+Clipped 'end' reads: Count: 5, Mean: 6.80, Sd: 5.07
+Trimmed 5 reads by an average of 1.00 bases on quality < 7

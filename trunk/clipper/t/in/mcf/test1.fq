@@ -1,0 +1,32 @@
+@1 CLIP IS AGTCCCGTAC AT END
+ATATGCTACGTTTGTGACCTAGTCCCGTAC
++
+hhhhh]]hhhhhhhhhhhhh]hhffgffaa
+@2 CLIP AGTCCCGTAC + AAAA's
+ATGTTCGTATATGAGCAGTCCCGTACAAAA
++
+hhbhh^^hhhhhhhhhhhhh]hhfffffaa
+@3 CLIP JUST AGTCC if nmin >= 5
+TATAGCCTCTAGCTTGACTCTAGCTAGTCC
++
+hhhh]]hhhhhhhhhhhhh]hhfffffaaa
+@4 CLIP AG at end if nmin >= 2
+ATCTATCTTAGTCATCTTATCTACTATCAG
++
+hhhhhdchhhhhhhhhhh]hhfggfaabbA
+@5 CLIP AGT at END if nmin >= 3
+ATATACTTATCTACTTATCTATCTTAAAGT
++
+hhhhh]bhddhhhhhhhhhh]hhffffgaA
+@6 CLIP NOTHING, even though some at front, because mismatch pct too high
+AGTCCTTGGTCTTATCTACTTATCTATCTT
++
+hhhhh]bhddhhhhhhhhhh]hhffffgaA
+@7 CLIP WHOLE SEQENCE
+AGTCCATTACCTTATCTACTTATCTATCTT
++
+hhhhh]bhddhhhhhhhhhh]hhffffgaA
+@8 CLIP HOMOPOLYMER
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAT
++
+hhhhh]bhddhhhhhhhhhh]hhffffgaA
