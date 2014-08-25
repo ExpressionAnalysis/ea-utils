@@ -51,13 +51,12 @@ sub check_output {
 
 sub run {
     my ($cmd) = @_;
-    my @o = $cmd =~ m/%o:(\S+)/g;
+    my @o = $cmd =~ m/[#%]o:(\S+)/g;
 
     chomp $cmd;
 
     $cmd =~ s/%o:(\S+)/$1/g;
-
-        
+       
 #    warn "# $cmd\n";
 
     my $exit = system($cmd);
