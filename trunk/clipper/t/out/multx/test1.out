@@ -1,0 +1,7 @@
+Id	Count	File(s)
+LB2	75	#TMPDIR#/mxout_LB2_1.fq	#TMPDIR#/mxout_LB2_2.fq
+LB4	57	#TMPDIR#/mxout_LB4_1.fq	#TMPDIR#/mxout_LB4_2.fq
+LB5	60	#TMPDIR#/mxout_LB5_1.fq	#TMPDIR#/mxout_LB5_2.fq
+LB6	51	#TMPDIR#/mxout_LB6_1.fq	#TMPDIR#/mxout_LB6_2.fq
+unmatched	7	#TMPDIR#/mxout_unmatched_1.fq	#TMPDIR#/mxout_unmatched_2.fq
+total	250
