@@ -55,6 +55,9 @@ $(PKG).tar.gz: Makefile $(TOOLS) $(SRC) $(PKG).spec fastq-lib.cpp fastq-lib.h sa
 	tar --exclude=".svn" -cvzf $(PKG).tar.gz $(PKG).${VER}-${REL}
 	rm -rf $(PKG).${VER}-${REL}
 
+check: $(BIN)
+	prove t
+
 disttest: $(PKG).tar.gz
 	tar -xzvf $(PKG).tar.gz
 	cd $(PKG).${VER}-${REL} && make
