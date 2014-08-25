@@ -1,0 +1,7 @@
+Id	Count	File(s)
+ACAGTGA	60	#TMPDIR#/mxout_ACAGTGA_1.fq	#TMPDIR#/mxout_ACAGTGA_2.fq
+CGATGTA	73	#TMPDIR#/mxout_CGATGTA_1.fq	#TMPDIR#/mxout_CGATGTA_2.fq
+TGACCAA	56	#TMPDIR#/mxout_TGACCAA_1.fq	#TMPDIR#/mxout_TGACCAA_2.fq
+GCCAATA	49	#TMPDIR#/mxout_GCCAATA_1.fq	#TMPDIR#/mxout_GCCAATA_2.fq
+unmatched	12	#TMPDIR#/mxout_unmatched_1.fq	#TMPDIR#/mxout_unmatched_2.fq
+total	250
