@@ -44,7 +44,7 @@ getrel:
 $(PKG).spec: $(PKG).spex
 	perl -pe 's/%RELEASE%/${REL}/' $(PKG).spex > $(PKG).spec
 
-$(PKG).tar.gz: Makefile $(TOOLS) $(SRC) $(PKG).spec fastq-lib.cpp fastq-lib.h sam-stats.cpp fastq-stats.cpp gcModel.cpp gcModel.h varcall.cpp utils.h README CHANGES sparsehash-2.0.2 samtools/*.c t t/* 
+$(PKG).tar.gz: Makefile $(TOOLS) $(SRC) $(PKG).spec fastq-lib.cpp fastq-lib.h sam-stats.cpp fastq-stats.cpp gcModel.cpp gcModel.h varcall.cpp utils.h README CHANGES sparsehash-2.0.2 samtools/*.c t
 	rm -rf $(PKG).${VER}-${REL}
 	mkdir $(PKG).${VER}-${REL}
 	mkdir $(PKG).${VER}-${REL}/tidx
