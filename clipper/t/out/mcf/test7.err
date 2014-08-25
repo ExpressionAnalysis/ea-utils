@@ -1,0 +1,9 @@
+Command Line: -0 -D 20 n/a in/mcf/test-mcf-dup.fq -o #TMPDIR#/test7.out
+Scale used: 2.2
+Phred: 64
+Threshold used: 1 out of 6
+No adapters found.
+Files: 1
+Total reads: 6
+Too short after clip: 0
+Filtered on duplicates: 2

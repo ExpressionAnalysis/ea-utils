@@ -1,0 +1,9 @@
+Command Line: -l 15 -L72 -f in/mcf/test.fa in/mcf/test4.fq1 in/mcf/test4.fq2 -o #TMPDIR#/test4.out1 -o #TMPDIR#/test4.out2
+Scale used: 2.2
+Phred: 64
+Threshold used: 1 out of 1
+Files: 2
+Total reads: 1
+Too short after clip: 0
+Trimmed 1 reads (in/mcf/test4.fq1) by an average of 21.00 bases on quality < 7
+Trimmed 1 reads (in/mcf/test4.fq2) by an average of 8.00 bases on quality < 7
