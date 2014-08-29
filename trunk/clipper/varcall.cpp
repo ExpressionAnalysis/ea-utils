@@ -45,7 +45,7 @@ THE SOFTWARE.
 #include "fastq-lib.h"
 
 #define SVNREV atoi(strchr("$Revision$", ':')+1)
-const char * VERSION = "0.93";
+const char * VERSION = "0.94";
 
 #define MIN_READ_LEN 20
 #define DEFAULT_LOCII 1000000
@@ -56,6 +56,8 @@ using namespace google;
 
 void usage(FILE *f);
 
+
+FILE *stat_fout=NULL;
 
 // #define DEBUG 1
 
@@ -227,6 +229,8 @@ public:
     virtual void Visit(PileupSummary &dat) = 0;
     virtual void Finish() {};
     PileupSubscriber(PileupManager &man);
+    PileupSubscriber() {Manager = NULL;}
+    void SetManager(PileupManager &man);
 };
 
 class PileupManager  {
@@ -244,8 +248,8 @@ public:
 
     string Reference;
     char InputType;
-    int WinMax;
-    int WinDex;
+    int WinMax;             // flanking window size
+    int WinDex;             // current index into the window (ususally midpoint)
 
     deque<PileupSummary> Win;
 
@@ -267,6 +271,7 @@ public:
 
 class VarStatVisitor : public PileupSubscriber {
     public:
+    VarStatVisitor() : PileupSubscriber() {tot_locii=0; tot_depth=0; num_reads=0;};
     VarStatVisitor(PileupManager &man) : PileupSubscriber(man) {tot_locii=0; tot_depth=0; num_reads=0;};
 
     void Visit(PileupSummary &dat);
@@ -365,13 +370,13 @@ int str_in(const char *needle, const char **haystack) {
     return -1;
 }
 
+void output_stats(VarStatVisitor &vstat);
 
 Faidx faidx;
 bool pcr_annot = false;
 
 int main(int argc, char **argv) {
 	char c;
-	const char *noiseout=NULL;
 	const char *ref=NULL;
 	optind = 0;
 	int umindepth=0;
@@ -383,7 +388,7 @@ int main(int argc, char **argv) {
 
     char *out_prefix = NULL;
     char *target_annot = NULL;
-    char *read_stats = NULL;
+    const char *read_stats = NULL;
 
 
 // list of default output formats used when -o is specified
@@ -408,7 +413,7 @@ int main(int argc, char **argv) {
        {0, 0, 0, 0}
     };
 
-	while ( (c = getopt_long(argc, argv, "?sv0VBhe:m:N:x:f:p:a:g:q:Q:i:o:D:R:b:L:S:F:A:G:d:",long_options,NULL)) != -1) {
+	while ( (c = getopt_long(argc, argv, "?sv0VBhe:m:x:f:p:a:g:q:Q:i:o:D:R:b:L:S:F:A:G:d:",long_options,NULL)) != -1) {
 		switch (c) {
 			case OPT_PCR_ANNOT: target_annot=optarg; pcr_annot=true; break;
 			case OPT_FILTER_ANNOT: target_annot=optarg; pcr_annot=false; break;
@@ -444,7 +449,6 @@ int main(int argc, char **argv) {
 			case 'g': global_error_rate=atof(optarg); break;
 			case 'L': total_locii=ok_atoi(optarg); break;
 			case 'f': ref=optarg; break;
-			case 'N': noiseout=optarg; break;
 			case 's': do_stats=1; break;
 			case 'S': read_stats=optarg; break;
 			case 'v': do_varcall=1; break;
@@ -471,19 +475,13 @@ int main(int argc, char **argv) {
 	}
 
 
-	if (!do_stats && !do_varcall || do_stats && do_varcall) {
+	if (!do_stats && !do_varcall) {
 		warn("Specify -s for stats only, or -v to do variant calling\n\n");
 		usage(stderr);
 		return 1;
 	}
 
-    if (out_prefix) {
-        if (!do_varcall) {
-            warn("Specify -o with -v only\n\n");
-            usage(stderr);
-            return 1;
-        }
-
+    if (out_prefix && do_varcall) {
         var_f = openordie(string_format("%s.var.tmp", out_prefix).c_str(), "w");
 
         fprintf(var_f,"%s\t%s\t%s\t%s\t%s\t%s\t%s%s\n","chr", "pos", "ref", "depth", "skip", "pct", (target_annot&&!pcr_annot) ? "target\t" : pcr_annot ? "regions\t" : "", "...");
@@ -520,14 +518,6 @@ int main(int argc, char **argv) {
 		minsampdepth=umindepth;
 	}
 
-	if (noiseout) {
-		noise_f = fopen(noiseout, "w");
-		if (!noise_f) {
-			warn("Can't write %s: %s\n", noiseout, strerror(errno));
-			exit(1);
-		}
-	}
-
 	// set argv to '-' if stdin
 	const char *stdv[3] = {argv[0],"-",NULL};
 	if (!argv[optind]) {
@@ -545,107 +535,33 @@ int main(int argc, char **argv) {
     max_phred = -log10(global_error_rate)*10;
 
 	if (do_stats) {
-		FILE *stat_fout=stdout;			// stats to stdout
-
-		if (do_varcall) 				// unless varcalling at the same time
-			stat_fout=stderr;
-
+        if (out_prefix) {
+            stat_fout = openordie(string_format("%s.stats", out_prefix).c_str(), "w");
+            noise_f = openordie(string_format("%s.noise", out_prefix).c_str(), "w");
+        }
+        if (!stat_fout)  {
+            if (do_varcall)
+    		    stat_fout=stderr;			// stats to stderr
+            else
+    		    stat_fout=stdout;			// stats to stdout
+        }
+        // do stats by myself
         PileupManager pman;
 		VarStatVisitor vstat(pman);
-
 		parse_bams(pman, in_n, in, ref);
-
-		stat_out("version\tvarcall-%s.%d\n", VERSION, SVNREV);
-        stat_out("min depth\t%d\n", minsampdepth);
-        stat_out("alpha\t%f\n", alpha);
-
-        if (vstat.stats.size()) {
-            // sort by depth descending
-            sort(vstat.stats.begin(), vstat.stats.end(), noisebydepth);
-
-            // flip 3 and 1 because sorted in descending order for sampling (above)
-            double depth_q3=quantile_depth(vstat.stats, .25);
-            double depth_q2=quantile_depth(vstat.stats, .50);
-            double depth_q1=quantile_depth(vstat.stats, .75);
-            double depth_qx=quantile_depth(vstat.stats, .95);
-
-            // number of locii to compute error rate
-            int ncnt=min(100000,vstat.stats.size());
-
-            int i;
-            double nsum=0, nssq=0, dsum=0, dmin=vstat.stats[0].depth, qnsum=0, qnssq=0, qualsum=0;
-
-            double ins_nsum=0, ins_nssq=0, del_nsum=0, del_nssq=0;
-            for (i=0;i<ncnt;++i) {
-                if (vstat.stats[i].depth < depth_q1) {
-                    continue;
-                }
-                nsum+=vstat.stats[i].noise;
-                nssq+=vstat.stats[i].noise*vstat.stats[i].noise;
-                dsum+=vstat.stats[i].depth;
-                qnsum+=vstat.stats[i].qnoise;
-                qnssq+=vstat.stats[i].qnoise*vstat.stats[i].qnoise;
-                qualsum+=vstat.stats[i].mnqual;
-                if (vstat.stats[i].depth < dmin) dmin = vstat.stats[i].depth;
-                ins_nsum+=vstat.ins_stats[i].noise;
-                ins_nssq+=vstat.ins_stats[i].noise*vstat.ins_stats[i].noise;
-                del_nsum+=vstat.del_stats[i].noise;
-                del_nssq+=vstat.del_stats[i].noise*vstat.del_stats[i].noise;
-            }
-
-            double noise_mean =nsum/ncnt;
-            double noise_dev = stdev(ncnt, nsum, nssq);
-            double qnoise_mean =qnsum/ncnt;
-            double qnoise_dev = stdev(ncnt, qnsum, qnssq);
-            double qual_mean = qualsum/ncnt;
-            double ins_noise_mean =ins_nsum/ncnt;
-            double ins_noise_dev = stdev(ncnt, ins_nsum, ins_nssq);
-            double del_noise_mean =del_nsum/ncnt;
-            double del_noise_dev = stdev(ncnt, del_nsum, del_nssq);
-
-            stat_out("qual mean\t%.4f\n", qual_mean);
-            stat_out("noise mean\t%.6f\n", noise_mean);
-            stat_out("noise dev\t%.6f\n", noise_dev);
-            stat_out("qnoise mean\t%.6f\n", qnoise_mean);
-            stat_out("qnoise dev\t%.6f\n", qnoise_dev);
-            stat_out("ins freq\t%.6f\n", ins_noise_mean);
-            stat_out("ins freq dev\t%.6f\n", ins_noise_dev);
-            stat_out("del freq\t%.6f\n", del_noise_mean);
-            stat_out("del freq dev\t%.6f\n", del_noise_dev);
-
-            if (qnoise_mean >= noise_mean ) {
-                stat_out("error\tpoor quality estimates\n");
-            }
-
-            stat_out("noise depth mean\t%.4f\n", dsum/ncnt);
-            stat_out("noise depth min\t%.4f\n", dmin);
-            stat_out("noise cnt\t%d\n", ncnt);
-
-            stat_out("depth q1\t%.4f\n", depth_q1);
-            stat_out("depth median\t%.4f\n", depth_q2);
-            stat_out("depth q3\t%.4f\n", depth_q3);
-
-            dsum=0;
-            for (i=0;i<vstat.stats.size();++i) {
-                dsum+=vstat.stats[i].depth;
-            }
-
-            int locii_gtmin=0;
-            for (i=0;i<vstat.stats.size();++i) {
-                if (vstat.stats[i].depth >= min_depth) {
-                    ++locii_gtmin;
-                }
-            }
-            stat_out("locii >= min depth\t%d\n", locii_gtmin);
-            stat_out("locii\t%d\n", vstat.tot_locii);
-
-            double stdevfrommean=-qnorm((alpha/locii_gtmin)/2);
-            stat_out("qnorm adj\t%f\n", stdevfrommean);
-
-            pct_qdepth=qnoise_mean+qnoise_dev*stdevfrommean;
-            stat_out("min pct qual\t%.4f\n", 100*pct_qdepth);
+        output_stats(vstat);
+        if (out_prefix) {
+            fclose(stat_fout);
+            fclose(noise_f);
+            noise_f=NULL;
+            stat_fout=NULL;
         }
-	}
+    }
+ 
+    if (do_varcall && out_prefix) {
+        // run stats again... with new levels if any
+        stat_fout = openordie(string_format("%s.vstats", out_prefix).c_str(), "w");
+    }
 
     if (read_stats){
         FILE * f = fopen(read_stats, "r");
@@ -713,7 +629,11 @@ int main(int argc, char **argv) {
         PileupManager pman;
 
 		VarCallVisitor vcall(pman);
-		VarStatVisitor vstat(pman);
+		VarStatVisitor vstat;
+
+		if (stat_fout) {
+            vstat.SetManager(pman);
+        }
        
         if (target_annot) {
             pman.LoadAnnot(target_annot);
@@ -764,10 +684,12 @@ int main(int argc, char **argv) {
             if (vcf_f) rename_tmp(string_format("%s.vcf.tmp", out_prefix));
             if (eav_f) rename_tmp(string_format("%s.eav.tmp", out_prefix));
             if (cse_f) rename_tmp(string_format("%s.cse.tmp", out_prefix));
-            if (noise_f) rename_tmp(string_format("%s.noise.tmp", out_prefix));
 
             if (tgt_var_f) rename_tmp(string_format("%s.tgt.var.tmp", out_prefix));
             if (tgt_cse_f) rename_tmp(string_format("%s.tgt.cse.tmp", out_prefix));
+
+            if (stat_fout) 
+                output_stats(vstat);
         }
 	}
 }
@@ -1501,19 +1423,22 @@ void PileupManager::VisitX(PileupSummary &p, int windex) {
 void VarCallVisitor::Visit(PileupSummary &p) {
     //debug("VisitX: %d\n", p.Pos);
 
-    if (pcr_annot) {
-        if (!p.InTarget) {
-            ++SkippedAnnot;
-            return;
-        }
-    }
-
 	if (debug_xpos) {
 		if (p.Pos != debug_xpos)
 			return;
 		if (strcmp(debug_xchr,p.Chr.data())) 
 			return;
 	}
+
+    if (pcr_annot) {
+        if (!p.InTarget) {
+            if (debug_xpos) {
+                fprintf(stderr,"xpos-skip-annot\t1\n");
+            }
+            ++SkippedAnnot;
+            return;
+        }
+    }
 
 	if (p.Depth < min_depth) {
         if (debug_xpos) {
@@ -1527,6 +1452,7 @@ void VarCallVisitor::Visit(PileupSummary &p) {
 		++SkippedDepth;
 		return;
 	}
+
 
 	int ins_fwd = p.Calls.size() > 6 ? p.Calls[6].fwd : 0;
 	int ins_rev = p.Calls.size() > 6 ? p.Calls[6].rev : 0;
@@ -2015,7 +1941,7 @@ void VarStatVisitor::Visit(PileupSummary &p) {
 	int ins_qual = p.Calls.size() > 6 ? p.Calls[6].qual : 0;
 	double ins_noise = 0;
 	double ins_qnoise = 0;
-	if (p.Calls.size() > 1 && p.Calls[1].depth() > ins_depth && ins_depth > 0) {
+	if (p.Calls.size() > 1 && p.Depth > 0 && ins_depth > 0) {
 		ins_noise = (double) ins_depth/p.Depth;
 		ins_qnoise = (double) ins_qual/p.TotQual;
 	}
@@ -2024,24 +1950,42 @@ void VarStatVisitor::Visit(PileupSummary &p) {
 	int del_qual = p.Calls.size() > 5 ? p.Calls[5].qual : 0;
 	double del_noise = 0;
 	double del_qnoise = 0;
-	if (p.Calls.size() > 1 && p.Calls[1].depth() > del_depth && del_depth > 0) {
+	if (p.Calls.size() > 1 && p.Depth > 0 && del_depth > 0) {
 		del_noise = (double) del_depth/p.Depth;
 		del_qnoise = (double) del_qual/p.TotQual;
 	}
 
-    // snp's are "noise" if there are 3 alleles at a given position
+    // snp's are "noise" ... since they are supposedly rare.
 	int i;
 	if (p.Calls.size() > 5) 
 		p.Calls.resize(5);		// toss N's and inserts before sort
 
 	sort(p.Calls.begin(), p.Calls.end(), hitolocall);
 
-	double noise = p.Calls.size() > 2 ? (double) p.Calls[2].depth()/p.Depth : 0;
-	double qnoise = p.Calls.size() > 2 ? (double) p.Calls[2].qual/p.TotQual : 0;
+	double noise;
+	double qnoise;
+    if (p.Calls.size() > 1) {
+        // assume non-reference is noise
+        noise = (double) p.Calls[1].depth()/p.Depth;
+        qnoise = (double) p.Calls[1].qual/p.TotQual;
+        if (noise > .25) {
+            // unless maybe that was a het or something....
+            if (p.Calls.size() > 2) {
+                // but 3rd allele is always noise
+                noise = (double) p.Calls[2].depth()/p.Depth;
+                qnoise = (double) p.Calls[2].qual/p.TotQual;
+            } else {
+                noise = (double) p.Calls[2].depth()/p.Depth;
+                qnoise = (double) p.Calls[2].qual/p.TotQual;
+            }
+        }
+    } else {
+        noise = qnoise = 0.0;
+    }
 
 	double mnqual = (double)p.TotQual/p.Depth;
 
-	char pbase = p.Calls.size() > 2 ? p.Calls[2].base : '.';
+	char pbase = p.Calls.size() > 1 ? p.Calls[1].base : '.';
 
 	if (noise_f) {
 		fprintf(noise_f,"%d\t%c\t%f\t%f\n", p.Depth, pbase, noise, qnoise, mnqual);
@@ -2091,10 +2035,9 @@ void usage(FILE *f) {
 "-g FLOAT    Global minimum error rate (default: assume phred is ok)\n"
 "-l INT      Number of locii in total pileup used for bonferroni (1 mil)\n"
 "-x CHR:POS  Output this pos only, then quit\n"
-"-N FILE     Output noise stats to FIL\n"
 "-S FILE     Read in statistics and params from a previous run with -s (do this!)\n"
 "-A ANNOT    Calculate in-target stats using the annotation file (requires -o)\n"
-"-o PREFIX   Output prefix (note: overlaps with -N)\n"
+"-o PREFIX   Output prefix (works with -s or -v)\n"
 "-F files    List of file types to output (var, varsum, eav, vcf)\n"
 "\n"
 "Extended Options\n"
@@ -2128,6 +2071,12 @@ void usage(FILE *f) {
 "Contains mean, median, quartile information for depth, base quality, read len,\n"
 "mapping quality, indel levels. Also estimates parameters suitable for\n"
 "variant calls, and can be passed directly to this program for variant calls\n"
+"\n"
+"If an output prefix is used, files are created as follows:\n"
+"\n"
+"   PREFIX.stats       Stats output"
+"   PREFIX.noise       Non-reference, non-homozygous allele summary"
+"   PREFIX.xnoise      Like noise, but with context-specific rates"
 "\n"
 "Filtering Details:\n"
 "\n"
@@ -2282,8 +2231,117 @@ bool Faidx::Fetch(char *buf, const Faient *ent, int pos_from, int pos_to) {
 }
 
 
-PileupSubscriber::PileupSubscriber(PileupManager &man) { 
+PileupSubscriber::PileupSubscriber(PileupManager &man) {
+    Manager = NULL; 
+    SetManager(man);
+};
+
+void PileupSubscriber::SetManager(PileupManager &man) { 
+    assert(!Manager);
     Manager = &man; 
     man.Kids.push_back(this); 
 };
+
+
+
+void output_stats(VarStatVisitor &vstat) {
+    stat_out("version\tvarcall-%s.%d\n", VERSION, SVNREV);
+    stat_out("min depth\t%d\n", minsampdepth);
+    stat_out("alpha\t%f\n", alpha);
+
+    if (vstat.stats.size()) {
+        // sort by depth descending
+        sort(vstat.stats.begin(), vstat.stats.end(), noisebydepth);
+
+        // flip 3 and 1 because sorted in descending order for sampling (above)
+        double depth_q3=quantile_depth(vstat.stats, .25);
+        double depth_q2=quantile_depth(vstat.stats, .50);
+        double depth_q1=quantile_depth(vstat.stats, .75);
+        double depth_qx=quantile_depth(vstat.stats, .95);
+
+        // number of locii to compute error rate
+        int ncnt=min(100000,vstat.stats.size());
+
+        int i;
+        double nsum=0, nssq=0, dsum=0, dmin=vstat.stats[0].depth, qnsum=0, qnssq=0, qualsum=0;
+
+        double ins_nsum=0, ins_nssq=0, del_nsum=0, del_nssq=0;
+        for (i=0;i<ncnt;++i) {
+            if (vstat.stats[i].depth < depth_q1) {
+                continue;
+            }
+            nsum+=vstat.stats[i].noise;
+            nssq+=vstat.stats[i].noise*vstat.stats[i].noise;
+            dsum+=vstat.stats[i].depth;
+            qnsum+=vstat.stats[i].qnoise;
+            qnssq+=vstat.stats[i].qnoise*vstat.stats[i].qnoise;
+            qualsum+=vstat.stats[i].mnqual;
+            if (vstat.stats[i].depth < dmin) dmin = vstat.stats[i].depth;
+            ins_nsum+=vstat.ins_stats[i].noise;
+            ins_nssq+=vstat.ins_stats[i].noise*vstat.ins_stats[i].noise;
+            del_nsum+=vstat.del_stats[i].noise;
+            del_nssq+=vstat.del_stats[i].noise*vstat.del_stats[i].noise;
+        }
+
+        double noise_mean =nsum/ncnt;
+        double noise_dev = stdev(ncnt, nsum, nssq);
+        double qnoise_mean =qnsum/ncnt;
+        double qnoise_dev = stdev(ncnt, qnsum, qnssq);
+        double qual_mean = qualsum/ncnt;
+        double ins_noise_mean =ins_nsum/ncnt;
+        double ins_noise_dev = stdev(ncnt, ins_nsum, ins_nssq);
+        double del_noise_mean =del_nsum/ncnt;
+        double del_noise_dev = stdev(ncnt, del_nsum, del_nssq);
+
+        stat_out("qual mean\t%.4f\n", qual_mean);
+        stat_out("noise mean\t%.6f\n", noise_mean);
+        stat_out("noise dev\t%.6f\n", noise_dev);
+        stat_out("qnoise mean\t%.6f\n", qnoise_mean);
+        stat_out("qnoise dev\t%.6f\n", qnoise_dev);
+        stat_out("ins freq\t%.6f\n", ins_noise_mean);
+        stat_out("ins freq dev\t%.6f\n", ins_noise_dev);
+        stat_out("del freq\t%.6f\n", del_noise_mean);
+        stat_out("del freq dev\t%.6f\n", del_noise_dev);
+
+        if (qnoise_mean >= noise_mean ) {
+            stat_out("error\tpoor quality estimates\n");
+        }
+
+        stat_out("noise depth mean\t%.4f\n", dsum/ncnt);
+        stat_out("noise depth min\t%.4f\n", dmin);
+        stat_out("noise cnt\t%d\n", ncnt);
+
+        stat_out("depth q1\t%.4f\n", depth_q1);
+        stat_out("depth median\t%.4f\n", depth_q2);
+        stat_out("depth q3\t%.4f\n", depth_q3);
+
+        dsum=0;
+        for (i=0;i<vstat.stats.size();++i) {
+            dsum+=vstat.stats[i].depth;
+        }
+
+        int locii_gtmin=0;
+        for (i=0;i<vstat.stats.size();++i) {
+            if (vstat.stats[i].depth >= min_depth) {
+                ++locii_gtmin;
+            }
+        }
+        stat_out("locii >= min depth\t%d\n", locii_gtmin);
+        stat_out("locii\t%d\n", vstat.tot_locii);
+
+        double stdevfrommean=-qnorm((alpha/locii_gtmin)/2);
+        stat_out("qnorm adj\t%f\n", stdevfrommean);
+
+
+        pct_qdepth=qnoise_mean+qnoise_dev*stdevfrommean;
+        stat_out("min pct qual\t%.4f\n", 100*pct_qdepth);
+        
+        // now set params... as if you just read them in
+        // this should mirror "read stats"
+        min_depth = minsampdepth;
+        global_error_rate = noise_mean;
+        total_locii = locii_gtmin;
+    }
+}
+
 
