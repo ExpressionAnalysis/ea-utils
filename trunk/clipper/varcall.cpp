@@ -321,7 +321,7 @@ double pct_qdepth=0;
 double global_error_rate=0;
 double max_phred;
 int total_locii=-1;
-double pct_balance=0.01;       // at least 1 reverse read
+double pct_balance=0.05;       // at least 1 reverse read for every 20
 char *debug_xchr=NULL;
 int debug_xpos=0;
 int debug_level=0;
