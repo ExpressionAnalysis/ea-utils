@@ -1975,8 +1975,9 @@ void VarStatVisitor::Visit(PileupSummary &p) {
                 noise = (double) p.Calls[2].depth()/p.Depth;
                 qnoise = (double) p.Calls[2].qual/p.TotQual;
             } else {
-                noise = (double) p.Calls[2].depth()/p.Depth;
-                qnoise = (double) p.Calls[2].qual/p.TotQual;
+                // this is weird... but ok
+                noise = 0;
+                qnoise = 0;
             }
         }
     } else {
