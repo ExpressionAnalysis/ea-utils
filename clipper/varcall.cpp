@@ -339,6 +339,7 @@ int min_idepth=3;
 int no_baq=0;
 double zygosity=.5;		        // set to .1 for 1 10% admixture, or even .05 for het/admix
 bool output_ref=0;              // set to 1 if you want to output reference-only positions
+bool no_indels=0;
 
 void parse_bams(PileupManager &v, int in_n, char **in, const char *ref);
 void check_ref_fai(const char * ref);
@@ -399,6 +400,7 @@ int main(int argc, char **argv) {
 
     #define OPT_PCR_ANNOT '\1'
     #define OPT_DEBUG_LEVEL '\2'
+    #define OPT_NO_INDELS '\3'
     #define OPT_FILTER_ANNOT 'A'
 
 // long options
@@ -406,6 +408,7 @@ int main(int argc, char **argv) {
        {"pcr-annot", 1, 0, OPT_PCR_ANNOT},
        {"filter-annot", 1, 0, OPT_FILTER_ANNOT},
        {"repeat-filter", 1, 0, 'R'},
+       {"no-indels", 0, 0, OPT_NO_INDELS},
        {"agreement", 1, 0, 'G'},
        {"diversity", 1, 0, 'd'},
        {"version", 0, 0, 'V'},
@@ -417,6 +420,7 @@ int main(int argc, char **argv) {
 		switch (c) {
 			case OPT_PCR_ANNOT: target_annot=optarg; pcr_annot=true; break;
 			case OPT_FILTER_ANNOT: target_annot=optarg; pcr_annot=false; break;
+			case OPT_NO_INDELS: no_indels=true; break;
 			case 'h': usage(stdout); return 0;
 			case 'm': umindepth=ok_atoi(optarg); break;
 			case 'q': min_qual=ok_atoi(optarg); break;
@@ -1413,6 +1417,11 @@ void PileupManager::VisitX(PileupSummary &p, int windex) {
         }
     }
 
+    if (no_indels) {
+        if (p.Calls.size() > 4) {
+            p.Calls.resize(4);
+        }
+    }
 
     int i;
     for (i=0;i<Kids.size();++i) {
@@ -2047,6 +2056,7 @@ void usage(FILE *f) {
 "--stranded    TYPE     Can be FR (the default), FF, FR.  Used with pcr-annot\n"
 "--diversity|d FLOAT    Alias for -d\n"
 "--agreement|G FLOAT    Alias for -G\n"
+"--no-indels            Ignore all indels\n"
 "\n"
 "Input files\n"
 "\n"
