@@ -219,30 +219,59 @@ public:
     PileupSummary() { Base = '\0'; Pos=-1; };
 };
 
-class PileupVisitor {
-    public:
-        char InputType;
+class PileupManager;
 
-        int UseAnnot;
-        tidx AnnotDex;          // start/stop index file
-        char AnnotType;         // b (bed) or g (gtf - preferred)
-        
-        PileupReads Reads;
-        PileupVisitor() {InputType ='\0';}
-		void Parse(char *dat) {PileupSummary p(dat, Reads, UseAnnot ? &AnnotDex : NULL, AnnotType); Visit(p);};
-        void LoadAnnot(const char *annot_file);
-		virtual void Visit(PileupSummary &dat)=0;
-		virtual void Finish()=0;
+class PileupSubscriber {
+public:
+    PileupManager *Manager;
+    virtual void Visit(PileupSummary &dat) = 0;
+    virtual void Finish() {};
+    PileupSubscriber(PileupManager &man);
 };
 
-class VarStatVisitor : public PileupVisitor {
+class PileupManager  {
+friend class PileupSubscriber;
+
+private:
+    void Visit(PileupSummary &dat);
+    void VisitX(PileupSummary &dat, int windex);
+    PileupSummary *CurrentSummary;
+
+protected:
+    vector<PileupSubscriber *> Kids;
+
+public:
+
+    string Reference;
+    char InputType;
+    int WinMax;
+    int WinDex;
+
+    deque<PileupSummary> Win;
+
+    int UseAnnot;
+    tidx AnnotDex;          // start/stop index file
+    char AnnotType;         // b (bed) or g (gtf - preferred)
+
+    PileupReads Reads;
+ 
+    PileupManager() {InputType ='\0'; WinMax=0; WinDex=0; UseAnnot=0; AnnotType='\0';}
+
+    void Finish();
+
+    void Parse(char *dat);
+
+    void LoadAnnot(const char *annot_file);
+    void FillReference(int refSize);
+};
+
+class VarStatVisitor : public PileupSubscriber {
     public:
-    VarStatVisitor() : PileupVisitor() {tot_locii=0; tot_depth=0; num_reads=0;};
+    VarStatVisitor(PileupManager &man) : PileupSubscriber(man) {tot_locii=0; tot_depth=0; num_reads=0;};
 
     void Visit(PileupSummary &dat);
     void Finish() {};
 
-    public:
 	double tot_depth;
 	int tot_locii;
 	int num_reads;
@@ -251,17 +280,19 @@ class VarStatVisitor : public PileupVisitor {
 	vector<Noise> del_stats;
 };
 
-class VarCallVisitor : public PileupVisitor {
 
-    deque<PileupSummary> Win;
-    void VisitX(PileupSummary &dat, int windex);
-
+class VarCallVisitor : public PileupSubscriber {
     public:
-    int WinMax;
-    VarCallVisitor() : PileupVisitor() {SkippedAnnot=0;SkippedDepth=0;WinMax=0;Hets=0;Homs=0;Locii=0;};
+
+    VarCallVisitor(PileupManager &man) : PileupSubscriber(man) {
+        SkippedAnnot=0;
+        SkippedDepth=0;
+        Hets=0;
+        Homs=0;
+        Locii=0;
+    };
 
     void Visit(PileupSummary &dat);
-    void Finish();
 
 	int SkippedDepth;
 	int SkippedAnnot;
@@ -304,7 +335,7 @@ int no_baq=0;
 double zygosity=.5;		        // set to .1 for 1 10% admixture, or even .05 for het/admix
 bool output_ref=0;              // set to 1 if you want to output reference-only positions
 
-void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref);
+void parse_bams(PileupManager &v, int in_n, char **in, const char *ref);
 void check_ref_fai(const char * ref);
 
 FILE *noise_f=NULL, *var_f = NULL, *varsum_f = NULL, *tgt_var_f = NULL, *tgt_cse_f = NULL, *vcf_f = NULL, *eav_f=NULL, *cse_f=NULL;
@@ -519,9 +550,10 @@ int main(int argc, char **argv) {
 		if (do_varcall) 				// unless varcalling at the same time
 			stat_fout=stderr;
 
-		VarStatVisitor vstat;
+        PileupManager pman;
+		VarStatVisitor vstat(pman);
 
-		parse_bams(vstat, in_n, in, ref);
+		parse_bams(pman, in_n, in, ref);
 
 		stat_out("version\tvarcall-%s.%d\n", VERSION, SVNREV);
         stat_out("min depth\t%d\n", minsampdepth);
@@ -678,19 +710,22 @@ int main(int argc, char **argv) {
 		fprintf(varsum_f,"error rate\t%f\n", global_error_rate);
 		fprintf(varsum_f,"locii used for adjustment\t%d\n", total_locii);
 
-		VarCallVisitor vcall;
+        PileupManager pman;
 
+		VarCallVisitor vcall(pman);
+		VarStatVisitor vstat(pman);
+       
         if (target_annot) {
-            vcall.LoadAnnot(target_annot);
+            pman.LoadAnnot(target_annot);
        }
 
         if (cse_f) {
-            vcall.WinMax=21;
+            pman.WinMax=21;
         } else if (repeat_filter > 0) {
 		    fprintf(varsum_f,"homopolymer filter\t%d\n", repeat_filter);
-            vcall.WinMax=repeat_filter+repeat_filter+3;
+            pman.WinMax=repeat_filter+repeat_filter+3;
         } else {
-            vcall.WinMax=5;
+            pman.WinMax=5;
         }
 
         if (vcf_f) {
@@ -701,9 +736,9 @@ int main(int argc, char **argv) {
             fprintf(cse_f, "Chr\tPos\tRef\tA\tC\tG\tT\ta\tc\tg\tt\tAq\tCq\tGq\tTq\taq\tcq\tgq\ttq\tRefAllele\tAd\tCd\tGd\tTd\tAg\tCg\tGg\tTg%s\n", pcr_annot ? "\tRegions" : "");
         }
 
-		parse_bams(vcall, in_n, in, ref);
+		parse_bams(pman, in_n, in, ref);
 
-        if (vcall.InputType == 'B') {
+        if (pman.InputType == 'B') {
         	fprintf(varsum_f,"baq correct\t%s\n", (no_baq?"no":"yes"));
         }
         fprintf(varsum_f,"locii\t%d\n", vcall.Locii);
@@ -796,7 +831,7 @@ double pnorm(double x)
     return 0.5*(1.0 + sign*y);
 }
 
-void parse_bams(PileupVisitor &v, int in_n, char **in, const char *ref) {
+void parse_bams(PileupManager &v, int in_n, char **in, const char *ref) {
 
 	if (!in_n) {
 		die("No input files, quitting\n");
@@ -1292,7 +1327,14 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
 
 PileupSummary JunkSummary;
 
-void VarCallVisitor::Visit(PileupSummary &p) {
+void PileupManager::Parse(char *dat) {
+    PileupSummary p(dat, Reads, UseAnnot ? &AnnotDex : NULL, AnnotType);
+    CurrentSummary=&p;
+    Visit(p);
+}
+
+void PileupManager::Visit(PileupSummary &p) {
+
     if (WinMax < 3) {
         // no real window ... just go straight
         VisitX(p, -1);
@@ -1424,17 +1466,47 @@ void VarCallVisitor::Visit(PileupSummary &p) {
     VisitX(Win[vx], vx);
 }
 
-void VarCallVisitor::Finish() {
+void PileupManager::Finish() {
     // finish out the rest of the pileup, with the existing window
     int vx = WinMax/2+1;
     while (vx < Win.size()) {
         ///debug("Finish: %d\n", Win[vx].Pos);
         VisitX(Win[vx++], vx);
     }
+    int i;
+    for (i=0;i<Kids.size();++i) {
+        Kids[i]->Finish();
+    }
 }
 
-void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
+void PileupManager::VisitX(PileupSummary &p, int windex) {
+
+    WinDex=windex;
+
+    if (UseAnnot) {
+        // index lookup only.... not string lookup
+        const std::vector <long int> * v = &(AnnotDex.lookup(p.Chr.data(), p.Pos + (AnnotType=='b' ? -1 : 0)));
+        if (v && v->size()) {
+            p.InTarget=1;
+        }
+    }
+
+
+    int i;
+    for (i=0;i<Kids.size();++i) {
+        Kids[i]->Visit(p);
+    }
+}
+
+void VarCallVisitor::Visit(PileupSummary &p) {
     //debug("VisitX: %d\n", p.Pos);
+
+    if (pcr_annot) {
+        if (!p.InTarget) {
+            ++SkippedAnnot;
+            return;
+        }
+    }
 
 	if (debug_xpos) {
 		if (p.Pos != debug_xpos)
@@ -1456,23 +1528,6 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
 		return;
 	}
 
-    if (UseAnnot) {
-        // index lookup only.... not string lookup
-        const std::vector <long int> * v = &(AnnotDex.lookup(p.Chr.data(), p.Pos + (AnnotType=='b' ? -1 : 0)));
-        if (v && v->size()) {
-            p.InTarget=1;
-        }
-        if (pcr_annot) {
-            if (!p.InTarget) {
-                ++SkippedAnnot;
-                return;
-            }
-            // mode 2 ... ?   never happens... since you skip, right .. but if the code changes
-            // you'll need to keep track of this other way of using annotations
-            UseAnnot=2;
-        }
-    }
-
 	int ins_fwd = p.Calls.size() > 6 ? p.Calls[6].fwd : 0;
 	int ins_rev = p.Calls.size() > 6 ? p.Calls[6].rev : 0;
 
@@ -1489,24 +1544,9 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
     if (cse_f) {
         if (p.Calls.size() < 4) 
             p.Calls.resize(4);	// cse needs 4 calls
-    
-        static char ref21[22];
-        if (windex==10 && Win.size()==21) {
-            bool needfai=0;
-            for (i=windex-10;i<21;++i) {
-                if (!isalpha(Win[i].Base)) {
-                    needfai=1;
-                    break;
-                } else {
-                    ref21[i-(windex-10)]=Win[i].Base;
-                }
-            }
-            if (needfai) {
-                faidx.Fetch(ref21, p.Chr, p.Pos-10-1, p.Pos+10-1);
-            }
-        }
-        ref21[21]='\0';
 
+        Manager->FillReference(21);
+    
         // cse format... no need to sort or call anything
         if (p.Calls[T_A].depth()||p.Calls[T_C].depth()|| p.Calls[T_G].depth()|| p.Calls[T_T].depth()) {
             // silly 15 decimals to match R's default output ... better off with the C default
@@ -1517,7 +1557,7 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
                     , p.Calls[T_A].rev, p.Calls[T_C].rev, p.Calls[T_G].rev, p.Calls[T_T].rev
                     , MEANQ(T_A,fwd), MEANQ(T_C,fwd), MEANQ(T_G,fwd), MEANQ(T_T,fwd)
                     , MEANQ(T_A,rev), MEANQ(T_C,rev), MEANQ(T_G,rev), MEANQ(T_T,rev)
-                    , ref21
+                    , Manager->Reference.data()
                     , p.Calls[T_A].diversity
                     , p.Calls[T_C].diversity
                     , p.Calls[T_G].diversity
@@ -1783,7 +1823,7 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
                     pil += string_format("\t%c:%d,%d,%.1e,%.2g,%.2g",f.pcall->base,f.pcall->depth(),f.pcall->qual/f.pcall->depth(),f.padj, f.pcall->diversity, f.pcall->agreement);
                }
             }
-            fprintf(var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_diversity+skipped_agreement+skipped_alpha+skipped_depth+skipped_balance+p.SkipAmp+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, UseAnnot==1?(p.InTarget ? "\t1" : "\t0"):"", pil.c_str());
+            fprintf(var_f,"%s\t%d\t%c\t%d\t%d\t%2.2f%s%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, skipped_diversity+skipped_agreement+skipped_alpha+skipped_depth+skipped_balance+p.SkipAmp+p.SkipN+p.SkipDupReads+p.SkipMinMapq+p.SkipMinQual, pct_allele, Manager->UseAnnot==1?(p.InTarget ? "\t1" : "\t0"):"", pil.c_str());
 
             if (tgt_var_f) {
                 if (p.InTarget) {
@@ -1866,7 +1906,7 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
                 if (i > 0) diversity += ";";
                 diversity+= string_format("%g",f.pcall->diversity);
             }
-            fprintf(eav_f,"%s\t%d\t%c\t%d\t%d\t%s\t%2.2f\t%s\t%s\t%s\t%s\t%s\t%s\t%.1e\t%s\t%s%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, (int) final_calls.size(),top_cons.c_str(), pct_allele, var_base.c_str(), var_depth.c_str(), var_qual.c_str(), var_strands.c_str(), forward.c_str(), reverse.c_str(), padj, diversity.c_str(), agreement.c_str(), UseAnnot==1?(p.InTarget?"\t1":"\t0"):regions);
+            fprintf(eav_f,"%s\t%d\t%c\t%d\t%d\t%s\t%2.2f\t%s\t%s\t%s\t%s\t%s\t%s\t%.1e\t%s\t%s%s\n",p.Chr.c_str(), p.Pos, p.Base, p.Depth, (int) final_calls.size(),top_cons.c_str(), pct_allele, var_base.c_str(), var_depth.c_str(), var_qual.c_str(), var_strands.c_str(), forward.c_str(), reverse.c_str(), padj, diversity.c_str(), agreement.c_str(), Manager->UseAnnot==1?(p.InTarget?"\t1":"\t0"):regions);
         }
 
 		if (debug_xpos) {
@@ -1892,8 +1932,31 @@ void VarCallVisitor::VisitX(PileupSummary &p, int windex) {
 	}
 }
 
+void PileupManager::FillReference(int refSize) {
+    int flank=(refSize-1)/2;
+    Reference.resize(refSize);
 
-void PileupVisitor::LoadAnnot(const char *path) {
+    // if you're in the middle of a window
+    if (WinDex==flank && Win.size()==refSize) {
+        bool needfai=0;
+        int i;
+        for (i=WinDex-flank;i<refSize;++i) {
+            if (!isalpha(Win[i].Base)) {
+                needfai=1;
+                break;
+            } else {
+                Reference[i-(WinDex-flank)]=Win[i].Base;
+            }
+        }
+        if (needfai) {
+            faidx.Fetch((char *)Reference.data(), CurrentSummary->Chr, CurrentSummary->Pos-flank-1, CurrentSummary->Pos+flank-1);
+        }
+    } else {
+        faidx.Fetch((char *)Reference.data(), CurrentSummary->Chr, CurrentSummary->Pos-flank-1, CurrentSummary->Pos+flank-1);
+    }
+}
+
+void PileupManager::LoadAnnot(const char *path) {
     FILE *f = fopen(path,"r");
     if (!f) {
         warn("Can't open %s : %s\n", path, strerror(errno));
@@ -2218,4 +2281,9 @@ bool Faidx::Fetch(char *buf, const Faient *ent, int pos_from, int pos_to) {
     return l==len;
 }
 
+
+PileupSubscriber::PileupSubscriber(PileupManager &man) { 
+    Manager = &man; 
+    man.Kids.push_back(this); 
+};
 
