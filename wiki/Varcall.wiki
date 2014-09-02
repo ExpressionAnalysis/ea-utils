@@ -28,7 +28,8 @@ Version 1 should also have the ability to do a stats collection across a group o
 Usage: varcall <-s|-v> <-f REF> [options] bam1 [bam2...]
 Version: 0.95.794 (BETA)
 
-Either outputs summry stats for the list of files, or performs variant calling.  (You can specify -s and -v, in which case both are done).
+Either outputs summry stats for the list of files, or performs variant calling.  
+(You can specify -s and -v, in which case both are done).
 
 Options (later options override earlier):
 
