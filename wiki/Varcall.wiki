@@ -67,7 +67,8 @@ Extended Options
 
 Input files
 
-Files must be sorted bam files with bai index files available.  Alternatively, a single pileup file can be supplied.
+Files must be sorted bam files with bai index files available.
+Alternatively, a single pileup file can be supplied.
 
 Output files
 
