@@ -74,6 +74,20 @@ FILE *stat_fout=NULL;
 #define stdev(cnt, sum, ssq) sqrt((((double)cnt)*ssq-pow((double)sum,2)) / ((double)cnt*((double)cnt-1)))
 #define log10(x) (log(x)/log(10))
 
+//////////// BASE 2 INTEGER
+
+#define T_A 0
+#define T_C 1
+#define T_G 2
+#define T_T 3
+#define T_SDEL 4
+#define T_NDEL 5
+#define T_INS 6
+#define T_N 7
+#define T_CNT 8
+#define b2i(c) ((c)=='A'?0:(c)=='a'?0:(c)=='C'?1:(c)=='c'?1:(c)=='G'?2:(c)=='g'?2:(c)=='T'?3:(c)=='t'?3:(c)=='*'?4:(c)=='-'?5:(c)=='+'?6:7)
+#define i2b(i) (i==0?'A':i==1?'C':i==2?'G':i==3?'T':i==4?'*':i==5?'-':i==6?'+':'?')
+
 // die unless it's a number
 int ok_atoi(const char *s) {
     if (!s || (!isdigit(*s)&& !(*s=='-'))) {
@@ -97,6 +111,8 @@ void rename_tmp(std::string f);
 int errs=0;
 extern int optind;
 int g_lineno=0;
+double vse_rate[T_CNT][T_CNT];
+bool use_vse;
 
 class Faidx {
 public:
@@ -322,6 +338,7 @@ double pct_depth=0;
 double pct_qdepth=0;
 double global_error_rate=0;
 double max_phred;
+double vse_max_phred[T_CNT][T_CNT];
 int total_locii=-1;
 double pct_balance=0.05;       // at least 1 reverse read for every 20
 char *debug_xchr=NULL;
@@ -538,8 +555,6 @@ int main(int argc, char **argv) {
     // not really random
     srand(1);
 
-    max_phred = -log10(global_error_rate)*10;
-    
 	if (do_stats) {
         if (out_prefix) {
             stat_fout = openordie(string_format("%s.stats", out_prefix).c_str(), "w");
@@ -578,6 +593,19 @@ int main(int argc, char **argv) {
         }
         line l; meminit(l);
         char *val;
+
+        double noise_mean=0;
+        double noise_dev=0;
+
+        double qnoise_mean=0;
+        double qnoise_dev=0;
+
+        double vse_mean[T_CNT][T_CNT];
+        double vse_dev[T_CNT][T_CNT];
+
+        meminit(vse_mean);
+        meminit(vse_dev);
+
         while(read_line(f, l)>0) {
             if (val=strchr(l.s, '\t')) {
                 *val='\0'; ++val;
@@ -589,16 +617,66 @@ int main(int argc, char **argv) {
                 } else if (!strcasecmp(l.s, "min pct qual")) {
                     if (upctqdepth<=0) upctqdepth=atof(val); 
                 } else if (!strcasecmp(l.s, "noise mean")) {
-                    if (global_error_rate<=0) global_error_rate=atof(val); 
+                    if (global_error_rate<=0) noise_mean=atof(val); 
+                } else if (!strcasecmp(l.s, "noise dev")) {
+                    if (global_error_rate<=0) noise_dev=atof(val); 
+                } else if (!strcasecmp(l.s, "qnoise mean")) {
+                    if (global_error_rate<=0) qnoise_mean=atof(val); 
+                } else if (!strcasecmp(l.s, "qnoise dev")) {
+                    if (global_error_rate<=0) qnoise_dev=atof(val); 
                 } else if (!strcasecmp(l.s, "locii >= min depth")) {
                     if (total_locii<0) total_locii=atoi(val); 
                 } else if (!strcasecmp(l.s, "alpha")) {
                     if (alpha<=0) alpha=atof(val); 
+                } else if (!strncasecmp(l.s, "vnoise", 6)) {
+                    char ref, var; char typ[10];
+                    if ( sscanf(l.s, "vnoise %s %c:%c", typ, &ref, &var) == 2) {
+                        if (*typ == 'm') {
+                            vse_mean[b2i(ref)][b2i(var)]=atof(val); 
+                        } else {
+                            vse_dev[b2i(ref)][b2i(var)]=atof(val); 
+                        }
+                        use_vse=1;
+                    }
+                }
+            }
+        }
+
+        if (use_vse) {
+            int i, j;
+            for (i=0;i<T_CNT;++i) {
+                for (j=0;i<T_CNT;++i) {
+                    if (vse_rate[i][j]) {
+                        vse_rate[i][j] = vse_mean[i][j] + vse_dev[i][j];
+                    } else {
+                        vse_rate[i][j] = noise_mean+noise_dev;
+                    }
+                }
+            }
+        }
+
+        if (noise_mean > 0) {
+            global_error_rate=noise_mean+noise_dev;
+        }
+    }
+
+    // for speed, do this once...
+    max_phred = -log10(global_error_rate)*10;
+    meminit(vse_max_phred);
+   
+    if (use_vse) {
+        int i, j;
+        for (i=0;i<T_CNT;++i) {
+            for (j=0;j<T_CNT;++j) {
+                if (vse_rate[i][j]) {
+                    vse_max_phred[i][j]=-log10(vse_rate[i][j])*10;
+                } else {
+                    vse_max_phred[i][j]=max_phred;
                 }
             }
         }
     }
-
+ 
     if (total_locii<0) total_locii=DEFAULT_LOCII;
     if (total_locii==0) total_locii=1;          // no adjustment
 
@@ -850,16 +928,6 @@ void parse_bams(PileupManager &v, int in_n, char **in, const char *ref) {
 	}
 }
 
-#define T_A 0
-#define T_C 1
-#define T_G 2
-#define T_T 3
-#define T_SDEL 4
-#define T_NDEL 5
-#define T_INS 6
-#define T_N 7
-#define b2i(c) ((c)=='A'?0:(c)=='a'?0:(c)=='C'?1:(c)=='c'?1:(c)=='G'?2:(c)=='g'?2:(c)=='T'?3:(c)=='t'?3:(c)=='*'?4:(c)=='-'?5:(c)=='+'?6:7)
-#define i2b(i) (i==0?'A':i==1?'C':i==2?'G':i==3?'T':i==4?'*':i==5?'-':i==6?'+':'?')
 
 bool hitoloint (int i,int j) { return (i>j);}
 
@@ -1667,7 +1735,7 @@ void VarCallVisitor::Visit(PileupSummary &p) {
                                    }
                                  */
                                 if (p.Calls[i].depth() >= min_adepth && p.Calls[i].depth() > 0) {
-                                    double err_rate = mean_qual < max_phred ? pow(10,-mean_qual/10.0) : global_error_rate;
+                                    double err_rate = mean_qual < vse_max_phred[b2i(p.Base)][b2i(p.Calls[i].base)] ? pow(10,-mean_qual/10.0) : vse_rate[b2i(p.Base)][b2i(p.Calls[i].base)];
                                     // expected number of non-reference bases at this position is error_rate*depth
                                     double pval=(p.Depth*err_rate==0)?0:gsl_ran_poisson_pdf(p.Calls[i].depth(), p.Depth*err_rate);
                                     double padj=total_locii ? pval*total_locii : pval;           // multiple-testing adjustment
@@ -2363,19 +2431,24 @@ void output_stats(VarStatVisitor &vstat) {
 
         // variation-specific error rates
         int j;
-        for (i=0;i<4;++i) {
-        for (j=0;j<4;++j) {
+        for (i=0;i<T_CNT;++i) {
+        for (j=0;j<T_CNT;++j) {
             if (i!=j && qvsum[i*5+j] > 0) {
                 double qn_mean =qvsum[i*5+j]/qvcnt[i*5+j];
                 double qn_dev = stdev(qvcnt[i*5+j], qvsum[i*5+j], qvssq[i*5+j]);
-                stat_out("vnoise %c:%c mean\t%.6f\n", i2b(i), i2b(j), qn_mean);
-                stat_out("vnoise %c:%c dev\t%.6f\n", i2b(i), i2b(j), qn_dev);
+                stat_out("vnoise mean %c:%c\t%.6f\n", i2b(i), i2b(j), qn_mean);
+                stat_out("vnoise dev %c:%c\t%.6f\n", i2b(i), i2b(j), qn_dev);
+                vse_rate[i][j]=qn_mean+qn_dev;
+            } else {
+                vse_rate[i][j]=noise_mean;
             }
         }
         }
+
         
         // now set params... as if you just read them in
         // this should mirror "read stats"
+        use_vse=1;
         min_depth = minsampdepth;
         global_error_rate = noise_mean;
         total_locii = locii_gtmin;
