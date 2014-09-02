@@ -633,7 +633,7 @@ int main(int argc, char **argv) {
                     char ref, var; char typ[10];
                     if ( sscanf(l.s, "vnoise %s %c:%c", typ, &ref, &var) == 3) {
                         if (*typ == 'm') {
-                            warn("vse_mean  %d, %d : %f\n", b2i(ref),b2i(var), atof(val));
+                            // warn("vse_mean  %d, %d : %f\n", b2i(ref),b2i(var), atof(val));
                             vse_mean[b2i(ref)][b2i(var)]=atof(val); 
                         } else if (*typ == 'd') {
                             vse_dev[b2i(ref)][b2i(var)]=atof(val);
