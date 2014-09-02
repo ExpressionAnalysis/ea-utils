@@ -112,7 +112,6 @@ int errs=0;
 extern int optind;
 int g_lineno=0;
 double vse_rate[T_CNT][T_CNT];
-bool use_vse;
 
 class Faidx {
 public:
@@ -555,6 +554,8 @@ int main(int argc, char **argv) {
     // not really random
     srand(1);
 
+    meminit(vse_rate);
+
 	if (do_stats) {
         if (out_prefix) {
             stat_fout = openordie(string_format("%s.stats", out_prefix).c_str(), "w");
@@ -630,27 +631,27 @@ int main(int argc, char **argv) {
                     if (alpha<=0) alpha=atof(val); 
                 } else if (!strncasecmp(l.s, "vnoise", 6)) {
                     char ref, var; char typ[10];
-                    if ( sscanf(l.s, "vnoise %s %c:%c", typ, &ref, &var) == 2) {
+                    if ( sscanf(l.s, "vnoise %s %c:%c", typ, &ref, &var) == 3) {
                         if (*typ == 'm') {
+                            warn("vse_mean  %d, %d : %f\n", b2i(ref),b2i(var), atof(val));
                             vse_mean[b2i(ref)][b2i(var)]=atof(val); 
+                        } else if (*typ == 'd') {
+                            vse_dev[b2i(ref)][b2i(var)]=atof(val);
                         } else {
-                            vse_dev[b2i(ref)][b2i(var)]=atof(val); 
+                            die("Invalid stats format : %s\n", l.s);
                         }
-                        use_vse=1;
                     }
                 }
             }
         }
 
-        if (use_vse) {
-            int i, j;
-            for (i=0;i<T_CNT;++i) {
-                for (j=0;i<T_CNT;++i) {
-                    if (vse_rate[i][j]) {
-                        vse_rate[i][j] = vse_mean[i][j] + vse_dev[i][j];
-                    } else {
-                        vse_rate[i][j] = noise_mean+noise_dev;
-                    }
+        int i, j;
+        for (i=0;i<T_CNT;++i) {
+            for (j=0;j<T_CNT;++j) {
+                if (vse_mean[i][j]>0) {
+                    vse_rate[i][j] = vse_mean[i][j] + vse_dev[i][j];
+                } else {
+                    vse_rate[i][j] = noise_mean+noise_dev;
                 }
             }
         }
@@ -663,17 +664,17 @@ int main(int argc, char **argv) {
     // for speed, do this once...
     max_phred = -log10(global_error_rate)*10;
     meminit(vse_max_phred);
-   
-    if (use_vse) {
-        int i, j;
-        for (i=0;i<T_CNT;++i) {
-            for (j=0;j<T_CNT;++j) {
-                if (vse_rate[i][j]) {
-                    vse_max_phred[i][j]=-log10(vse_rate[i][j])*10;
-                } else {
-                    vse_max_phred[i][j]=max_phred;
-                }
+
+    // init table
+    int i, j;
+    for (i=0;i<T_CNT;++i) {
+        for (j=0;j<T_CNT;++j) {
+            if (vse_rate[i][j]>0) {
+                vse_max_phred[i][j]=-log10(vse_rate[i][j])*10;
+            } else {
+                vse_max_phred[i][j]=max_phred;
             }
+            // warn("%d %d %f\n", i, j, vse_max_phred[i][j]);
         }
     }
  
@@ -2349,18 +2350,24 @@ void output_stats(VarStatVisitor &vstat) {
 
         double ins_nsum=0, ins_nssq=0, del_nsum=0, del_nssq=0;
 
-        vector<double> qvsum(25), qvssq(25); vector<int> qvcnt(25);
+        double qvsum[T_CNT][T_CNT], qvssq[T_CNT][T_CNT]; int qvcnt[T_CNT][T_CNT];
+        meminit(qvsum);
+        meminit(qvssq);
+        meminit(qvcnt);
 
         for (i=0;i<ncnt;++i) {
             if (vstat.stats[i].depth < depth_q1) {
                 continue;
             }
 
-            int j;
-            if ((j=b2i(vstat.stats[i].ref) * 5 + b2i(vstat.stats[i].var)) < 25) {
-                qvsum[j]+=vstat.stats[i].qnoise;
-                qvssq[j]+=vstat.stats[i].qnoise*vstat.stats[i].qnoise;
-                qvcnt[j]+=1;
+            int ref_i, var_i;
+            ref_i=b2i(vstat.stats[i].ref);
+            var_i=b2i(vstat.stats[i].var);
+
+            if (ref_i < T_N && var_i < T_N) {
+                qvsum[ref_i][var_i]+=vstat.stats[i].qnoise;
+                qvssq[ref_i][var_i]+=vstat.stats[i].qnoise*vstat.stats[i].qnoise;
+                qvcnt[ref_i][var_i]+=1;
             }
 
             nsum+=vstat.stats[i].noise;
@@ -2429,18 +2436,20 @@ void output_stats(VarStatVisitor &vstat) {
         pct_qdepth=qnoise_mean+qnoise_dev*stdevfrommean;
         stat_out("min pct qual\t%.4f\n", 100*pct_qdepth);
 
+        meminit(vse_rate);
+
         // variation-specific error rates
         int j;
         for (i=0;i<T_CNT;++i) {
         for (j=0;j<T_CNT;++j) {
-            if (i!=j && qvsum[i*5+j] > 0) {
-                double qn_mean =qvsum[i*5+j]/qvcnt[i*5+j];
-                double qn_dev = stdev(qvcnt[i*5+j], qvsum[i*5+j], qvssq[i*5+j]);
+            if (i!=j && (qvcnt[i][j] > 20)) {
+                double qn_mean =qvsum[i][j]/qvcnt[i][j];
+                double qn_dev = stdev(qvcnt[i][j], qvsum[i][j], qvssq[i][j]);
                 stat_out("vnoise mean %c:%c\t%.6f\n", i2b(i), i2b(j), qn_mean);
                 stat_out("vnoise dev %c:%c\t%.6f\n", i2b(i), i2b(j), qn_dev);
-                vse_rate[i][j]=qn_mean+qn_dev;
+                vse_rate[i][j]=qn_mean+qn_dev;          // vse rate
             } else {
-                vse_rate[i][j]=noise_mean;
+                vse_rate[i][j]=noise_mean+noise_dev;              // global rate
             }
         }
         }
@@ -2448,9 +2457,8 @@ void output_stats(VarStatVisitor &vstat) {
         
         // now set params... as if you just read them in
         // this should mirror "read stats"
-        use_vse=1;
         min_depth = minsampdepth;
-        global_error_rate = noise_mean;
+        global_error_rate = noise_mean+noise_dev;
         total_locii = locii_gtmin;
     }
 }
