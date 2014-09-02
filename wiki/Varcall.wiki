@@ -10,11 +10,16 @@ varcall does two tasks:
 
 The tool is not complete.   
 
-In particular: the VCF output is broken, and the error rate calculations should probably be regional, not global.   Also when inputting "bams" all varcall does is call samtools mpileup... it has no real native bam reader. 
+In particular: the VCF output is somewhat broken.   The native output formats now work fine, and the stats/outputs collection and use are also working well.
 
-One of the advantages is the parameterization, allowing varcall to be used in any situation, this is also a shortcoming... since users must know the meanings of every parameter.
+One of the advantages of using varcall over something like GATK is the extensive parameterization, allowing varcall to be used in any situation, this is also a shortcoming... since users must know the meanings of every parameter.  In addition, varcall seems to be particularly fast.    
+
+Recently we added variation specific error rate collection, and it is used, instead of a the global error rate, in the calculation of pvals.   This vastly reduces false positives, etc. 
 
 By the time we reach version 1, all of these should be fixed, including better docs, and better "auto-configuration" based on sampling.  If you are using varcall before then, carefully experiment with parameters and compare to other tools.
+
+Version 1 should also have the ability to do a stats collection across a group of samples, and then subsequent calling using those stats.   The advantage here is that for some qPCR/rtPCR assays, there are insufficient locii to get an accurate error variation estimate per-sample.
+
 
 = Usage =
 
