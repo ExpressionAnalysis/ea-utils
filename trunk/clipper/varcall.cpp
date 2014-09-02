@@ -130,7 +130,9 @@ public:
 class Noise {
 public:
 	Noise() {noise=0;depth=0;};
-	Noise(int d, double n, double q, double mq) {depth=d; noise=n;qnoise=q;mnqual=mq;};
+	Noise(char r, char v, int d, double n, double q, double mq) {ref=r, var=v, depth=d; noise=n;qnoise=q;mnqual=mq;};
+    char ref;
+    char var;
 	double noise;
 	double qnoise;
 	int depth;
@@ -537,11 +539,12 @@ int main(int argc, char **argv) {
     srand(1);
 
     max_phred = -log10(global_error_rate)*10;
-
+    
 	if (do_stats) {
         if (out_prefix) {
             stat_fout = openordie(string_format("%s.stats", out_prefix).c_str(), "w");
             noise_f = openordie(string_format("%s.noise", out_prefix).c_str(), "w");
+		    fprintf(noise_f,"%s\t%s\t%s\t%s\t%s\t%s\n", "depth", "ref", "var", "noise", "qnoise", "qmean");
         }
         if (!stat_fout)  {
             if (do_varcall)
@@ -1998,7 +2001,7 @@ void VarStatVisitor::Visit(PileupSummary &p) {
 	char pbase = p.Calls.size() > 1 ? p.Calls[1].base : '.';
 
 	if (noise_f) {
-		fprintf(noise_f,"%d\t%c\t%f\t%f\n", p.Depth, pbase, noise, qnoise, mnqual);
+		fprintf(noise_f,"%d\t%c\t%c\t%f\t%f\t%f\n", p.Depth, p.Base, pbase, noise, qnoise, mnqual);
 /*
         if (ins_noise > 0) {
 		    fprintf(noise_f,"%d\t%c\t%f\t%f\n", p.Depth, '+', ins_noise, ins_qnoise, mnqual);
@@ -2011,9 +2014,9 @@ void VarStatVisitor::Visit(PileupSummary &p) {
 
 	tot_depth += p.Depth;
 	num_reads += p.NumReads;
-	stats.push_back(Noise(p.Depth, noise, qnoise, mnqual));
-	ins_stats.push_back(Noise(p.Depth, ins_noise, ins_qnoise, mnqual));
-	del_stats.push_back(Noise(p.Depth, del_noise, del_qnoise, mnqual));
+	stats.push_back(Noise(p.Base, p.Calls[1].base, p.Depth, noise, qnoise, mnqual));
+	ins_stats.push_back(Noise(p.Base, p.Calls[1].base, p.Depth, ins_noise, ins_qnoise, mnqual));
+	del_stats.push_back(Noise(p.Base, p.Calls[1].base, p.Depth, del_noise, del_qnoise, mnqual));
 }
 
 
@@ -2277,10 +2280,21 @@ void output_stats(VarStatVisitor &vstat) {
         double nsum=0, nssq=0, dsum=0, dmin=vstat.stats[0].depth, qnsum=0, qnssq=0, qualsum=0;
 
         double ins_nsum=0, ins_nssq=0, del_nsum=0, del_nssq=0;
+
+        vector<double> qvsum(25), qvssq(25); vector<int> qvcnt(25);
+
         for (i=0;i<ncnt;++i) {
             if (vstat.stats[i].depth < depth_q1) {
                 continue;
             }
+
+            int j;
+            if ((j=b2i(vstat.stats[i].ref) * 5 + b2i(vstat.stats[i].var)) < 25) {
+                qvsum[j]+=vstat.stats[i].qnoise;
+                qvssq[j]+=vstat.stats[i].qnoise*vstat.stats[i].qnoise;
+                qvcnt[j]+=1;
+            }
+
             nsum+=vstat.stats[i].noise;
             nssq+=vstat.stats[i].noise*vstat.stats[i].noise;
             dsum+=vstat.stats[i].depth;
@@ -2314,7 +2328,7 @@ void output_stats(VarStatVisitor &vstat) {
         stat_out("del freq\t%.6f\n", del_noise_mean);
         stat_out("del freq dev\t%.6f\n", del_noise_dev);
 
-        if (qnoise_mean >= noise_mean ) {
+       if (qnoise_mean >= noise_mean ) {
             stat_out("error\tpoor quality estimates\n");
         }
 
@@ -2346,6 +2360,19 @@ void output_stats(VarStatVisitor &vstat) {
 
         pct_qdepth=qnoise_mean+qnoise_dev*stdevfrommean;
         stat_out("min pct qual\t%.4f\n", 100*pct_qdepth);
+
+        // variation-specific error rates
+        int j;
+        for (i=0;i<4;++i) {
+        for (j=0;j<4;++j) {
+            if (i!=j && qvsum[i*5+j] > 0) {
+                double qn_mean =qvsum[i*5+j]/qvcnt[i*5+j];
+                double qn_dev = stdev(qvcnt[i*5+j], qvsum[i*5+j], qvssq[i*5+j]);
+                stat_out("vnoise %c:%c mean\t%.6f\n", i2b(i), i2b(j), qn_mean);
+                stat_out("vnoise %c:%c dev\t%.6f\n", i2b(i), i2b(j), qn_dev);
+            }
+        }
+        }
         
         // now set params... as if you just read them in
         // this should mirror "read stats"
