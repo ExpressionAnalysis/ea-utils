@@ -1,7 +1,0 @@
-Id	Count	File(s)
-ACAGTGA	60	mzout_ACAGTGA_1.fq.tmp	mzout_ACAGTGA_2.fq.tmp
-CGATGTA	73	mzout_CGATGTA_1.fq.tmp	mzout_CGATGTA_2.fq.tmp
-TGACCAA	56	mzout_TGACCAA_1.fq.tmp	mzout_TGACCAA_2.fq.tmp
-GCCAATA	49	mzout_GCCAATA_1.fq.tmp	mzout_GCCAATA_2.fq.tmp
-unmatched	12	mzout_unmatched_1.fq.tmp	mzout_unmatched_2.fq.tmp
-total	250
