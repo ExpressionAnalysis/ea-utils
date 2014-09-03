@@ -67,7 +67,7 @@ disttest: $(PKG).tar.gz
 $(PKG).${VER}-${REL}.tar.gz: $(PKG).tar.gz
 	cp $< $@
 
-%: %.cpp fastq-lib.cpp fastq-lib.h
+%: %.cpp fastq-lib.cpp fastq-lib.h sparsehash
 	$(CC) $(CFLAGS) $< fastq-lib.cpp -o $@
 
 sparsehash: sparsehash-2.0.2

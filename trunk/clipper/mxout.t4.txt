@@ -1,7 +1,0 @@
-Id	Count	File(s)
-LB2	75	mwout_LB2_1.fq.tmp	mwout_LB2_2.fq.tmp
-LB4	57	mwout_LB4_1.fq.tmp	mwout_LB4_2.fq.tmp
-LB5	60	mwout_LB5_1.fq.tmp	mwout_LB5_2.fq.tmp
-LB6	51	mwout_LB6_1.fq.tmp	mwout_LB6_2.fq.tmp
-unmatched	7	mwout_unmatched_1.fq.tmp	mwout_unmatched_2.fq.tmp
-total	250

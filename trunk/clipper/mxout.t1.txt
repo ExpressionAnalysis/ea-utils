@@ -1,7 +1,0 @@
-Id	Count	File(s)
-LB2	75	mxout_LB2_1.fq.tmp	mxout_LB2_2.fq.tmp
-LB4	57	mxout_LB4_1.fq.tmp	mxout_LB4_2.fq.tmp
-LB5	60	mxout_LB5_1.fq.tmp	mxout_LB5_2.fq.tmp
-LB6	51	mxout_LB6_1.fq.tmp	mxout_LB6_2.fq.tmp
-unmatched	7	mxout_unmatched_1.fq.tmp	mxout_unmatched_2.fq.tmp
-total	250
