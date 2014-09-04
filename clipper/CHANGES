@@ -1,3 +1,16 @@
+r805:
+* fixed fastq-mcf 'start' bug for ubuntu 14.04
+
+r780:
+* fixed fastq-mcf output
+* added support for fastq-multx reading from headers 
+* bundled entire sparsehash library, changed Makefile to include it
+* fastq-join corrected quality in overlapped regions
+* added a proper test suite. requires perl & Test::More
+* fastq-multx minimum distance
+* fastq-join allow insert < read-length
+* fastq-mcf corrected low-complexity filtering
+
 r181	- CASAVA purity filtering
 r154	- fixed major bug in RMN's that would invalidate reads
 r152	- allowed short adapters to work at the 'begin' of reads
