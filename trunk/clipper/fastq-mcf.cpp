@@ -639,7 +639,7 @@ int main (int argc, char **argv) {
 
 				if (nq != ns) {
 					if (warncount < MAXWARN) {
-						fprintf(stderr, "Warning, corrupt quality for sequence: '%s' -> '%s'", s, q);
+						fprintf(stderr, "Warning, corrupt quality for sequence: %s", s);
 						++warncount;
 					}
 					continue;
