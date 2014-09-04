@@ -22,6 +22,10 @@ Variant caller, takes bam or pileup output and does variant calling with advance
 
 REQUIRES:
 
+On Ubuntu:
+
+sudo apt-get install subversion zlib1g-dev libgsl0-dev
+
 For building sam-stats, please install this first!
 
 https://github.com/pezmaster31/bamtools/wiki/Building-and-installing
