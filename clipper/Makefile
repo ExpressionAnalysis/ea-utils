@@ -11,7 +11,7 @@ CPPFLAGS?=-O3 -I.
 # CPPFLAGS?=-g -I.
 
 PKG=ea-utils
-REL := $(shell svnversion 2>/dev/null | perl -ne 'print $$1 if /:(\d+)/' )
+REL := $(shell svnversion 2>/dev/null | perl -ne 'print $$1 if /(\d+)/' )
 VER := $(shell grep '%define ver' ${PKG}.spec | perl -ne 'print $$1 if / (\S+) *$$/')
 
 SRC=fastq-clipper.cpp fastq-mcf.cpp fastq-multx.cpp fastq-join.cpp fastq-stats.cpp gcModel.cpp
@@ -39,9 +39,9 @@ dist: getrel $(PKG).${VER}-${REL}.tar.gz
 getrel:
 	grep "${REL}" $(PKG).spec || touch $(PKG).spex
 
-.PHONY: getrel debug
+.PHONY: getrel debug $(PKG).spec
 
-$(PKG).spec: $(PKG).spex
+$(PKG).spec:
 	perl -pe 's/%RELEASE%/${REL}/' $(PKG).spex > $(PKG).spec
 
 $(PKG).tar.gz: Makefile $(TOOLS) $(SRC) $(PKG).spec fastq-lib.cpp fastq-lib.h sam-stats.cpp fastq-stats.cpp gcModel.cpp gcModel.h varcall.cpp utils.h README CHANGES sparsehash-2.0.2 samtools/*.c t
