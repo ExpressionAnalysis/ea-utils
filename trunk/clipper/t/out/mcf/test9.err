@@ -2,7 +2,8 @@ Command Line: in/mcf/adap.fa in/mcf/test5.fq
 Scale used: 2.2
 Phred: 64
 Threshold used: 1 out of 4
-No adapters found, no skewing detected, and no trimming needed.
+Adapter 3p_for_test (CATGATTGATGGTGCCTACAG): counted 4 at the 'start' of 'in/mcf/test5.fq', clip set to 1
 Files: 1
 Total reads: 4
 Too short after clip: 0
+Clipped 'start' reads: Count: 4, Mean: 21.00, Sd: 0.00
