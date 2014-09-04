@@ -15,6 +15,7 @@ $prog="$BINDIR/fastq-mcf";
     {param=>"-l 15 $INDIR/test.fa $INDIR/test1.fq -o %o:$TMPDIR/test6.out.gz > %o:$TMPDIR/test6.err 2>&1"},
     {param=>"-0 -D 20 n/a $INDIR/test-mcf-dup.fq -o %o:$TMPDIR/test7.out > %o:$TMPDIR/test7.err 2>&1"},
     {param=>"n/a $INDIR/count.fq > %o:$TMPDIR/test8.out 2> %o:$TMPDIR/test8.err 2>&1"},
+    {param=>"$INDIR/adap.fa $INDIR/test5.fq > %o:$TMPDIR/test9.out 2> %o:$TMPDIR/test9.err"},
 );
 
 my $id=0;
