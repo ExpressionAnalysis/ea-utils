@@ -82,7 +82,7 @@ const char *cmd_align_pe = "bowtie -S %i -1 %1 -2 %2";
 
 // quality filter args
 int qf_mean=0, qf_max_ns=-1, qf_xgt_num=0, qf_xgt_min=0, qf_max_n_pct=-1;
-int qf2_mean=0, qf2_max_ns=-1, qf2_xgt_num=0, qf2_xgt_min=0, qf2_max_n_pct=0;
+int qf2_mean=0, qf2_max_ns=-1, qf2_xgt_num=0, qf2_xgt_min=0, qf2_max_n_pct=-1;
 
 // qual adjust
 class adjustment {
