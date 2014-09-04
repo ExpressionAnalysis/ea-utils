@@ -639,7 +639,7 @@ int main (int argc, char **argv) {
 
 				if (nq != ns) {
 					if (warncount < MAXWARN) {
-						fprintf(stderr, "Warning, corrupt quality for sequence: %s", s, q);
+						fprintf(stderr, "Warning, corrupt quality for sequence: '%s' -> '%s'", s, q);
 						++warncount;
 					}
 					continue;
@@ -677,9 +677,11 @@ int main (int argc, char **argv) {
 				qcnt[i][1]+=((q[ns-1]-phred)<qthr);	
 				//fprintf(stderr,"qcnt i%d e0=%d, e1=%d\n", i, qcnt[i][0], qcnt[i][1]);
 
+				// BUF conains only the first 15 characters of the sequence
 				int a;
 				char buf[SCANLEN+1];
 				strncpy(buf, s, SCANLEN);
+				buf[SCANLEN]='\0';
 				for(a=0;a<acnt;++a) {
 					char *p;
 					// search whole seq for 15 char "end" of adap string
@@ -692,10 +694,14 @@ int main (int argc, char **argv) {
 					}
 					// search 15 char begin of seq in longer adap string
 					int slen;
+					if (debug > 1) fprintf(stderr, "COMPARE: %d <= %d, adseq: %s, buf: %s\n", SCANLEN, ad[a].nseq, ad[a].seq, buf);
+					// if the 15bp sequence is smaller than the adapter size
 					if (SCANLEN <= ad[a].nseq) {
 						slen = SCANLEN;
+						// search for the truncated buffer in the ADAPTER
 						p = strstr(ad[a].seq, buf);
 					} else {
+						// search for the adapter at the beginning of the buffer only... if it's short
 						slen = ad[a].nseq;
 						if (!strncmp(ad[a].seq,buf,ad[a].nseq)) 
 							p=ad[a].seq;
@@ -855,7 +861,7 @@ int main (int argc, char **argv) {
 
 				fprintf(fstat, "Adapter %s (%s): counted %d at the '%s' of '%s', clip set to %d", ad[a].id, ad[a].seq, cnt, ad[a].end[i] == 'e' ? "end" : "start", ifil[i], ad[a].thr[i]);
 				if (abs((ad[a].bcnt[i]-ad[a].ecnt[i])) < athr/4) {
-					fprintf(fstat, ", warning end was not reliable\n", ad[a].id, ad[a].seq);
+					fprintf(fstat, ", warning end was not reliable: %s/%s\n", ad[a].id, ad[a].seq);
 				} else {
 					fputc('\n', fstat);
 				}
