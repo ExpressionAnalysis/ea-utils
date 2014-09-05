@@ -1009,6 +1009,14 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
         }
     }
 
+    if (debug_xpos) {
+        if (Pos == debug_xpos && !strcmp(debug_xchr,Chr.data())) {
+            fprintf(stderr,"depth: %d, meanreadlen: %f\n", Depth, rds.MeanReadLen());
+        }
+    }
+
+    int maxdepthbypos = rds.MeanReadLen() <= 0 ? 10 : max(10, round(10 * artifact_filter * (Depth/rds.MeanReadLen())));
+
     int j;
 	for (i=0;i<Depth;++i,++read_i) {
 		bool sor=0;
@@ -1087,9 +1095,8 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
 		} else if (c == 'N') {
 			++SkipN;
 			skip=1;
-            // probably should not be adding anything here... but the old code added 1 and floored... new code adds .5 and rounds... which is comparable
-            // really.. should just be adding zero, the reason the old code had it was because of a lack of max()
-		} else if (artifact_filter > 0 && (depthbypos[pia] > max(1,rand_round(0.5+artifact_filter * (Depth/rds.MeanReadLen()))))) {
+            // ok, instead of rolling a random number, even things out
+		} else if (artifact_filter > 0 && (((10*depthbypos[pia])+(i%10)) > maxdepthbypos )) {
 			++SkipDupReads;
 			skip=1;
 		} else if (mq < min_mapq) {
@@ -1188,8 +1195,8 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
                 rds.TotReadLen+=read_i->Seq.size();
                 rds.ReadBin.push_back(*read_i);
                 if (rds.ReadBin.size() > min(1000,Depth*2)) {
-                    rds.ReadBin.pop_front();
                     rds.TotReadLen-=rds.ReadBin.front().Seq.size();
+                    rds.ReadBin.pop_front();
                 }
             }
 //            printf("%d\t%s\n", read_i->MapQ, read_i->Seq.c_str());
@@ -1224,6 +1231,8 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
 
     if (debug_xpos) {
         if (Pos == debug_xpos && !strcmp(debug_xchr,Chr.data())) {
+            fprintf(stderr,"xpos-max-per-pos\t%d\n", maxdepthbypos);
+            fprintf(stderr,"xpos-mean-readlen\t%f\n", rds.MeanReadLen());
             fprintf(stderr,"xpos-depth-list\t");
             for (i=0;i<depthbypos.size();++i) {
                 fprintf(stderr,"%d,", depthbypos[i]);
