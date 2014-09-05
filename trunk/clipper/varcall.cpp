@@ -1039,7 +1039,7 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
         if (read_i == rds.ReadList.end()) {
             warn("warning\tread start without '^', partial pileup: '%s'\n", cur_p);
             Read x;
-            x.MapQ = -1;
+            x.MapQ = 0;
             x.Pos = -1;
             read_i=rds.ReadList.insert(read_i,x);
         }
