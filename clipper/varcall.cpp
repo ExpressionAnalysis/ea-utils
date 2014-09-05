@@ -234,7 +234,7 @@ public:
     int RepeatCount;
     char RepeatBase;
 
-	PileupSummary(char *line, PileupReads &reads, tidx *annot=NULL, char annot_type='\0');
+	void Parse(char *line, PileupReads &reads, tidx *annot=NULL, char annot_type='\0');
     PileupSummary() { Base = '\0'; Pos=-1; };
 };
 
@@ -256,7 +256,7 @@ friend class PileupSubscriber;
 private:
     void Visit(PileupSummary &dat);
     void VisitX(PileupSummary &dat, int windex);
-    PileupSummary *CurrentSummary;
+    PileupSummary Pileup;
 
 protected:
     vector<PileupSubscriber *> Kids;
@@ -942,7 +942,7 @@ typedef struct  {
 } ChrRange;
 
 
-PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atype) {
+void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) {
 
 	vector<char *> d=split(line, '\t');
 
@@ -952,6 +952,8 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
 	}
 
 	const char * p_qual=d[5];
+
+    Calls.resize(0);
 
 	Chr=d[0];
 	Pos=atoi(d[1]);
@@ -973,7 +975,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
 	const char *cur_p = d[4];
 
     list<Read>::iterator read_i = rds.ReadList.begin();
-
+    
     memset(depthbypos.data(),0,depthbypos.size()*sizeof(depthbypos[0]));
     memset(depthbyposbycall.data(),0,depthbyposbycall.size()*sizeof(depthbyposbycall[0]));
 
@@ -1087,6 +1089,16 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
                 }
             }
         }
+
+/*
+        if (debug_xpos) {
+            if (Pos == debug_xpos && !strcmp(debug_xchr,Chr.data())) {
+                fprintf(stderr, "DEBUG: PIA: %d, DBP: %d, rrou: %d, nonRR: %f, maxdbp: %d, filt: %d, f1: %d, f2: %d\n", pia,
+                    depthbypos[pia], max(1,rand_round(0.5 + artifact_filter * (Depth/rds.MeanReadLen()))), artifact_filter * (Depth/rds.MeanReadLen()),
+                    maxdepthbypos, (10*depthbypos[pia])+(i%10), ((10*depthbypos[pia])+(i%10)) > maxdepthbypos, depthbypos[pia] > max(1,rand_round(0.5+artifact_filter * (Depth/rds.MeanReadLen()))) );
+            }
+        }
+*/
 
 		if (!ampok) {
 //            warn("SKIP: %d-%d, %c\n", read_i->Pos, (int)(read_i->Pos+rds.MeanReadLen()), o);
@@ -1231,7 +1243,7 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
 
     if (debug_xpos) {
         if (Pos == debug_xpos && !strcmp(debug_xchr,Chr.data())) {
-            fprintf(stderr,"xpos-max-per-pos\t%d\n", maxdepthbypos);
+            fprintf(stderr,"xpos-max-per-pos\t%f\n", maxdepthbypos/10.0);
             fprintf(stderr,"xpos-mean-readlen\t%f\n", rds.MeanReadLen());
             fprintf(stderr,"xpos-depth-list\t");
             for (i=0;i<depthbypos.size();++i) {
@@ -1335,9 +1347,8 @@ PileupSummary::PileupSummary(char *line, PileupReads &rds, tidx *adex, char atyp
 PileupSummary JunkSummary;
 
 void PileupManager::Parse(char *dat) {
-    PileupSummary p(dat, Reads, UseAnnot ? &AnnotDex : NULL, AnnotType);
-    CurrentSummary=&p;
-    Visit(p);
+    Pileup.Parse(dat, Reads, UseAnnot ? &AnnotDex : NULL, AnnotType);
+    Visit(Pileup);
 }
 
 void PileupManager::Visit(PileupSummary &p) {
@@ -1965,10 +1976,10 @@ void PileupManager::FillReference(int refSize) {
             }
         }
         if (needfai) {
-            faidx.Fetch((char *)Reference.data(), CurrentSummary->Chr, CurrentSummary->Pos-flank-1, CurrentSummary->Pos+flank-1);
+            faidx.Fetch((char *)Reference.data(), Pileup.Chr, Pileup.Pos-flank-1, Pileup.Pos+flank-1);
         }
     } else {
-        faidx.Fetch((char *)Reference.data(), CurrentSummary->Chr, CurrentSummary->Pos-flank-1, CurrentSummary->Pos+flank-1);
+        faidx.Fetch((char *)Reference.data(), Pileup.Chr, Pileup.Pos-flank-1, Pileup.Pos+flank-1);
     }
 }
 
