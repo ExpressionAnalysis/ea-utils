@@ -45,7 +45,7 @@ THE SOFTWARE.
 #include "fastq-lib.h"
 
 #define SVNREV atoi(strchr("$Revision$", ':')+1)
-const char * VERSION = "0.95";
+const char * VERSION = "0.96";
 
 #define MIN_READ_LEN 20
 #define DEFAULT_LOCII 1000000
@@ -1051,7 +1051,6 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
 			depthbypos.resize(pia+1);
 			depthbyposbycall.resize(pia+1);
 		}
-		depthbypos[pia]++;
 
 		if (sor) 
 			++NumReads;
@@ -1108,7 +1107,7 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
 			++SkipN;
 			skip=1;
             // ok, instead of rolling a random number, even things out
-		} else if (artifact_filter > 0 && (((10*depthbypos[pia])+(i%10)) > maxdepthbypos )) {
+		} else if (artifact_filter > 0 && (((10*(depthbypos[pia]+1))+(i%10)) > maxdepthbypos )) {
 			++SkipDupReads;
 			skip=1;
 		} else if (mq < min_mapq) {
@@ -1120,6 +1119,7 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
 		} else {
 			int j = b2i(c);
 
+		    depthbypos[pia]++;
 		    depthbyposbycall[pia].call[j]++;
 
 			if (j >= Calls.size()) {
