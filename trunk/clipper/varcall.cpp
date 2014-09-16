@@ -2033,6 +2033,10 @@ void PileupManager::LoadAnnot(const char *path) {
 void VarStatVisitor::Visit(PileupSummary &p) {
 	tot_locii += 1;
 
+//    if (tot_locii % 10000 == 0) {
+//        fprintf(stderr,"\r%.4f          ", 100*(float)tot_locii/777385781.0);
+//    }
+
 	if (p.Depth < minsampdepth)
 		return;
 
