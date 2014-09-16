@@ -5,10 +5,8 @@ CC=g++
 PREFIX?=/usr
 BINDIR?=$(PREFIX)/bin
 CFLAGS?=-O3 -I. 
-CPPFLAGS?=-O3 -I.
 # for debugging:
 # CFLAGS?=-g -I. 
-# CPPFLAGS?=-g -I.
 
 PKG=ea-utils
 REL := $(shell svnversion 2>/dev/null | perl -ne 'print $$1 if /(\d+)/' )
@@ -21,7 +19,7 @@ TOOLS=fastx-graph gtf2bed determine-phred randomFQ alc
 all: $(BIN) check
 
 debug: 
-	CPPFLAGS=-g ${MAKE} $(MFLAGS) varcall
+	CFLAGS="-g -I." ${MAKE} $(MFLAGS) varcall
 
 install: $(BIN) $(BINDIR)/fastq-clipper $(BINDIR)/fastq-mcf $(BINDIR)/fastq-multx $(BINDIR)/fastq-join $(BINDIR)/fastq-stats $(BINDIR)/sam-stats $(BINDIR)/varcall $(BINDIR)/fastx-graph $(BINDIR)/determine-phred $(BINDIR)/randomFQ $(BINDIR)/alc
 
