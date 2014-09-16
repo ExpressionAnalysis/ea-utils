@@ -87,6 +87,7 @@ FILE *stat_fout=NULL;
 #define T_CNT 8
 #define b2i(c) ((c)=='A'?0:(c)=='a'?0:(c)=='C'?1:(c)=='c'?1:(c)=='G'?2:(c)=='g'?2:(c)=='T'?3:(c)=='t'?3:(c)=='*'?4:(c)=='-'?5:(c)=='+'?6:7)
 #define i2b(i) (i==0?'A':i==1?'C':i==2?'G':i==3?'T':i==4?'*':i==5?'-':i==6?'+':'?')
+#define toupper(c) ((c)>='a' && (c)<='z' ? ((c)-32) : (c))
 
 // die unless it's a number
 int ok_atoi(const char *s) {
@@ -104,6 +105,7 @@ int rand_round(double x);
 
 // basic utils
 std::vector<char *> split(char* str, char delim);
+int split(char **buf, char* str, char delim);
 std::string string_format(const std::string &fmt, ...);
 void to_upper(const std::string str);
 void rename_tmp(std::string f);
@@ -288,7 +290,7 @@ public:
 
 class VarStatVisitor : public PileupSubscriber {
     public:
-    VarStatVisitor() : PileupSubscriber() {tot_locii=0; tot_depth=0; num_reads=0;};
+    VarStatVisitor() : PileupSubscriber() {tot_locii=0; tot_depth=0; num_reads=0; stats.reserve(1000000); ins_stats.reserve(1000000); del_stats.reserve(1000000);};
     VarStatVisitor(PileupManager &man) : PileupSubscriber(man) {tot_locii=0; tot_depth=0; num_reads=0;};
 
     void Visit(PileupSummary &dat);
@@ -345,8 +347,8 @@ int debug_xpos=0;
 int debug_level=0;
 int min_depth=1;
 int min_mapq=0;
-double min_diversity=0.25;     // only skip huge piles in one spot... even a little diversity is OK
-double min_agreement=0.25;     // only skip when like-depth variation wildly disagrees
+double min_diversity=0.15;     // only skip huge piles in one spot... even a little diversity is OK
+double min_agreement=0.15;     // only really relevent when depths are high ... this is a bare minimum score
 int min_qual=3;
 int repeat_filter=7;
 double artifact_filter=1;
@@ -942,23 +944,22 @@ typedef struct  {
 } ChrRange;
 
 
-void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) {
+char *_dat[256];
+inline void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) {
 
-	vector<char *> d=split(line, '\t');
+	int dsize=split(_dat, line, '\t');
 
-	if (d.size() < 6) {
-		warn("Can't read pileup : %d fields, need 6 columns, line %d\n", (int) d.size(), g_lineno);
+	if (dsize < 6) {
+		warn("Can't read pileup : %d fields, need 6 columns, line %d\n", (int) dsize, g_lineno);
 		exit(1);
 	}
 
-	const char * p_qual=d[5];
+	const char * p_qual=_dat[5];
 
-    Calls.resize(0);
-
-	Chr=d[0];
-	Pos=atoi(d[1]);
-	Base=*(d[2]);
-	Depth = atoi(d[3]);
+	Chr=_dat[0];
+	Pos=atoi(_dat[1]);
+	Base=*(_dat[2]);
+	Depth = atoi(_dat[3]);
 	SkipDupReads = 0;
 	SkipN = 0;
 	SkipAmp = 0;
@@ -972,7 +973,7 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
 
 	int i;
 
-	const char *cur_p = d[4];
+	const char *cur_p = _dat[4];
 
     list<Read>::iterator read_i = rds.ReadList.begin();
     
@@ -1017,9 +1018,13 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
         }
     }
 
-    int maxdepthbypos = rds.MeanReadLen() <= 0 ? 10 : max(10, round(10 * artifact_filter * (Depth/rds.MeanReadLen())));
+    int meanreadlen = rds.MeanReadLen();
+    int maxdepthbypos = meanreadlen <= 0 ? 10 : max(10, round(10 * artifact_filter * (Depth/meanreadlen)));
+
+    Calls.clear();
 
     int j;
+    int max_pia=-1;
 	for (i=0;i<Depth;++i,++read_i) {
 		bool sor=0;
 
@@ -1034,6 +1039,7 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
                 ++read_i;
             }
             read_i=rds.ReadList.insert(read_i,x);
+            meanreadlen = rds.MeanReadLen();
 		}
 
         if (read_i == rds.ReadList.end()) {
@@ -1042,6 +1048,7 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
             x.MapQ = 0;
             x.Pos = -1;
             read_i=rds.ReadList.insert(read_i,x);
+            meanreadlen = rds.MeanReadLen();
         }
 
 
@@ -1051,6 +1058,10 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
 			depthbypos.resize(pia+1);
 			depthbyposbycall.resize(pia+1);
 		}
+        if (pia > max_pia)
+            max_pia=pia;
+
+        depthbypos[pia]++;
 
 		if (sor) 
 			++NumReads;
@@ -1076,9 +1087,9 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
 
         if (!ampok) {
             for (j=0;j<amps.size();++j) {
-                int apos = read_i->Pos + rds.MeanReadLen() + 1;
-                int bpos = read_i->Pos + rds.MeanReadLen();
-                int cpos = read_i->Pos + rds.MeanReadLen() - 1;
+                int apos = read_i->Pos + meanreadlen + 1;
+                int bpos = read_i->Pos + meanreadlen;
+                int cpos = read_i->Pos + meanreadlen - 1;
                 if (apos == amps[j].End || bpos == amps[j].End || cpos == amps[j].End) {
                     ampok=1;
                 }
@@ -1099,6 +1110,11 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
         }
 */
 
+// before dup filtering
+
+        int call_index = b2i(c);
+        depthbyposbycall[pia].call[call_index]++;
+
 		if (!ampok) {
 //            warn("SKIP: %d-%d, %c\n", read_i->Pos, (int)(read_i->Pos+rds.MeanReadLen()), o);
             ++SkipAmp;
@@ -1107,22 +1123,19 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
 			++SkipN;
 			skip=1;
             // ok, instead of rolling a random number, even things out
-		} else if (artifact_filter > 0 && (((10*(depthbypos[pia]+1))+(i%10)) > maxdepthbypos )) {
-			++SkipDupReads;
-			skip=1;
 		} else if (mq < min_mapq) {
 			++SkipMinMapq;
 			skip=1;
 		} else if (q < min_qual) {
 			++SkipMinQual;
 			skip=1;
+		} else if (artifact_filter > 0 && (((10*(depthbypos[pia]+1))+(i%10)) > maxdepthbypos )) {
+			++SkipDupReads;
+			skip=1;
 		} else {
-			int j = b2i(c);
+			int j = call_index;
 
-		    depthbypos[pia]++;
-		    depthbyposbycall[pia].call[j]++;
-
-			if (j >= Calls.size()) {
+			if (call_index >= Calls.size()) {
 				int was = Calls.size();
 				Calls.resize(j+1);
 				int t; for (t=was;t<=j;++t) {
@@ -1213,6 +1226,7 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
             }
 //            printf("%d\t%s\n", read_i->MapQ, read_i->Seq.c_str());
             read_i=rds.ReadList.erase(read_i);
+            meanreadlen = rds.MeanReadLen();
             --read_i;
             ++cur_p;
             ++eor;
@@ -1232,7 +1246,7 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
 	}
 
 	if (*cur_p) {
-		warn("Failed to parse pileup %s\n", d[4]);
+		warn("Failed to parse pileup %s\n", _dat[4]);
 		exit(1);
 	}
 
@@ -1246,7 +1260,7 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
             fprintf(stderr,"xpos-max-per-pos\t%f\n", maxdepthbypos/10.0);
             fprintf(stderr,"xpos-mean-readlen\t%f\n", rds.MeanReadLen());
             fprintf(stderr,"xpos-depth-list\t");
-            for (i=0;i<depthbypos.size();++i) {
+            for (i=0;i<max_pia;++i) {
                 fprintf(stderr,"%d,", depthbypos[i]);
             }
             fprintf(stderr,"\n");
@@ -1265,12 +1279,15 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
         }
     }
 
+    if (max_pia > meanreadlen*2) 
+            max_pia=meanreadlen*2;
+
 //    bool quit=0;
 	for (i=0;i < Calls.size();++i) {		// total depth (exclude inserts for tot depth, otherwise they are double-counted)
         if (Calls[i].depth()>0) {
-            double expected=Calls[i].depth()/rds.MeanReadLen();
+            double expected=Calls[i].depth()/meanreadlen;
             double all_pct=Calls[i].depth()/(double)Depth;
-            double p2=(Calls[i].depth()+2*all_pct*depthbypos.size())/(double)(Depth+2*depthbypos.size());
+            double p2=(Calls[i].depth()+2*all_pct*max_pia)/(double)(Depth+2*max_pia);
             double total_v=0;
             double diff;
             double moment_den=0;
@@ -1294,7 +1311,7 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
 
 */
             int poscnt=0;
-            for (j=0;j<depthbyposbycall.size();++j) {
+            for (j=0;j<max_pia;++j) {
                 // diversity calc
                 diff=floor(fabs(depthbyposbycall[j].call[i]-expected));
                 total_v+=diff*diff;
@@ -1315,12 +1332,12 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
             Calls[i].diversity = max(0,1-shift_v/max(1,(pow(Calls[i].depth()-expected,2)-2*Calls[i].depth())));
             if (poscnt==1) Calls[i].diversity = 0;
 
-            double wt4_od=pow(cube_v/((double)(Depth+2*depthbypos.size())),1.0/3.0)/all_pct;
+            double wt4_od=pow(cube_v/((double)(Depth+2*max_pia)),1.0/3.0)/all_pct;
             Calls[i].agreement = max(0,1-wt4_od);
 
             if (debug_xpos) {
                 if (Pos == debug_xpos && !strcmp(debug_xchr,Chr.data())) {
-                    if (debug_level > 2) warn("base:%c, cube_v:%g, deno:%g\n", Calls[i].base, cube_v, ((double)(Depth+2*depthbypos.size())));
+                    if (debug_level > 2) warn("base:%c, cube_v:%g, deno:%g\n", Calls[i].base, cube_v, ((double)(Depth+2*max_pia)));
                     fprintf(stderr,"xpos-agree-%c\t%g\n",Calls[i].base, Calls[i].agreement);
                     fprintf(stderr,"xpos-diver-%c\t%g\n",Calls[i].base, Calls[i].diversity);
                 }
@@ -1328,7 +1345,7 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
 
 /*
             if(Depth>100 && Calls[i].depth() < 100) {
-                printf("num %g, den %g\n", (p2*(1-p2)*(Depth+2*depthbypos.size())), moment_den);
+                printf("num %g, den %g\n", (p2*(1-p2)*(Depth+2*max_pia)), moment_den);
                 printf(", Agree: %g", Calls[i].agreement);
                 printf(", Divers: %g\n", Calls[i].diversity);
                 quit=1;
@@ -1346,7 +1363,7 @@ void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char atype) 
 
 PileupSummary JunkSummary;
 
-void PileupManager::Parse(char *dat) {
+inline void PileupManager::Parse(char *dat) {
     Pileup.Parse(dat, Reads, UseAnnot ? &AnnotDex : NULL, AnnotType);
     Visit(Pileup);
 }
@@ -2211,10 +2228,13 @@ std::string string_format(const std::string &fmt, ...) {
 }
 
 void to_upper(const std::string str) {
-	std::string::iterator it;
-	int i;
+	static int i;
+    static char c;
 	for ( i=0;i<str.size();++i ) {
-		((char *)(void *)str.data())[i]=toupper(((char *)str.data())[i]);
+        c=((char *)(void *)str.data())[i];
+		if (c >= 'a' && c <= 'z') {
+            ((char *)(void *)str.data())[i]=c-32;
+        }
 	}
 }
 
@@ -2283,6 +2303,27 @@ std::vector<char *> split(char* str, char delim)
     if (*str) 
         result.push_back(str);
     return result;
+}
+
+int split(char **buf, char* str, char delim)
+{
+    char **bb=buf;
+    char *p=strchr(str,delim);
+    std::vector<char *> result;
+    while(p != NULL)
+    {
+        *p='\0';
+        *bb=str;
+        ++bb;
+        str=p+1;
+        p=strchr(str,delim);
+    }
+    if (*str) {
+        *bb=str;
+        bb++;
+    }
+    *bb=NULL;
+    return bb-buf;
 }
 
 int rand_round(double x) {
