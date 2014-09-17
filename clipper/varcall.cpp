@@ -1054,6 +1054,9 @@ inline void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char 
 
         // position of read relative to my position
         int pia = read_i->Pos >= 0 ? Pos-read_i->Pos : 0;
+
+        pia = pia % (meanreadlen*2);
+
 		if (pia >= depthbypos.size()) {
 			depthbypos.resize(pia+1);
 			depthbyposbycall.resize(pia+1);
@@ -1077,7 +1080,8 @@ inline void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char 
 			is_ref = 1;
 		}
 
-		if (o == '>' || o == '<') {	
+		if (o == '>' || o == '<') {
+            /// splice!  don't add to SEQ or depth, etc!	
 			c = 'N';					// no call
 			is_ref = 1;
 		}
@@ -1177,7 +1181,7 @@ inline void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char 
 		if (c == '-' || c == '+') {
             warn("invalid pileup, at '%s', indel not attached to read?\n", cur_p);
 		} else {
-		    if (c != '*') 
+		    if (c != '*' && c != 'N') 
                 read_i->Seq += c;
 			++cur_p;
 		}
@@ -1278,9 +1282,6 @@ inline void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char 
             }
         }
     }
-
-    if (max_pia > meanreadlen*2) 
-            max_pia=meanreadlen*2;
 
 //    bool quit=0;
 	for (i=0;i < Calls.size();++i) {		// total depth (exclude inserts for tot depth, otherwise they are double-counted)
