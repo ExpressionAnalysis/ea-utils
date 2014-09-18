@@ -97,10 +97,11 @@ int main (int argc, char **argv) {
     int tile=0;                                   // tile number
     int debug=0;                    // debug flag
     bool usegz=false;
+    const char *fcid="X";
 
     int option_index = 0;
     int c;
-    while (	(c = getopt_long(argc, argv, "zhr:l:t:o:m:s:n:",long_options,&option_index)) != -1) {
+    while (	(c = getopt_long(argc, argv, "zhr:l:t:o:m:s:n:f:",long_options,&option_index)) != -1) {
 		switch (c) {
 			case '\0':
                 { 
@@ -115,6 +116,7 @@ int main (int argc, char **argv) {
 			case 'l': lane = atoi(optarg); break;
 			case 'o': out = optarg; break;
 			case 't': tile = atoi(optarg); break;
+			case 'f': fcid = optarg; break;
 			case 'z': usegz = 1; break;
 			case 'm': 
                     {
@@ -359,7 +361,8 @@ int main (int argc, char **argv) {
     //@<instrument>:<run number>:<flowcell ID>:<lane>:<tile>:<x-pos>:<y-pos> <read>:<is filtered>:<control number>:<index sequence>
     //@NS500184:5:H0K79AGXX:1:11103:20690:3982 1:N:0:ATTCAGAA+GCCTCTAT
 
-    char read_id[100]="@NS:1:X:";
+    char read_id[1000];
+    sprintf(read_id,"@NS:1:%s:",fcid);
 
     // pid is a pointer to the end of the id, after the lane: has been added
     char *pid_after_lane=read_id+strlen(read_id);
