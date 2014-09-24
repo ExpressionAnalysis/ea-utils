@@ -1024,7 +1024,7 @@ inline void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char 
     Calls.clear();
 
     int j;
-    int max_pia=-1;
+    int pia_len=0;
 	for (i=0;i<Depth;++i,++read_i) {
 		bool sor=0;
 
@@ -1061,8 +1061,8 @@ inline void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char 
 			depthbypos.resize(pia+1);
 			depthbyposbycall.resize(pia+1);
 		}
-        if (pia > max_pia)
-            max_pia=pia;
+        if (pia >= pia_len)
+            pia_len=pia+1;
 
         depthbypos[pia]++;
 
@@ -1104,15 +1104,17 @@ inline void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char 
             }
         }
 
-/*
+
         if (debug_xpos) {
-            if (Pos == debug_xpos && !strcmp(debug_xchr,Chr.data())) {
-                fprintf(stderr, "DEBUG: PIA: %d, DBP: %d, rrou: %d, nonRR: %f, maxdbp: %d, filt: %d, f1: %d, f2: %d\n", pia,
-                    depthbypos[pia], max(1,rand_round(0.5 + artifact_filter * (Depth/rds.MeanReadLen()))), artifact_filter * (Depth/rds.MeanReadLen()),
-                    maxdepthbypos, (10*depthbypos[pia])+(i%10), ((10*depthbypos[pia])+(i%10)) > maxdepthbypos, depthbypos[pia] > max(1,rand_round(0.5+artifact_filter * (Depth/rds.MeanReadLen()))) );
+            if (debug_level >= 3) {
+                if (Pos == debug_xpos && !strcmp(debug_xchr,Chr.data())) {
+                    fprintf(stderr, "DEBUG: PIA: %d, DBP: %d, rrou: %d, nonRR: %f, maxdbp: %d, filt: %d, f1: %d, f2: %d\n", pia,
+                        depthbypos[pia], max(1,rand_round(0.5 + artifact_filter * (Depth/rds.MeanReadLen()))), artifact_filter * (Depth/rds.MeanReadLen()),
+                        maxdepthbypos, (10*(depthbypos[pia]-1))+(i%10), ((10*(depthbypos[pia]-1))+(i%10)) > maxdepthbypos, depthbypos[pia] > max(1,rand_round(0.5+artifact_filter * (Depth/rds.MeanReadLen()))) );
+                }
             }
         }
-*/
+
 
 // before dup filtering
 
@@ -1133,7 +1135,7 @@ inline void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char 
 		} else if (q < min_qual) {
 			++SkipMinQual;
 			skip=1;
-		} else if (artifact_filter > 0 && (((10*(depthbypos[pia]+1))+(i%10)) > maxdepthbypos )) {
+		} else if (artifact_filter > 0 && (((10*(depthbypos[pia]-1))+(i%10)) > maxdepthbypos )) {
 			++SkipDupReads;
 			skip=1;
 		} else {
@@ -1264,7 +1266,7 @@ inline void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char 
             fprintf(stderr,"xpos-max-per-pos\t%f\n", maxdepthbypos/10.0);
             fprintf(stderr,"xpos-mean-readlen\t%f\n", rds.MeanReadLen());
             fprintf(stderr,"xpos-depth-list\t");
-            for (i=0;i<max_pia;++i) {
+            for (i=0;i<pia_len;++i) {
                 fprintf(stderr,"%d,", depthbypos[i]);
             }
             fprintf(stderr,"\n");
@@ -1288,7 +1290,7 @@ inline void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char 
         if (Calls[i].depth()>0) {
             double expected=Calls[i].depth()/meanreadlen;
             double all_pct=Calls[i].depth()/(double)Depth;
-            double p2=(Calls[i].depth()+2*all_pct*max_pia)/(double)(Depth+2*max_pia);
+            double p2=(Calls[i].depth()+2*all_pct*pia_len)/(double)(Depth+2*pia_len);
             double total_v=0;
             double diff;
             double moment_den=0;
@@ -1312,7 +1314,7 @@ inline void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char 
 
 */
             int poscnt=0;
-            for (j=0;j<max_pia;++j) {
+            for (j=0;j<pia_len;++j) {
                 // diversity calc
                 diff=floor(fabs(depthbyposbycall[j].call[i]-expected));
                 total_v+=diff*diff;
@@ -1333,12 +1335,12 @@ inline void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char 
             Calls[i].diversity = max(0,1-shift_v/max(1,(pow(Calls[i].depth()-expected,2)-2*Calls[i].depth())));
             if (poscnt==1) Calls[i].diversity = 0;
 
-            double wt4_od=pow(cube_v/((double)(Depth+2*max_pia)),1.0/3.0)/all_pct;
+            double wt4_od=pow(cube_v/((double)(Depth+2*pia_len)),1.0/3.0)/all_pct;
             Calls[i].agreement = max(0,1-wt4_od);
 
             if (debug_xpos) {
                 if (Pos == debug_xpos && !strcmp(debug_xchr,Chr.data())) {
-                    if (debug_level > 2) warn("base:%c, cube_v:%g, deno:%g\n", Calls[i].base, cube_v, ((double)(Depth+2*max_pia)));
+                    if (debug_level > 2) warn("base:%c, cube_v:%g, deno:%g\n", Calls[i].base, cube_v, ((double)(Depth+2*pia_len)));
                     fprintf(stderr,"xpos-agree-%c\t%g\n",Calls[i].base, Calls[i].agreement);
                     fprintf(stderr,"xpos-diver-%c\t%g\n",Calls[i].base, Calls[i].diversity);
                 }
@@ -1346,7 +1348,7 @@ inline void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char 
 
 /*
             if(Depth>100 && Calls[i].depth() < 100) {
-                printf("num %g, den %g\n", (p2*(1-p2)*(Depth+2*max_pia)), moment_den);
+                printf("num %g, den %g\n", (p2*(1-p2)*(Depth+2*pia_len)), moment_den);
                 printf(", Agree: %g", Calls[i].agreement);
                 printf(", Divers: %g\n", Calls[i].diversity);
                 quit=1;
