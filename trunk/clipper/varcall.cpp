@@ -1019,7 +1019,7 @@ inline void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char 
     }
 
     int meanreadlen = rds.MeanReadLen();
-    int maxdepthbypos = meanreadlen <= 0 ? 10 : max(10, round(10 * artifact_filter * (Depth/meanreadlen)));
+    int maxdepthbypos = meanreadlen <= 0 ? 10 : min(10, round(10 * artifact_filter * (Depth/meanreadlen)));
 
     Calls.clear();
 
