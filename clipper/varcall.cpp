@@ -1019,7 +1019,7 @@ inline void PileupSummary::Parse(char *line, PileupReads &rds, tidx *adex, char 
     }
 
     int meanreadlen = rds.MeanReadLen();
-    int maxdepthbypos = meanreadlen <= 0 ? 10 : min(10, round(10 * artifact_filter * (Depth/meanreadlen)));
+    int maxdepthbypos = meanreadlen <= 0 ? 10 : max(10, round(10.0 * artifact_filter * (Depth/(double)meanreadlen)));
 
     Calls.clear();
 
@@ -1569,11 +1569,11 @@ void VarCallVisitor::Visit(PileupSummary &p) {
 		    fprintf(stderr,"xpos-skip-amp\t%d\n",p.SkipAmp);
 		    fprintf(stderr,"xpos-skip-mapq\t%d\n",p.SkipMinMapq);
 		    fprintf(stderr,"xpos-skip-qual\t%d\n",p.SkipMinQual);
+			exit(0);
         }
 		++SkippedDepth;
 		return;
 	}
-
 
 	int ins_fwd = p.Calls.size() > 6 ? p.Calls[6].fwd : 0;
 	int ins_rev = p.Calls.size() > 6 ? p.Calls[6].rev : 0;
@@ -1974,8 +1974,6 @@ void VarCallVisitor::Visit(PileupSummary &p) {
             }
 			exit(0);
 		}
-
-
 	}
 }
 
