@@ -18,7 +18,7 @@ Recently we added variation specific error rate collection, and it is used, inst
 
 By the time we reach version 1, all of these should be fixed, including better docs, and better "auto-configuration" based on sampling.  If you are using varcall before then, carefully experiment with parameters and compare to other tools.
 
-Version 1 should also have the ability to do a stats collection across a group of samples, and then subsequent calling using those stats.   The advantage here is that for some qPCR/rtPCR assays, there are insufficient locii to get an accurate error variation estimate per-sample.
+Version 1 should also have the ability to do a stats collection across a group of samples, and then subsequent calling using those stats.   The advantage here is that for some amplicon/pcr assays, there are insufficient locii to get an accurate error variation estimate per-sample.
 
 
 = Usage =
