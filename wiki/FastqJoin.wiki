@@ -46,9 +46,11 @@ If one quality is greater than "3" (50%), then the the resulting quality is the 
 
 ==== Examples: ==== 
 
+{{{
 40 vs 3 = 37 : second base has low quality... doesn't change top by much
 40 vs 40 = 3 : two equal quality bases that don't match = qual of 3
 2 vs 2 = 2 : neither base has a high quality
+}}}
 
 ==== Some caveats: ==== 
 
