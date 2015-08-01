@@ -16,6 +16,7 @@ Options:
 -m N            N-minimum overlap (6)
 -r FIL          Verbose stitch length report
 -R              No reverse complement
+-V              Show version
 
 Output:
 
