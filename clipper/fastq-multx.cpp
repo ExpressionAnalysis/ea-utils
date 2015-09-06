@@ -105,6 +105,7 @@ int main (int argc, char **argv) {
 	int distance = 2;
 	int poor_distance = 0;       // count of skipped reads on distance only
 	int quality = 0;
+    int blen = 0;
 	char end = '\0';
 	char dend = '\0';
 	bool dual = false;
@@ -125,7 +126,7 @@ int main (int argc, char **argv) {
 	int i;
 	bool omode = false;	
 	char *bfil = NULL;
-	while (	(c = getopt (argc, argv, "-DzxnHhbeov:m:B:g:L:l:G:q:d:t:")) != -1) {
+	while (	(c = getopt (argc, argv, "-DzxnHhbeov:m:B:g:L:l:G:q:d:t:k:")) != -1) {
 		switch (c) t:{
 		case '\1': 
                        	if (omode) {
@@ -168,6 +169,7 @@ int main (int argc, char **argv) {
 		case 'm': mismatch = atoi(optarg); break;
 		case 'd': distance = atoi(optarg); break;
 		case 'q': quality = atoi(optarg); break;
+		case 'k': blen = atoi(optarg); if (!end) end = 'b'; break;
 		case 'D': ++debug; break;
 		case '?': 
 		     if (strchr("vmBglG", optopt))
@@ -521,7 +523,6 @@ int main (int argc, char **argv) {
 		// use the first file as a "guide file" ... and select a set of codes from that
 		FILE *gin = fin[0];
 
-		int blen = 0;
 	
 		int sampcnt = 100000;
 		struct stat st;
@@ -530,48 +531,50 @@ int main (int argc, char **argv) {
 		char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
 		char *q = NULL; size_t nq = 0;
 
-// small sample to get lengths
-		double tots=0, totsq=0;
-		while ((ns=getline(&s, &na, gin)) > 0) {
-			if (*s != '@')  {
-				fprintf(stderr,"Invalid fastq file: %s.\n", in[0]);
-				exit(1);
-			}
+        if (blen <= 0) {
+            // small sample to get lengths
+            double tots=0, totsq=0;
+            while ((ns=getline(&s, &na, gin)) > 0) {
+                if (*s != '@')  {
+                    fprintf(stderr,"Invalid fastq file: %s.\n", in[0]);
+                    exit(1);
+                }
 
-            if (bcinheader) {
-                    ignore=getline(&q, &ignore_st, fin[i]);
-                    ignore=getline(&q, &ignore_st, fin[i]);
-                    ignore=getline(&q, &ignore_st, fin[i]);
-                    /// no dual barcode detection allowed
-                    getbcfromheader(s, &ns);
-                    printf("bc is %s\n", s);
-            } else {
-                if ((ns=getline(&s, &na, gin)) <=0)
-                    break;
-                ignore=getline(&q, &ignore_st, gin);
-                ignore=getline(&q, &ignore_st, gin);
+                if (bcinheader) {
+                        ignore=getline(&q, &ignore_st, fin[i]);
+                        ignore=getline(&q, &ignore_st, fin[i]);
+                        ignore=getline(&q, &ignore_st, fin[i]);
+                        /// no dual barcode detection allowed
+                        getbcfromheader(s, &ns);
+                        printf("bc is %s\n", s);
+                } else {
+                    if ((ns=getline(&s, &na, gin)) <=0)
+                        break;
+                    ignore=getline(&q, &ignore_st, gin);
+                    ignore=getline(&q, &ignore_st, gin);
+                }
+
+                --ns;
+                tots+=ns;
+                totsq+=ns*ns;
+                ++nr;
+                if (nr >= 200) break;
             }
+            double dev = stdev(nr, tots, totsq);
 
-			--ns;
-			tots+=ns;
-			totsq+=ns*ns;
-			++nr;
-			if (nr >= 200) break;
-		}
-		double dev = stdev(nr, tots, totsq);
-
-		// short, and nonvarying (by much, depends on the tech used)
-		if (dev < .25 && roundl(tots/nr) < 12) {
-			// most probably a barcode-only read
-			blen = (int) round(tots/nr);
-			end = 'b';
-		} else if (round(tots/nr) < 12) {
-			fprintf(stderr, "File %s looks to be barcode-only, but it's length deviation is too high (%.4g)\n", in[0], dev);
-			return 1;
-		} else {
-			fprintf(stderr, "File %s isn't a barcode-only file, try using -l instead\n", in[0]);
-			return 1;
-		}
+            // short, and nonvarying (by much, depends on the tech used)
+            if (dev < .25 && roundl(tots/nr) < 12) {
+                // most probably a barcode-only read
+                blen = (int) round(tots/nr);
+                end = 'b';
+            } else if (round(tots/nr) < 12) {
+                fprintf(stderr, "File %s looks to be barcode-only, but it's length deviation is too high (%.4g)\n", in[0], dev);
+                return 1;
+            } else {
+                fprintf(stderr, "File %s isn't a barcode-only file, try using -l instead\n", in[0]);
+                return 1;
+            }
+        }
 
 		fprintf(stderr, "Barcode length used: %d (%s)\n", blen, endstr(end));
 
@@ -1141,6 +1144,7 @@ void usage(FILE *f) {
 "\n"
 "-o FIL1     Output files (one per input, required)\n"
 "-g SEQFIL   Determine barcodes from the indexed read SEQFIL\n"
+"-k N        Use N as a barcode length\n"
 "-l BCFIL    Determine barcodes from any read, using BCFIL as a master list\n"
 "-L BCFIL    Determine barcodes from <read1.fq>, using BCFIL as a master list\n"
 "-B BCFIL    Use barcodes from BCFIL, no determination step, codes in <read1.fq>\n"
