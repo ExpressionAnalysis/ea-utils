@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset='utf-8'>
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <link href='https://fonts.googleapis.com/css?family=Architects+Daughter' rel='stylesheet' type='text/css'>
+    <link rel="stylesheet" type="text/css" href="stylesheets/stylesheet.css" media="screen">
+    <link rel="stylesheet" type="text/css" href="stylesheets/github-light.css" media="screen">
+    <link rel="stylesheet" type="text/css" href="stylesheets/print.css" media="print">
+
+    <!--[if lt IE 9]>
+    <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+
+    <title>ea-utils by ExpressionAnalysis</title>
+  </head>
+
+  <body>
+    <header>
+      <div class="inner">
+        <h1>ea-utils</h1>
+        <h2>FASTQ processing utilities</h2>
+        <a href="https://github.com/ExpressionAnalysis/ea-utils" class="button"><small>View project on</small> GitHub</a>
+      </div>
+    </header>
+
+    <div id="content-wrapper">
+      <div class="inner clearfix">
+        <section id="main-content">
+          <h1>
+<a id="ea-utils-has-migrated-to-github-from-httpscodegooglecompea-utils" class="anchor" href="#ea-utils-has-migrated-to-github-from-httpscodegooglecompea-utils" aria-hidden="true"><span class="octicon octicon-link"></span></a>ea-utils has migrated to GitHub from <a href="https://code.google.com/p/ea-utils/">https://code.google.com/p/ea-utils/</a>
+</h1>
+
+<h1>
+<a id="overview" class="anchor" href="#overview" aria-hidden="true"><span class="octicon octicon-link"></span></a>Overview:</h1>
+
+<p>Command-line tools for processing biological sequencing data.  Barcode demultiplexing, adapter trimming, etc.
+Primarily written to support an Illumina based pipeline - but should work with any FASTQs.</p>
+
+<ul>
+<li>
+<strong><a href="https://github.com/ExpressionAnalysis/ea-utils/blob/wiki/FastqMcf.md">fastq-mcf</a></strong> - Scans a sequence file for adapters, and, based on a log-scaled threshold, determines a set of clipping parameters and performs clipping.  Also does skewing detection and quality filtering.</li>
+<li>
+<strong><a href="https://github.com/ExpressionAnalysis/ea-utils/blob/wiki/FastqMultx.md">fastq-multx</a></strong> - Demultiplexes a fastq.  Capable of auto-determining barcode id's based on a master set fields.  Keeps multiple reads in-sync during demultiplexing.  Can verify that the reads are in-sync as well, and fail if they're not.</li>
+<li>
+<strong><a href="https://github.com/ExpressionAnalysis/ea-utils/blob/wiki/FastqJoin.md">fastq-join</a></strong> - Similar to audy's stitch program, but in C, more efficient and supports some automatic benchmarking and tuning. It uses the same "squared distance for anchored alignment" as other tools.</li>
+<li>
+<strong><a href="https://github.com/ExpressionAnalysis/ea-utils/blob/wiki/Varcall.md">varcall</a></strong> - Takes a pileup and calculates variants in a more easily parameterized manner than some other tools.</li>
+</ul>
+
+<h1>
+<a id="other-stuff" class="anchor" href="#other-stuff" aria-hidden="true"><span class="octicon octicon-link"></span></a>Other Stuff:</h1>
+
+<ul>
+<li>
+<strong><a href="https://github.com/ExpressionAnalysis/ea-utils/blob/wiki/SamStats.md">sam-stats</a></strong> - Basic sam/bam stats.  Like other tools, but produces what I want to look at, in a format suitable for passing to other programs. </li>
+<li>
+<strong>fastq-stats</strong> - Basic fastq stats.  Counts duplicates. Option for per-cycle stats, or not (irrelevant for many sequencers). </li>
+<li>
+<strong>determine-phred</strong> - Returns the phred scale of the input file. Works with sams, fastq's or pileups and gzipped files.</li>
+<li>
+<strong>Chrdex.pm</strong> &amp; <strong>Sqldex.pm</strong> - obsoleted by the cpan module Text::Tidx.   Sqldex may not actually be obsolete, because Tidx uses more ram and is slower for very small jobs.  But for Exome and RNA-Seq work, <a href="http://search.cpan.org/%7Eearonesty/Text-Tidx/">Text::Tidx</a> beats both.</li>
+<li>
+<strong>qsh</strong> - Runs a bash script file like a "cluster aware makefile"...only processing newer things, dieing if things go wrong, and sending jobs to a queue manager if they're big.  That way you don't have to write makefiles, or wrap things in "qsub" calls for every little program.  Not really ready yet.</li>
+<li>
+<strong>grun</strong> - Fast, lightweight grid queue software.  Keeps the job queue on disk at all times.  Very fast.   Works well by now</li>
+<li>
+<strong>gwrap</strong> - Bash wrapper shell that downloads all dependencies that are not the local system.... good for EC2 nodes.  Linux only.   Will use it if we ever go to EC2.</li>
+<li>
+<strong>gtf2bed</strong> - Converter that bundles up a GFF's exons and makes a UCSC-styled bed file with thin/thick properly set from the start/stop sites. </li>
+<li>
+<strong>randomFQ</strong> - takes a fastq (can be gzipped or paired-end) and randomly subsets to a user defined number of reads </li>
+</ul>
+
+<h1>
+<a id="citing" class="anchor" href="#citing" aria-hidden="true"><span class="octicon octicon-link"></span></a>Citing:</h1>
+
+<blockquote>
+<p>Erik Aronesty (2011). <em>ea-utils</em> : "Command-line tools for processing biological sequencing data"; <a href="https://github.com/ExpressionAnalysis/ea-utils">https://github.com/ExpressionAnalysis/ea-utils</a></p>
+
+<p>Erik Aronesty (2013). <em>TOBioiJ</em> : "Comparison of Sequencing Utility Programs", <a href="http://benthamscience.com/open/openaccess.php?tobioij/articles/V007/1TOBIOIJ.htm">DOI:10.2174/1875036201307010001</a></p>
+</blockquote>
+        </section>
+
+        <aside id="sidebar">
+          <a href="https://github.com/ExpressionAnalysis/ea-utils/zipball/master" class="button">
+            <small>Download</small>
+            .zip file
+          </a>
+          <a href="https://github.com/ExpressionAnalysis/ea-utils/tarball/master" class="button">
+            <small>Download</small>
+            .tar.gz file
+          </a>
+
+          <p class="repo-owner"><a href="https://github.com/ExpressionAnalysis/ea-utils"></a> is maintained by <a href="https://github.com/ExpressionAnalysis">ExpressionAnalysis</a>.</p>
+
+          <p>This page was generated by <a href="https://pages.github.com">GitHub Pages</a> using the Architect theme by <a href="https://twitter.com/jasonlong">Jason Long</a>.</p>
+        </aside>
+      </div>
+    </div>
+
+  
+  </body>
+</html>
