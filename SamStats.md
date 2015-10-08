@@ -2,7 +2,7 @@
 
 Tool for computing statistics from (possibly compressed) SAM or BAM files.
 
-See SamStatsDetails for more info on the output fields.
+See [SamStatsDetails](https://github.com/ExpressionAnalysis/ea-utils/blob/wiki/SamStatsDetails.md) for more info on the output fields.
 
 # Usage #
 
@@ -62,4 +62,4 @@ Meaning of the per-chromosome signature:
 
 DETAILED OVERVIEW OF STATISTICS:
 
-Click SamStatsDetails for more information on each stat, how it's calculated and what it means.
+Click [SamStatsDetails](https://github.com/ExpressionAnalysis/ea-utils/blob/wiki/SamStatsDetails.md) for more information on each stat, how it's calculated and what it means.
