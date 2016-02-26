@@ -31,8 +31,7 @@ See "void usage" below for usage.
 
 #include "fastq-lib.h"
 
-#define VERSION "1.04"
-#define SVNREV atoi(strchr("$LastChangedRevision$", ':')+1)
+#define VERSION "1.04.807"
 
 #define MAX_ADAPTER_NUM 1000
 #define SCANLEN 15
@@ -365,7 +364,7 @@ int main (int argc, char **argv) {
 			case 'F': fref[fref_n++] = optarg; break;
 			case 'x': pctns = atof(optarg); break;
 			case 'R': rmns = false; break;
-			case 'V': printf("Version: %s.%d\n", VERSION, SVNREV); return 0; break;
+			case 'V': printf("Version: %s\n", VERSION); return 0; break;
 			case 'p': pctdiff = atoi(optarg); break;
 			case 'P': phred = (char) atoi(optarg); break;
 			case 'D': duplen = atoi(optarg); break;
@@ -1453,7 +1452,7 @@ void usage(FILE *f, const char *msg) {
 
 	fprintf(f, 
 "Usage: fastq-mcf [options] <adapters.fa> <reads.fq> [mates1.fq ...] \n"
-"Version: %s.%d\n"
+"Version: %s\n"
 "\n"
 "Detects levels of adapter presence, computes likelihoods and\n"
 "locations (start, end) of the adapters.   Removes the adapter\n"
@@ -1562,7 +1561,7 @@ void usage(FILE *f, const char *msg) {
 "\n"
 "Homopolymer filtering is a subset of low-complexity, but will not\n"
 "be separately tracked unless both are turned on.\n"
-	,VERSION, SVNREV);
+	,VERSION);
 }
 
 inline int char2bp(char c) {

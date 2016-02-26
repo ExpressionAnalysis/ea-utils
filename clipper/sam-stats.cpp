@@ -41,9 +41,8 @@
 
 #include "fastq-lib.h"
 
-const char * VERSION = "1.38";
+const char * VERSION = "1.38.763";
 
-#define SVNREV atoi(strchr("$LastChangedRevision$", ':')+1)
 
 using namespace std;
 
@@ -429,7 +428,7 @@ int main(int argc, char **argv) {
         if (s.dat.secondary > 0) {
     		fprintf(o, "secondary\t%d\n", s.dat.secondary);
         }
-		fprintf(o, "version\t%s.%d\n", VERSION, SVNREV);
+		fprintf(o, "version\t%s\n", VERSION);
 
 		// mapped reads is the number of reads that mapped at least once (either mated or not)
 		if (s.dat.mapn > 0) {
@@ -1020,7 +1019,7 @@ bool sstats::parse_bam(const char *in) {
 void usage(FILE *f) {
         fprintf(f,
 "Usage: sam-stats [options] [file1] [file2...filen]\n"
-"Version: %s.%d\n"
+"Version: %s\n"
 "\n"
 "Produces lots of easily digested statistics for the files listed\n"
 "\n"
@@ -1080,7 +1079,7 @@ void usage(FILE *f) {
 "  .ldist           : length distribution (if applicable)\n"
 "  .mqdist          : mapping quality distribution\n"
 "\n"
-        ,VERSION, SVNREV);
+        ,VERSION);
 }
 
 std::string string_format(const std::string &fmt, ...) {
