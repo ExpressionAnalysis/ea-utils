@@ -46,8 +46,7 @@ using namespace std;            // bad practice
 #define MAX_ERR_FILES 10
 #include "zlib.h"
 
-#define VERSION "1.01"
-#define SVNREV atoi(strchr("$LastChangedRevision: 705 $", ':')+1)
+#define VERSION "1.01.816"
 #define warn(...) { fprintf(stderr, __VA_ARGS__); }
 #define die(...) { warn(__VA_ARGS__); exit(1); }
 
@@ -525,7 +524,7 @@ void usage(FILE *f, const char *msg) {
 
 	fprintf(f, 
 "Usage: ea-bcl2fastq -r PATH -l NUM -m MASK -o PREFIX [options] \n"
-"Version: %s.%d\n"
+"Version: %s\n"
 "\n"
 "Converts Illumina bcl files to fastq\n"
 "\n"
@@ -538,7 +537,7 @@ void usage(FILE *f, const char *msg) {
 "    -s START    Cluster offset (ZERO BASED OFFSET)\n"
 "    -n COUNT    Cluster count\n"
 "\n"
-    ,VERSION, SVNREV);
+    ,VERSION);
 }
 
 char *arg2cmd(int argc, char** argv) {

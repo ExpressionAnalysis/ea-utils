@@ -34,8 +34,7 @@ See "void usage" below for usage.
 #define THFIXFACTOR 20
 #define endstr(e) (e=='e'?"end":e=='b'?"start":"n/a")
 
-const char * VERSION = "1.02";
-#define SVNREV atoi(strchr("$LastChangedRevision$", ':')+1)
+const char * VERSION = "1.02.772";
 
 // barcode
 struct bc {
@@ -1114,7 +1113,7 @@ void pickbest(const void *nodep, const VISIT which, const int depth)
 void usage(FILE *f) {
 	fprintf(f,
 "Usage: fastq-multx [-g|-l|-B] <barcodes.fil> <read1.fq> -o r1.%%.fq [mate.fq -o r2.%%.fq] ...\n"
-"Version: %s.%d\n"
+"Version: %s\n"
 "\n"
 "Output files must contain a '%%' sign which is replaced with the barcode id in the barcodes file.\n"
 "Output file can be n/a to discard the corresponding data (use this for the barcode read)\n"
@@ -1156,7 +1155,7 @@ void usage(FILE *f) {
 "-m N        Allow up to N mismatches, as long as they are unique (1)\n"
 "-d N        Require a minimum distance of N between the best and next best (2)\n"
 "-q N        Require a minimum phred quality of N to accept a barcode base (0)\n"
-	,VERSION,SVNREV);
+	,VERSION);
 }
 
 void getbcfromheader(struct fq *fq, struct fq *bc, char **s2, int *ns2) {

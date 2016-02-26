@@ -44,8 +44,7 @@ THE SOFTWARE.
 
 #include "fastq-lib.h"
 
-#define SVNREV atoi(strchr("$Revision$", ':')+1)
-const char * VERSION = "0.96";
+const char * VERSION = "0.96.819";
 
 #define MIN_READ_LEN 20
 #define DEFAULT_LOCII 1000000
@@ -446,7 +445,7 @@ int main(int argc, char **argv) {
 			case 'q': min_qual=ok_atoi(optarg); break;
 			case 'o': out_prefix=optarg; break;
 			case 'Q': min_mapq=ok_atoi(optarg); break;
-			case 'V': printf("Version: %s.%d\n", VERSION, SVNREV); exit(0); break;
+			case 'V': printf("Version: %s\n", VERSION); exit(0); break;
 			case 'R': repeat_filter=ok_atoi(optarg); break;
 			case 'a': uminadepth=ok_atoi(optarg);break;
 			case 'D': artifact_filter=atof(optarg);break;
@@ -701,7 +700,7 @@ int main(int argc, char **argv) {
             output_ref=1;
         }
 
-		fprintf(varsum_f,"version\tvarcall-%s.%d\n", VERSION, SVNREV);
+		fprintf(varsum_f,"version\tvarcall-%s\n", VERSION);
 		fprintf(varsum_f,"min depth\t%d\n", min_depth);
 		fprintf(varsum_f,"min call depth\t%d\n", min_adepth);
 		fprintf(varsum_f,"alpha\t%f\n", alpha);
@@ -2134,7 +2133,7 @@ void VarStatVisitor::Visit(PileupSummary &p) {
 void usage(FILE *f) {
         fprintf(f,
 "Usage: varcall <-s|-v> <-f REF> [options] bam1 [bam2...]\n"
-"Version: %s.%d (BETA)\n"
+"Version: %s (BETA)\n"
 "\n"
 "Either outputs summry stats for the list of files, or performs variant calling\n"
 "\n"
@@ -2205,7 +2204,7 @@ void usage(FILE *f) {
 "\n"
 "Filtering Details:\n"
 "\n"
-        ,VERSION, SVNREV);
+        ,VERSION);
 }
 
 std::string string_format(const std::string &fmt, ...) {
@@ -2394,7 +2393,7 @@ void PileupSubscriber::SetManager(PileupManager &man) {
 
 
 void output_stats(VarStatVisitor &vstat) {
-    stat_out("version\tvarcall-%s.%d\n", VERSION, SVNREV);
+    stat_out("version\tvarcall-%s\n", VERSION);
     stat_out("min depth\t%d\n", minsampdepth);
     stat_out("alpha\t%f\n", alpha);
 
