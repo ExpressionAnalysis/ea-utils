@@ -174,7 +174,7 @@ public:
                 fq->qual.s[--fq->qual.n] = '\0';
             }
  
-            return fq->qual.n > 0;
+            return fq->qual.n >= 0;  // github issue 46, 53
         } else {
             return ::read_fq(fin, rno, fq, name);
         }
@@ -220,8 +220,8 @@ int main (int argc, char **argv) {
 	int ilv3 = -1;
 	int duplen = 0;
 	int dupskip = 0;
-        int min_start_trim = 0;
-        int min_end_trim = 0;
+    int min_start_trim = 0;
+    int min_end_trim = 0;
     bool noexec = 0;
     bool hompol_filter = 0;
     bool lowcom_filter = 0;
@@ -639,7 +639,7 @@ int main (int argc, char **argv) {
 				--nq; --ns;				// don't count newline for read len
 
 				// skip poor quals/lots of N's when doing sampling (otherwise you'll miss some)
-                if (ns == 0) {
+                if (ns == 0) {  // github issue 46, 53
                     ++skipped;
                     continue;
                 }
@@ -982,6 +982,15 @@ int main (int argc, char **argv) {
 			}
 		}
 		++nrec;
+        if (fq[0].qual.n == 0) { // github issue 46, 53
+            ++nfiltered;
+            continue;
+        } else if (i_n > 1) {
+            if (fq[1].qual.n == 0) {
+                ++nfiltered;
+                continue;
+            }
+        }
 		if (read_ok < 0) {
 			++nerr;
 			continue;
