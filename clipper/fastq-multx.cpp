@@ -34,7 +34,7 @@ See "void usage" below for usage.
 #define THFIXFACTOR 20
 #define endstr(e) (e=='e'?"end":e=='b'?"start":"n/a")
 
-const char * VERSION = "1.02.772";
+const char * VERSION = "1.03";
 
 // barcode
 struct bc {
@@ -116,6 +116,7 @@ int main (int argc, char **argv) {
 	const char* list=NULL;		// use a barcode master list
 	char verify='\0';
 	bool noexec = false;
+    bool seqnames = false;
 	const char *group = NULL;
     bool usefile1 = false;
     int phred = 33;
@@ -125,7 +126,7 @@ int main (int argc, char **argv) {
 	int i;
 	bool omode = false;	
 	char *bfil = NULL;
-	while (	(c = getopt (argc, argv, "-DzxnHhbeov:m:B:g:L:l:G:q:d:t:")) != -1) {
+	while (	(c = getopt (argc, argv, "-DzxnHhbeosv:m:B:g:L:l:G:q:d:t:")) != -1) {
 		switch (c) t:{
 		case '\1': 
                        	if (omode) {
@@ -143,6 +144,7 @@ int main (int argc, char **argv) {
 			}
 			break;
                 case 'o': omode=true; break;
+                case 's': seqnames=true; break;
                 case 'v': 
 			if (strlen(optarg)>1) {
 				fprintf(stderr, "Option -v requires a single character argument");
@@ -801,6 +803,13 @@ int main (int argc, char **argv) {
 	// TODO: output barcode read ...but only for unmatched?
 	int b;
     for (b=0;b<=bcnt;++b) {
+		size_t nameseq_len = strlen(bc[b].id.s);
+		if ((b < bcnt) && seqnames) {
+                  nameseq_len = strlen(bc[b].seq.s);
+                  if (bc[b].dual)
+                    nameseq_len += bc[b].dual_n + 1;
+		}
+
 		for (i=0;i<f_n;++i) {
 			if (!strcasecmp(out[i],"n/a") || !strcasecmp(out[i],"/dev/null")) {
 				bc[b].out[i] = NULL;
@@ -808,11 +817,20 @@ int main (int argc, char **argv) {
 				continue;
 			}
 			const char *p=strchr(out[i],'%');
-			if (!p) fail("Each output file name must contain a '%%' sign, which is replaced by the barcode id\n");
-			bc[b].out[i]=(char *) malloc(strlen(out[i])+strlen(bc[b].id.s)+100);
+			if (!p) fail("Each output file name must contain a '%%' sign, which is replaced by the barcode id or sequence\n");
+			bc[b].out[i]=(char *) malloc(strlen(out[i])+nameseq_len+100);
 			strncpy(bc[b].out[i], out[i], p-out[i]);
 			bc[b].out[i][p-out[i]]='\0';
-			strcat(bc[b].out[i], bc[b].id.s);
+			if (seqnames && (b < bcnt)) {
+			  strcat(bc[b].out[i], bc[b].seq.s);
+                          if (bc[b].dual) {
+                            strcat(bc[b].out[i], "-");
+                            strcat(bc[b].out[i], bc[b].dual);
+                          }
+                        }
+			else {
+			  strcat(bc[b].out[i], bc[b].id.s);
+                        }
 			strcat(bc[b].out[i], p+1);
 			if (!(bc[b].fout[i]=gzopen(bc[b].out[i], "w", &bc[b].gzout[i]))) {
 				fprintf(stderr, "Error opening output file '%s': %s\n",bc[b].out[i], strerror(errno));
@@ -1011,7 +1029,7 @@ int main (int argc, char **argv) {
 			if (!f) continue;
             if (!trimmed) {
 			    // todo: capture always, not just when trim is off
-                *strrchr(fq[i].id.s, '\n') = '\0';
+                if (!debug) *strrchr(fq[i].id.s, '\n') = '\0';
                 fputs(fq[i].id.s,f);
                 fputc(' ', f);
                 fputs(fq[0].seq.s,f);
@@ -1145,6 +1163,7 @@ void usage(FILE *f) {
 "-L BCFIL    Determine barcodes from <read1.fq>, using BCFIL as a master list\n"
 "-B BCFIL    Use barcodes from BCFIL, no determination step, codes in <read1.fq>\n"
 "-H          Use barcodes from illumina's header, instead of a read\n"
+"-s          Substitute barcode sequence instead of barcode label into output file names\n"
 "-b          Force beginning of line (5') for barcode matching\n"
 "-e          Force end of line (3') for batcode matching\n"
 "-t NUM      Divide threshold for auto-determine by factor NUM (1), > 1 = more sensitive\n"
