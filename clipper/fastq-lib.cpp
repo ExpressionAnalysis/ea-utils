@@ -361,7 +361,7 @@ int getstr (char ** lineptr, size_t *n, FILE * stream, char terminator, int offs
 	 NUL-terminate the line buffer.  */
 
       assert(*n - nchars_avail == read_pos - *lineptr);
-      if (nchars_avail < 1)
+      if (nchars_avail < 2)
 	{
 	  if (*n > 64)
 	    *n *= 2;
