@@ -31,7 +31,7 @@ See "void usage" below for usage.
 
 #include "fastq-lib.h"
 
-#define VERSION "1.04.807"
+#define VERSION "1.05"
 
 #define MAX_ADAPTER_NUM 1000
 #define SCANLEN 15
@@ -174,7 +174,7 @@ public:
                 fq->qual.s[--fq->qual.n] = '\0';
             }
  
-            return fq->qual.n > 0;
+            return fq->qual.n >= 0;  // github issue 46, 53
         } else {
             return ::read_fq(fin, rno, fq, name);
         }
@@ -220,6 +220,8 @@ int main (int argc, char **argv) {
 	int ilv3 = -1;
 	int duplen = 0;
 	int dupskip = 0;
+    int min_start_trim = 0;
+    int min_end_trim = 0;
     bool noexec = 0;
     bool hompol_filter = 0;
     bool lowcom_filter = 0;
@@ -258,6 +260,8 @@ int main (int argc, char **argv) {
        {"mate-min-len", 1, 0, 0},
        {"homopolymer-pct", 1, 0, 0},
        {"lowcomplex-pct", 1, 0, 0},
+       {"min-start-trim", 1, 0, 0},
+       {"min-end-trim", 1, 0, 0},
        {0, 0, 0, 0}
     };
 
@@ -275,6 +279,10 @@ int main (int argc, char **argv) {
                         keeponlyclip=1;
                     } else if(!strcmp(oname, "mate-qual-mean")) {
                         qf2_mean=atoi(optarg);
+                    } else if (!strcmp(oname, "min-start-trim")) {
+        		min_start_trim = atoi(optarg);
+                    } else if (!strcmp(oname, "min-end-trim")) {
+        		min_end_trim = atoi(optarg);
                     } else if(!strcmp(oname, "homopolymer-pct")) {
                         hompol_pct=atof(optarg)/100.0;
                         hompol_filter=1;
@@ -631,6 +639,10 @@ int main (int argc, char **argv) {
 				--nq; --ns;				// don't count newline for read len
 
 				// skip poor quals/lots of N's when doing sampling (otherwise you'll miss some)
+                if (ns == 0) {  // github issue 46, 53
+                    ++skipped;
+                    continue;
+                }
 				if ((st.st_size > (sampcnt * 500)) && (skipped < sampcnt) && poorqual(i, ns, s, q)) {
                     ++skipped;
 					continue;
@@ -970,6 +982,15 @@ int main (int argc, char **argv) {
 			}
 		}
 		++nrec;
+        if (fq[0].qual.n == 0) { // github issue 46, 53
+            ++nfiltered;
+            continue;
+        } else if (i_n > 1) {
+            if (fq[1].qual.n == 0) {
+                ++nfiltered;
+                continue;
+            }
+        }
 		if (read_ok < 0) {
 			++nerr;
 			continue;
@@ -1003,6 +1024,9 @@ int main (int argc, char **argv) {
 		for (f=0;f<i_n;++f) {
 			dotrim[f][0] = sktrim[f][0];					// default, trim to detected skew levels
 			dotrim[f][1] = sktrim[f][1];
+			// trim to minimum, if specified
+			dotrim[f][0] = max(dotrim[f][0], min_start_trim);
+			dotrim[f][1] = max(dotrim[f][1], min_end_trim);
 			if (avgns[f] < 11)  
 				// reads of avg length < 11 ? barcode lane, skip it
 				continue;
@@ -1492,6 +1516,10 @@ void usage(FILE *f, const char *msg) {
 "    -S       Save all discarded reads to '.skip' files\n"
 "    -C N     Number of reads to use for subsampling (300k)\n"
 "    -d       Output lots of random debugging stuff\n"
+"\n"
+"Minimum trimming options:\n"
+"    --min-start-trim    NUM       Always trim at least NUM bases from start\n"
+"    --min-end-trim      NUM       Always trim at least NUM bases from end\n"
 "\n"
 "Quality adjustment options:\n"
 "    --cycle-adjust      CYC,AMT   Adjust cycle CYC (negative = offset from end) by amount AMT\n"
