@@ -228,6 +228,9 @@ bool poorqual(int n, int l, const char *s, const char *q) {
         }
         quals[n].sum += sum;
         quals[n].ns += ns;
+        if (l == 0) { // Avoid SIGFPE when passed zero-length read.
+          return 1;
+        }
         int xmean = sum/l;
         if (quals[n].cnt < 20000) {
             // mean qual < 18 = junk
