@@ -42,7 +42,7 @@ getrel:
 $(PKG).spec:
 	perl -pe 's/%RELEASE%/${REL}/' $(PKG).spex > $(PKG).spec
 
-$(PKG).tar.gz: Makefile $(TOOLS) $(SRC) $(PKG).spec fastq-lib.cpp fastq-lib.h sam-stats.cpp fastq-stats.cpp gcModel.cpp gcModel.h varcall.cpp utils.h README CHANGES sparsehash-2.0.2 samtools/*.c t
+$(PKG).tar.gz: Makefile $(TOOLS) $(SRC) $(PKG).spec fastq-lib.cpp fastq-lib.h sam-stats.cpp fastq-stats.cpp gcModel.cpp gcModel.h varcall.cpp utils.h README CHANGES sparsehash-2.0.3 samtools/*.c t
 	rm -rf $(PKG).${VER}-${REL}
 	mkdir $(PKG).${VER}-${REL}
 	mkdir $(PKG).${VER}-${REL}/tidx
@@ -68,10 +68,10 @@ $(PKG).${VER}-${REL}.tar.gz: $(PKG).tar.gz
 %: %.cpp fastq-lib.cpp fastq-lib.h sparsehash
 	$(CC) $(CFLAGS) $< fastq-lib.cpp -o $@
 
-sparsehash: sparsehash-2.0.2
-	cd sparsehash-2.0.2; ./configure; make
+sparsehash: sparsehash-2.0.3
+	cd sparsehash-2.0.3; ./configure; make
 	mkdir sparsehash
-	cp -r sparsehash-2.0.2/src/sparsehash/* sparsehash/
+	cp -r sparsehash-2.0.3/src/sparsehash/* sparsehash/
 
 # why the libbam.a doesn't work?  not sure... *.o works
 sam-stats: sam-stats.cpp samtools/libbam.a samtools/bam.h fastq-lib.h sparsehash
