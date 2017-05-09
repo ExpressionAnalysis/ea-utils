@@ -290,7 +290,7 @@ int main (int argc, char **argv) {
             ++output_fnum;                        // output file number is sequential
             masks[i].rnum=output_fnum;            // save file number as "read number"
             if (usegz) {
-                outtmp = string_format("gzip -2 --rsyncable -c > %s.%d.fq.gz",out.c_str(),output_fnum); 
+                outtmp = string_format("gzip -2  -c > %s.%d.fq.gz",out.c_str(),output_fnum); 
                 fo=popenordie(outtmp.c_str(),"w");
             } else {
                 outtmp = string_format("%s.%d.fq",out.c_str(),output_fnum); 

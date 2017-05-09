@@ -160,7 +160,7 @@ FILE *gzopen(const char *f, const char *m, bool*isgz) {
         if (!strcmp(ext,".gz")) {
             char *tmp=(char *)malloc(strlen(f)+100);
             if (strchr(m,'w')) {
-                    strcpy(tmp, "gzip -3 --rsyncable > '");
+                    strcpy(tmp, "gzip -3  > '");
                     strcat(tmp, f);
                     strcat(tmp, "'");
             } else {
@@ -361,7 +361,7 @@ int getstr (char ** lineptr, size_t *n, FILE * stream, char terminator, int offs
 	 NUL-terminate the line buffer.  */
 
       assert(*n - nchars_avail == read_pos - *lineptr);
-      if (nchars_avail < 1)
+      if (nchars_avail < 2)
 	{
 	  if (*n > 64)
 	    *n *= 2;
