@@ -43,7 +43,7 @@ struct bc {
 	char *out[6];			// one output per input
 	FILE *fout[6];
 	bool gzout[6];
-	int cnt;			// count found
+	uint64_t cnt;			// count found
 	bool shifted;			// count found in 1-shifted position
 	char * dual;			// is this a dual-indexed barcode?  if so, this points to the second index.
 	int dual_n;			// length of dual
@@ -1072,9 +1072,9 @@ int main (int argc, char **argv) {
 
 	int j;
 	printf("Id\tCount\tFile(s)\n");
-	int tot=0;
+	uint64_t tot=0;
 	for (i=0;i<=bcnt;++i) {
-		printf("%s\t%d", bc[i].id.s, bc[i].cnt);
+		printf("%s\t%ld", bc[i].id.s, bc[i].cnt);
 		tot+=bc[i].cnt;
 		for (j=0;j<f_n;++j) {
 			if (bc[i].out[j])
@@ -1082,7 +1082,7 @@ int main (int argc, char **argv) {
 		}
 		printf("\n");
 	}
-	printf("total\t%d\n", tot);
+	printf("total\t%ld\n", tot);
 
     if (!io_ok)
         return 3;
