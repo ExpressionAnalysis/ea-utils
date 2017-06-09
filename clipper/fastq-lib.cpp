@@ -40,7 +40,7 @@ int read_line(FILE *in, struct line &l) {
 }
 
 char sempty[1]={'\0'};
-int read_fq_sam(FILE *in, int rno, struct fq *fq, const char *name) {
+int read_fq_sam(FILE *in, uint64_t rno, struct fq *fq, const char *name) {
     read_line(in, fq->id);
 
     while (fq->id.s[0] == '@') {
@@ -89,7 +89,7 @@ int read_fq_sam(FILE *in, int rno, struct fq *fq, const char *name) {
     return 1;
 }
 
-int read_fq(FILE *in, int rno, struct fq *fq, const char *name) {
+int read_fq(FILE *in, uint64_t rno, struct fq *fq, const char *name) {
     read_line(in, fq->id);
     if (fq->id.s && (*fq->id.s == '>')) {
         fq->id.s[0] = '@';
@@ -124,9 +124,9 @@ int read_fq(FILE *in, int rno, struct fq *fq, const char *name) {
     if (fq->id.s[0] != '@' || fq->com.s[0] != '+' || fq->seq.n != fq->qual.n) {
         const char *errtyp = (fq->seq.n != fq->qual.n) ?  "length mismatch" : fq->id.s[0] != '@' ? "no '@' for id" : "no '+' for comment";
         if (name) {
-            fprintf(stderr, "Malformed fastq record (%s) in file '%s', line %d\n", errtyp, name, rno*2+1);
+            fprintf(stderr, "Malformed fastq record (%s) in file '%s', line %ld\n", errtyp, name, rno*2+1);
         } else {
-            fprintf(stderr, "Malformed fastq record (%s) at line %d\n", errtyp, rno*2+1);
+            fprintf(stderr, "Malformed fastq record (%s) at line %ld\n", errtyp, rno*2+1);
         }
         return -1;
     }
@@ -217,9 +217,9 @@ const char *fext(const char *f) {
         return x ? x : "";
 }
 
-bool poorqual(int n, int l, const char *s, const char *q) {
+bool poorqual(int n, size_t len, const char *s, const char *q) {
         int i=0, sum=0, ns=0;
-        for (i=0;i<l;++i) {
+        for (i=0;i<len;++i) {
                 if (s[i] == 'N')
                     ++ns;
                 quals[n].cnt++;
@@ -228,7 +228,7 @@ bool poorqual(int n, int l, const char *s, const char *q) {
         }
         quals[n].sum += sum;
         quals[n].ns += ns;
-        int xmean = sum/l;
+        int xmean = sum/len;
         if (quals[n].cnt < 20000) {
             // mean qual < 18 = junk
             return ((xmean-33) < 18) || (ns > 1);
@@ -236,17 +236,17 @@ bool poorqual(int n, int l, const char *s, const char *q) {
         // enough data? use stdev
         int pmean = quals[n].sum / quals[n].cnt;                                // mean q
         double pdev = stdev(quals[n].cnt, quals[n].sum, quals[n].ssq);          // dev q
-        int serr = min(pmean/2,max(1,pdev/sqrt(l)));                                         // stderr for length l
+        int serr = min(pmean/2,max(1,pdev/sqrt(len)));                                         // stderr for length len
         // mean qual < min(18,peman-serr*3) = junk/skip it
         // cap low qual, because adapters often are low qual
         // but you still need to calculate something, in case we're doing ion/pacbio
         int thr = min((33+18), (pmean - serr * 3));
         if (xmean < thr) {
-//           fprintf(stderr, "POORQ xmean:%d, pmean:%d, pdev:%f, sqrt(l):%f, serr:%d, thr: %d, %s",xmean,pmean,pdev,sqrt(l),serr,thr,s);
+//           fprintf(stderr, "POORQ xmean:%d, pmean:%d, pdev:%f, sqrt(len):%f, serr:%d, thr: %d, %s",xmean,pmean,pdev,sqrt(len),serr,thr,s);
             return 1;                                                       // ditch it
         }
-        if (ns > (1+(l*quals[n].ns / quals[n].cnt))) {                          // 1 more n than average?
-//           fprintf(stderr, "POORQ: ns:%d, thr: %d\n",ns,(int)(1+(l*quals[n].ns / quals[n].cnt)));
+        if (ns > (1+(len*quals[n].ns / quals[n].cnt))) {                          // 1 more n than average?
+//           fprintf(stderr, "POORQ: ns:%d, thr: %d\n",ns,(int)(1+(len*quals[n].ns / quals[n].cnt)));
             return 1;                                                       // ditch it
         }
         return 0;
