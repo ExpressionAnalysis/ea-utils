@@ -83,8 +83,10 @@ const char *fext(const char *f);
 
 // read fq
 int read_line(FILE *in, struct line &l);                // 0=done, 1=ok, -1=err+continue
-int read_fq(FILE *in, int rno, struct fq *fq, const char *name=NULL);          // 0=done, 1=ok, -1=err+continue
-int read_fq_sam(FILE *in, int rno, struct fq *fq, const char *name=NULL);          // 0=done, 1=ok, -1=err+continue
+// rno: row number, only for message to show trouble line
+int read_fq(FILE *in, uint64_t rno, struct fq *fq, const char *name=NULL);          // 0=done, 1=ok, -1=err+continue
+// rno: not used
+int read_fq_sam(FILE *in, uint64_t rno, struct fq *fq, const char *name=NULL);          // 0=done, 1=ok, -1=err+continue
 void free_fq(struct fq *fq);
 
 // open a file, possibly gzipped, exit on failure
@@ -92,10 +94,12 @@ FILE *gzopen(const char *in, const char *mode, bool *isgz);
 int gzclose(FILE *f, bool isgz);
 
 // keep track of poor quals (n == "file number", maybe should have persistent stat struct instead?)
-bool poorqual(int n, int l, const char *s, const char *q);
+// len: seqence length
+// s: seqence string; q: quality string
+bool poorqual(int n, size_t len, const char *s, const char *q);
 
 // returns number of differences between 2 strings, where n is the "max-length to check"
-inline int hd(char *a, char *b, int n) {
+inline int hd(char *a, char *b, size_t n) {
         int d=0;
         //if (debug) fprintf(stderr, "hd: %s,%s ", a, b);
         while (*a && *b && n > 0) {

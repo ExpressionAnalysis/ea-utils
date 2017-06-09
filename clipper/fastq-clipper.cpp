@@ -43,7 +43,7 @@ See "void usage" below for usage.
 #define MAX_ADAPTER_LEN 160
 
 void usage(FILE *f);
-int hd(char *a, char *b, int n);
+int hd(char *a, char *b, size_t n);
 int debug=0;
 int main (int argc, char **argv) {
 	char c;
