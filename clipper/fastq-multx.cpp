@@ -76,7 +76,7 @@ static int debug=0;
 // it's times like this when i think a class might be handy, but nah, not worth it
 typedef struct bnode {
 	char *seq;
-	int cnt;
+	uint64_t cnt;
 } bnode;
 
 struct group grs[MAX_GROUP_NUM];
@@ -85,33 +85,32 @@ static int grcnt=0;
 struct bc bc[MAX_BARCODE_NUM+1];
 static int bcnt=0;
 
-static int pickmax=0;
-static int pickmax2=0;
+static uint64_t pickmax=0;
+static uint64_t pickmax2=0;
 static void *picktab=NULL;
-void pickbest(const void *nodep, const VISIT which, const int depth);
+void pickbest(const void *nodep, const VISIT which, const int depth);		// depth: not used
 int bnodecomp(const void *a, const void *b) {return strcmp(((bnode*)a)->seq,((bnode*)b)->seq);};
 static float pickmaxpct=0.10;
 void getbcfromheader(struct fq *fqin, struct fq *bc, char **s2=NULL, int *ns2=NULL);
 void getbcfromheader(char *s, int *ns, char **q=NULL, char **s2=NULL, int *ns2=NULL);
 
-int ignore;
 size_t ignore_st;
 
 
 int main (int argc, char **argv) {
 	char c;
 	bool trim = true;
-	int mismatch = 1;
-	int distance = 2;
-	int poor_distance = 0;       // count of skipped reads on distance only
+	int mismatch = 1;			// number of mismatch allowed
+	int distance = 2;			// gap before next matching
+	int poor_distance = 0;		// count of skipped reads on distance only
 	int quality = 0;
 	char end = '\0';
 	char dend = '\0';
 	bool dual = false;
 	char *in[6];
 	const char *out[6];
-	int f_n=0;
-	int f_oarg=0;
+	int f_n=0;					// input files number
+	int f_oarg=0;				// output files number
 	const char* guide=NULL;		// use an indexed-read
 	const char* list=NULL;		// use a barcode master list
 	char verify='\0';
@@ -121,9 +120,9 @@ int main (int argc, char **argv) {
     bool usefile1 = false;
     int phred = 33;
     double threshfactor = 1;
-    int bcinheader = 0;
+    int bcinheader = 0;			// This is a boolean
 
-	int i;
+	int i;						// index of input files
 	bool omode = false;	
 	char *bfil = NULL;
 	while (	(c = getopt (argc, argv, "-DzxnHhbeosv:m:B:g:L:l:G:q:d:t:")) != -1) {
@@ -226,8 +225,8 @@ int main (int argc, char **argv) {
                         return 1;
 		}
 		memset(bcg, 0, sizeof(*bcg) * MAX_GROUP_NUM * MAX_BARCODE_NUM);
-		int bgcnt=0;
-		int b;
+		int bgcnt=0;	// barcode group count?
+		int b;			// index of barcode group
         FILE *lin = fopen(list, "r");
         if (!lin) {
                 fprintf(stderr, "Error opening file '%s': %s\n",list, strerror(errno));
@@ -279,17 +278,25 @@ int main (int argc, char **argv) {
 
         int sampcnt = 200000;
         struct stat st;
-		int fsum[f_n], fmax[f_n]; int bestcnt=0, besti=-1, bestdual=0;
-		int dfsum[f_n], dfmax[f_n]; int dbestcnt=0, dbesti=-1;
+		uint64_t fsum[f_n], fmax[f_n];
+		uint64_t dfsum[f_n], dfmax[f_n];	// for dual files
+		uint64_t bestcnt=0, dbestcnt=0;
+		int besti=-1, dbesti=-1;			// index of best file/best dual file
+		bool bestdual=false;
+
 		meminit(fsum); meminit(fmax); meminit(dfsum); meminit(dfmax);
 
         // subsample to determine group to use
 		for (i=0;i<(usefile1?1:f_n);++i) {
-            char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
-            char *q = NULL; size_t nq = 0;
-			double tots=0, totsq=0;
-		    char *s2 = NULL; int ns2=0;
-            char *ignore_s=NULL;
+            char *s = NULL;
+            size_t na = 0;
+            int nr = 0, ns = 0;		// length of the line read, -1 if failed
+            char *q = NULL;
+            size_t nq = 0;
+			// double tots=0, totsq=0;
+		    char *s2 = NULL;
+		    int ns2=0;
+            char *ignore_s=NULL; // !!!every time, space allocated for it, but never freed
 	
 			stat(in[i], &st);
 
@@ -301,9 +308,9 @@ int main (int argc, char **argv) {
 
                 if (bcinheader) {
                     // read in 3 more lines (seq, comment, qual) and ignore them
-                    ignore=getline(&ignore_s, &ignore_st, fin[i]);
-                    ignore=getline(&ignore_s, &ignore_st, fin[i]);
-                    ignore=getline(&ignore_s, &ignore_st, fin[i]);
+                    getline(&ignore_s, &ignore_st, fin[i]);
+                    getline(&ignore_s, &ignore_st, fin[i]);
+                    getline(&ignore_s, &ignore_st, fin[i]);
                     getbcfromheader(s, &ns, &q, &s2, &ns2);
                     nq=ns;
                }  else {
@@ -311,7 +318,7 @@ int main (int argc, char **argv) {
                     if ((ns=getline(&s, &na, fin[i])) <=0)
                         break;
 
-                    ignore=getline(&q, &ignore_st, fin[i]);
+                    getline(&q, &ignore_st, fin[i]);
                     nq=getline(&q, &ignore_st, fin[i]);
 
     				s[--ns]='\0'; q[--nq]='\0';
@@ -367,7 +374,7 @@ int main (int argc, char **argv) {
 
 				if (fsum[i] > bestcnt)  {
                     if (debug > 1) 
-                        fprintf(stderr,"file %d(%s), bcg: %s, file-sum: %d, bestsum: %d\n", i, in[i], bcg[b].gptr->id, fsum[i], bestcnt);
+                        fprintf(stderr,"file %d(%s), bcg: %s, file-sum: %ld, bestsum: %ld\n", i, in[i], bcg[b].gptr->id, fsum[i], bestcnt);
 
 					bestcnt=fsum[i];
 					besti=i;
@@ -375,7 +382,7 @@ int main (int argc, char **argv) {
 				}
 
                 if (debug > 1) 
-                    fprintf(stderr,"dual %d(%s), bcg: %s, file-sum: %d, bestsum: %d\n", i, in[i], bcg[b].gptr->id, dfsum[i], dbestcnt);
+                    fprintf(stderr,"dual %d(%s), bcg: %s, file-sum: %ld, bestsum: %ld\n", i, in[i], bcg[b].gptr->id, dfsum[i], dbestcnt);
 
 				if (bcg[b].b.dual) {
 					// highest count
@@ -385,23 +392,23 @@ int main (int argc, char **argv) {
 						dfmax[i]=dcnt;
 					if (dfsum[i] > dbestcnt)  {
                         if (debug > 1) 
-                            fprintf(stderr,"dual %d(%s), bcg: %s, file-sum: %d, bestsum: %d\n", i, in[i], bcg[b].gptr->id, dfsum[i], dbestcnt);
+                            fprintf(stderr,"dual %d(%s), bcg: %s, file-sum: %ld, bestsum: %ld\n", i, in[i], bcg[b].gptr->id, dfsum[i], dbestcnt);
 						dbestcnt=dfsum[i];
 						dbesti=i;
 					}
 				}
                         }
-			if (debug > 0) fprintf(stderr,"file-best %d sum:%d, max:%d\n", besti, fsum[besti], fmax[besti]);
-			if (debug > 0 && bestdual) fprintf(stderr,"dual file-best %d sum:%d, max:%d\n", dbesti, dfsum[dbesti], dfmax[dbesti]);
+			if (debug > 0) fprintf(stderr,"file-best %d sum:%ld, max:%ld\n", besti, fsum[besti], fmax[besti]);
+			if (debug > 0 && bestdual) fprintf(stderr,"dual file-best %d sum:%ld, max:%ld\n", dbesti, dfsum[dbesti], dfmax[dbesti]);
 		}
 
         // chosen file is "besti"
 		i=usefile1?0:besti;
 
 		int gmax=0, gindex=-1, scnt = 0, ecnt=0, dscnt = 0, decnt = 0;
-		int thresh = (int) (pickmaxpct*fmax[i]); 
+		uint64_t thresh = (uint64_t) (pickmaxpct*fmax[i]);
 
-		if (debug > 0) fprintf(stderr,"besti: %d thresh: %d, dual: %d\n", besti, thresh, bestdual);
+		if (debug > 0) fprintf(stderr,"besti: %d thresh: %ld, dual: %d\n", besti, thresh, bestdual);
 		for (b=0;b<bgcnt;++b) {
 			int hcnt = (int) (max(bcg[b].bcnt[i],bcg[b].ecnt[i]) * log(bcg[b].b.seq.n));
 			if (debug > 1) fprintf(stderr,"cnt: %s %s hc:%d bc:%d ec: %d\n", bcg[b].b.id.s, bcg[b].b.seq.s, hcnt, bcg[b].bcnt[i], bcg[b].ecnt[i]);
@@ -464,7 +471,7 @@ int main (int argc, char **argv) {
         for (b=0;b<bgcnt;++b) {
 			if (bcg[b].gptr->i == gindex) {
 				int cnt = (end == 'e' ? (bcg[b].ecnt[i]+bcg[b].escnt[i]) : ( bcg[b].bcnt[i] + bcg[b].bscnt[i] ));
-				if (cnt > thresh/THFIXFACTOR) {
+				if (cnt > (int)thresh/THFIXFACTOR) {
 					// count exceeds threshold... use it
 					bc[bcnt]=bcg[b].b;
 					if ((end == 'e' && (bcg[b].escnt[i] < 1.2*bcg[b].ecnt[i])) ||
@@ -494,6 +501,7 @@ int main (int argc, char **argv) {
 			char *n = in[0];
 			const char *o = out[0];
 			bool gzi = gzin[0];
+
 			fin[0]=fin[i];
 			in[0]=in[i];
 			out[0]=out[i];
@@ -523,7 +531,7 @@ int main (int argc, char **argv) {
 		// use the first file as a "guide file" ... and select a set of codes from that
 		FILE *gin = fin[0];
 
-		int blen = 0;
+		uint64_t blen = 0;
 	
 		int sampcnt = 100000;
 		struct stat st;
@@ -533,7 +541,7 @@ int main (int argc, char **argv) {
 		char *q = NULL; size_t nq = 0;
 
 // small sample to get lengths
-		double tots=0, totsq=0;
+		uint64_t tots=0, totsq=0;
 		while ((ns=getline(&s, &na, gin)) > 0) {
 			if (*s != '@')  {
 				fprintf(stderr,"Invalid fastq file: %s.\n", in[0]);
@@ -541,17 +549,17 @@ int main (int argc, char **argv) {
 			}
 
             if (bcinheader) {
-                    ignore=getline(&q, &ignore_st, fin[i]);
-                    ignore=getline(&q, &ignore_st, fin[i]);
-                    ignore=getline(&q, &ignore_st, fin[i]);
+                    getline(&q, &ignore_st, fin[i]);
+                    getline(&q, &ignore_st, fin[i]);
+                    getline(&q, &ignore_st, fin[i]);
                     /// no dual barcode detection allowed
                     getbcfromheader(s, &ns);
                     printf("bc is %s\n", s);
             } else {
                 if ((ns=getline(&s, &na, gin)) <=0)
                     break;
-                ignore=getline(&q, &ignore_st, gin);
-                ignore=getline(&q, &ignore_st, gin);
+                getline(&q, &ignore_st, gin);
+                getline(&q, &ignore_st, gin);
             }
 
 			--ns;
@@ -563,11 +571,13 @@ int main (int argc, char **argv) {
 		double dev = stdev(nr, tots, totsq);
 
 		// short, and nonvarying (by much, depends on the tech used)
-		if (dev < .25 && roundl(tots/nr) < 12) {
+		// This tots/nr should NOT be too big, we should just call round()
+		blen = (uint64_t)roundl(tots/nr);
+		if (dev < .25 && blen < 12) {
 			// most probably a barcode-only read
-			blen = (int) round(tots/nr);
+			// blen = (int) round(tots/nr);
 			end = 'b';
-		} else if (round(tots/nr) < 12) {
+		} else if (blen < 12) {
 			fprintf(stderr, "File %s looks to be barcode-only, but it's length deviation is too high (%.4g)\n", in[0], dev);
 			return 1;
 		} else {
@@ -575,7 +585,7 @@ int main (int argc, char **argv) {
 			return 1;
 		}
 
-		fprintf(stderr, "Barcode length used: %d (%s)\n", blen, endstr(end));
+		fprintf(stderr, "Barcode length used: %ld (%s)\n", blen, endstr(end));
 
 		// load a table of possble codes
 		pickmax=0;
@@ -588,16 +598,16 @@ int main (int argc, char **argv) {
 			}
 
             if (bcinheader) {
-                ignore=getline(&q, &ignore_st, fin[i]);
-                ignore=getline(&q, &ignore_st, fin[i]);
-                ignore=getline(&q, &ignore_st, fin[i]);
+                getline(&q, &ignore_st, fin[i]);
+                getline(&q, &ignore_st, fin[i]);
+                getline(&q, &ignore_st, fin[i]);
                 getbcfromheader(s, &ns, &q);
                 printf("bc is %s\n", s);
             } else {
                 if ((ns=getline(&s, &na, gin)) <=0)
                     break;
 
-                ignore=getline(&q, &ignore_st, gin);
+                getline(&q, &ignore_st, gin);
                 if (getline(&q, &ignore_st, gin) != ns)
                     break;
 			    s[--ns]='\0'; q[ns]='\0';
@@ -642,7 +652,7 @@ int main (int argc, char **argv) {
 				break;
 		}
 		pickmax=max(1,(int)(pickmaxpct*pickmax2));
-		fprintf(stderr, "Threshold used: %d\n", pickmax);
+		fprintf(stderr, "Threshold used: %ld\n", pickmax);
 		twalk(picktab, pickbest);
 	} else {
 		// user specifies a list of barcodes, indexed read is f[0] and f[1] if dual
@@ -705,8 +715,11 @@ int main (int argc, char **argv) {
         int sampcnt = dual ? 200000 : 10000;
         struct stat st;
         stat(in[0], &st);
-        char *s = NULL; size_t na = 0; int nr = 0, ns = 0;
-        char *q = NULL; size_t nq = 0;
+        char *s = NULL;
+        size_t na = 0;
+        int nr = 0, ns = 0;
+        char *q = NULL;
+        size_t nq = 0;
         int ne=0, nb=0, dne=0, dnb=0, tcount=0, read_ok=0;
 
         int *recount = dual ? ((int *) malloc(sizeof(int)*bcnt)) : NULL;

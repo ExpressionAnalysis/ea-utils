@@ -104,7 +104,7 @@ class countPerCycle {
 	public:
 	int basecount[26];
 	int qc;
-	double qsum;
+	uint64_t qsum;
 	//vector<int> qual; 
 	int counts_by_qual[127];
 	int qmin;
@@ -138,9 +138,9 @@ class count_perCycle_perQual {
 
 
 void usage( FILE * f );
-double std_dev( double count , double total, double sqsum );
+double std_dev( uint64_t count , uint64_t total, uint64_t sqsum );
 double quantile( const std::vector <int> & vec, double p );
-double quantiles_with_counts(int* v, int start, int end, double p, bool dbug);
+double quantiles_with_counts(int* v, uint64_t start, uint64_t end, double p, bool dbug);
 std::string string_format( const std::string &fmt, ... );
 
 extern int optind;
@@ -153,7 +153,7 @@ int window = 2000000;
 int cyclemax = 35; 
 int gcCyclemax = 100; // to compare with fastqc, seq is rounded to nearest 100 to reduce # of gc models; for < 200 length, this is teh same as max=100
 float gcSum;
-int gcTotal;
+uint64_t gcTotal;
 
 int show_max = 10;
 bool debug = 0;
@@ -206,17 +206,17 @@ int main( int argc, char**argv ) {
 
 	int lenmax = 0;
 	int lenmin = 100000000;
-	double lensum = 0;
-	double lenssq = 0;
-	double nbase = 0;
+	uint64_t lensum = 0;
+	uint64_t lenssq = 0;
+	uint64_t nbase = 0;
 	int qualmax = 0;
 	int qualmin = 100000;
-	double qualsum = 0;
-	double qualssq = 0;
-	int errs = 0;
-	long long nreads = 0;
-	int ndups = 0;
-	double dupss = 0;
+	uint64_t qualsum = 0;
+	uint64_t qualssq = 0;
+	uint64_t errs = 0;
+	uint64_t nreads = 0;
+	uint64_t ndups = 0;
+	uint64_t dupss = 0;
 	bool fixlen = 0; //is fixed length
 	FILE *file;
 	struct fq newFq; meminit(newFq);
@@ -224,8 +224,8 @@ int main( int argc, char**argv ) {
 	vector<countPerCycle> qcStats (1);
 	vector<count_perCycle_perQual> qcStats_by_qual (1);
 	int phred = 64;
-	double ACGTN_count[26];
-	double total_bases = 0;
+	uint64_t ACGTN_count[26];
+	uint64_t total_bases = 0;
 
 
 	for(int i=0; i<26; i++) {
@@ -254,7 +254,7 @@ int main( int argc, char**argv ) {
 		}
 		
 		if(nreads == 10000) {
-			if(!std_dev((double)nreads,lensum,lenssq)) {
+			if(!std_dev(nreads,lensum,lenssq)) {
 				fixlen = 1;
 			}
 		}
@@ -287,7 +287,7 @@ int main( int argc, char**argv ) {
 			qcStats_by_qual.resize(newFq.seq.n,count_perCycle_perQual());
 		}
 
-		int gcTally = 0;
+		uint64_t gcTally = 0;
 		//compute quality stats for the first cyclemax bases
 		for(int i=0; i < newFq.seq.n; i++) {
 			int ascii_val = (int) newFq.qual.s[i];
@@ -402,13 +402,13 @@ int main( int argc, char**argv ) {
 	if(qualmin < 64) {
 		phred = 33;
 	}
-	printf("reads\t%lld\n",nreads);
+	printf("reads\t%ld\n",nreads);
 
 	if(!fixlen) {
 		printf("len\t%d\n", lenmax);
 		printf("len mean\t%.4f\n", (double)lensum/nreads);
 		if(nreads > 1) {
-			printf("len stdev\t%.4f\n", std_dev((double)nreads,lensum,lenssq));
+			printf("len stdev\t%.4f\n", std_dev(nreads,lensum,lenssq));
 		}
 		printf("len min\t%d\n", lenmin);
 	} else {
@@ -417,7 +417,7 @@ int main( int argc, char**argv ) {
 	
 	printf("phred\t%d\n", phred);
 	if(errs > 0) {
-		printf("errors\t%d\n", errs);
+		printf("errors\t%ld\n", errs);
 	}
 
 
@@ -444,11 +444,11 @@ int main( int argc, char**argv ) {
 		myfile = fopen(fastx_outfile,"wd");
 		fprintf(myfile,"column\tcount\tmin\tmax\tsum\tmean\tQ1\tmed\tQ3\tIQR\tlW\trW\tA_count\tC_count\tG_count\tT_count\tN_count\tMax_count\n");
 		for(int i=0; i<qcStats.size(); i++) {
-			int A_tot = 0;
-			int C_tot = 0;
-			int G_tot = 0;
-			int T_tot = 0;
-			int N_tot = 0;
+			uint64_t A_tot = 0;
+			uint64_t C_tot = 0;
+			uint64_t G_tot = 0;
+			uint64_t T_tot = 0;
+			uint64_t N_tot = 0;
 			for(int j=0; j<26; j++) {
 				if(j==T_A) {
 					A_tot += qcStats[i].basecount[j];
@@ -496,10 +496,10 @@ int main( int argc, char**argv ) {
 			}
 
 			fprintf(myfile,"%d\t%d\t%d\t%d\t%.0f\t%.2f\t%.2f\t%.2f\t%.2f\t%.2f\t%d\t%d\t", (i+1), qcStats[i].qc, (qcStats[i].qmin-phred),
-			                        (qcStats[i].qmax-phred), (qcStats[i].qsum-qcStats[i].qc*phred), 
-									(qcStats[i].qsum/qcStats[i].qc-phred),
-									 q1, med, q3,iqr, lW, rW);
-			fprintf(myfile,"%d\t%d\t%d\t%d\t%d\t%lld\n", A_tot, C_tot, G_tot, T_tot, N_tot,nreads);
+			                        (qcStats[i].qmax-phred), (double)(qcStats[i].qsum-qcStats[i].qc*phred),
+									((double)qcStats[i].qsum/qcStats[i].qc-phred),
+									 q1, med, q3, iqr, lW, rW);
+			fprintf(myfile,"%ld\t%ld\t%ld\t%ld\t%ld\t%ld\n", A_tot, C_tot, G_tot, T_tot, N_tot,nreads);
 		
 		}
 		fclose(myfile);
@@ -537,7 +537,7 @@ int main( int argc, char**argv ) {
 		cout << endl;
 	}
 	if (uniq_dup && !nodup) {
-		printf("dups\t%d\n",ndups-uniq_dup);
+		printf("dups\t%ld\n",ndups-uniq_dup);
 		printf("%%dup\t%.4f\n", ((double)(ndups-uniq_dup)/nreads)*100);
 	    int uniq_dup = (int)dup_sort.size();
 	    printf("unique-dup seq\t%d\n", uniq_dup);
@@ -554,13 +554,13 @@ int main( int argc, char**argv ) {
 
 		if(uniq_dup > 1) {
 			printf("dup mean\t%.4f\n", (double)ndups/uniq_dup);
-			printf("dup stddev\t%.4f\n", (std_dev((double)uniq_dup, ndups, dupss)));
+			printf("dup stddev\t%.4f\n", (std_dev(uniq_dup, ndups, dupss)));
 		}
 	}
 	printf("qual min\t%d\n", qualmin-phred);
 	printf("qual max\t%d\n", qualmax-phred);
 	printf("qual mean\t%.4f\n", ((double)qualsum/nbase)-phred);
-	printf("qual stdev\t%.4f\n", std_dev((double)nbase,qualsum,qualssq));
+	printf("qual stdev\t%.4f\n", std_dev(nbase,qualsum,qualssq));
 
 	
 	if(gc) {
@@ -573,9 +573,9 @@ int main( int argc, char**argv ) {
 	printf("%%C\t%.4f\n", ((double)ACGTN_count[T_C]/nbase*100));
 	printf("%%G\t%.4f\n", ((double)ACGTN_count[T_G]/nbase*100));
 	printf("%%T\t%.4f\n", ((double)ACGTN_count[T_T]/nbase*100));
-	double ACGT_total  = ACGTN_count[T_A] + ACGTN_count[T_C] + ACGTN_count[T_G] + ACGTN_count[T_T];
+	uint64_t ACGT_total  = ACGTN_count[T_A] + ACGTN_count[T_C] + ACGTN_count[T_G] + ACGTN_count[T_T];
 	printf("%%N\t%.4f\n", ((double)(nbase-ACGT_total)/nbase*100));
-	printf("total bases\t%.0f\n",total_bases);
+	printf("total bases\t%ld\n",total_bases);
 
     if (inputReadError) {   
         printf("error\t%s\n", "error during close, output may be invalid");
@@ -615,7 +615,7 @@ std::string string_format( const std::string &fmt, ... ) {
 	}
 } //end string_format function
 
-double std_dev(double count, double total, double sqsum) {
+double std_dev(uint64_t count, uint64_t total, uint64_t sqsum) {
 	if(debug) {
 		cout << endl;
 		cout << "count " << count << " total " << total << " sqsum " << sqsum << endl;
@@ -624,19 +624,19 @@ double std_dev(double count, double total, double sqsum) {
 	return sqrt(sqsum/(count-1)-(total/count *total/(count-1)));
 }
 
-double quantiles_with_counts(int *v, int start, int end, double p, bool dbug) {
-	int v_size = 0;
-	for(int i=start; i<=end; i++) {
+double quantiles_with_counts(int *v, uint64_t start, uint64_t end, double p, bool dbug) {
+	uint64_t v_size = 0;
+	for(uint64_t i=start; i<=end; i++) {
 		if(dbug) 
 			cout << "i: " << i << " v[i]: " << v[i] << endl;
 		v_size += v[i];
 	}
 	
 	double q = p*(v_size-1);
-	int count_skip = (int) q;
+	uint64_t count_skip = (uint64_t) q;
 	double val = -1;
 	bool v_fill = 0;
-	int v_next = -1;
+	uint64_t v_next = -1;
 
 	if(dbug) {
 		cout << "p : " << p << endl;
@@ -644,8 +644,8 @@ double quantiles_with_counts(int *v, int start, int end, double p, bool dbug) {
 		cout << "q : " << q << endl;
 		cout << "count-skip: " << count_skip << endl;
 	}
-	int tot=0;
-	for(int i=start; i<=end; i++) {
+	uint64_t tot=0;
+	for(uint64_t i=start; i<=end; i++) {
 		tot += v[i];
 		if(tot>count_skip && !v_fill) {
 			val = i;
