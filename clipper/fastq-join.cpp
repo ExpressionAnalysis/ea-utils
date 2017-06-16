@@ -156,7 +156,7 @@ int main (int argc, char **argv) {
 	{
 		for (i=0;i<in_n;++i) {
 			char c=getc(fin[i]);
-			if (c != '@')  {
+			if (c != '@' && c != EOF)  {
 				fprintf(stderr, "%s doesn't appear to be a fastq file (%c)\n", in[i], c);
 				return 1;
 			}
