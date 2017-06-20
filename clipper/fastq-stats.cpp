@@ -25,7 +25,6 @@ const char * VERSION = "1.01 $Id$";
 
 #include <ctype.h>
 #include <stdio.h>
-#include <cinttypes>
 
 void usage( FILE * f ) {
   fprintf( f,
@@ -567,7 +566,7 @@ int main( int argc, char**argv ) {
 	if(gc) {
         // put these where they belong
 		if (debug)
-			printf("gcTotal\t%" PRIu64 "\tgcSum\t%f\n\n", gcTotal, gcSum);
+			printf("gcTotal\t%lu\tgcSum\t%f\n\n", gcTotal, gcSum);
         printf("pct-gc cycle-max\t%d\n", gcCyclemax);
         printf("pct-gc mean\t%.2f\n", 100.0 * gcSum / gcTotal);
     }

@@ -25,7 +25,7 @@ THE SOFTWARE.
 See "void usage" below for usage.
 
 */
-#include <cinttypes>
+
 #include "fastq-lib.h"
 
 #define MAX_BARCODE_NUM 6000
@@ -1074,7 +1074,7 @@ int main (int argc, char **argv) {
 	printf("Id\tCount\tFile(s)\n");
 	uint64_t tot=0;
 	for (i=0;i<=bcnt;++i) {
-		printf("%s\t%" PRIu64, bc[i].id.s, bc[i].cnt);
+		printf("%s\t%lu", bc[i].id.s, bc[i].cnt);
 		tot+=bc[i].cnt;
 		for (j=0;j<f_n;++j) {
 			if (bc[i].out[j])
@@ -1082,7 +1082,7 @@ int main (int argc, char **argv) {
 		}
 		printf("\n");
 	}
-	printf("total\t%" PRIu64 "\n", tot);
+	printf("total\t%lu\n", tot);
 
     if (!io_ok)
         return 3;
