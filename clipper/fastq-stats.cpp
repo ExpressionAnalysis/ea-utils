@@ -153,7 +153,7 @@ int window = 2000000;
 int cyclemax = 35; 
 int gcCyclemax = 100; // to compare with fastqc, seq is rounded to nearest 100 to reduce # of gc models; for < 200 length, this is teh same as max=100
 float gcSum;
-int gcTotal;
+uint64_t gcTotal;
 
 int show_max = 10;
 bool debug = 0;
@@ -565,6 +565,8 @@ int main( int argc, char**argv ) {
 	
 	if(gc) {
         // put these where they belong
+		if (debug)
+			printf("gcTotal\t%lu\tgcSum\t%f\n\n", gcTotal, gcSum);
         printf("pct-gc cycle-max\t%d\n", gcCyclemax);
         printf("pct-gc mean\t%.2f\n", 100.0 * gcSum / gcTotal);
     }
