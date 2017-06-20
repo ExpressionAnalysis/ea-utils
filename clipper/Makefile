@@ -5,7 +5,6 @@ CC=g++
 PREFIX?=/usr
 BINDIR?=$(PREFIX)/bin
 CFLAGS?=-O3 -I. 
-CXXFLAGS=-std=c++0x $(CFLAGS)
 # for debugging:
 # CFLAGS?=-g -I. 
 
@@ -71,7 +70,7 @@ $(PKG).${VER}-${REL}.tar.gz: $(PKG).tar.gz
 
 sparsehash: sparsehash-2.0.3
 	cd sparsehash-2.0.3; ./configure; make
-	mkdir -p sparsehash
+	mkdir sparsehash
 	cp -r sparsehash-2.0.3/src/sparsehash/* sparsehash/
 
 # why the libbam.a doesn't work?  not sure... *.o works
@@ -95,11 +94,8 @@ else
 	$(CC) $(CFLAGS) fastq-lib.cpp tidx/tidx-lib.cpp -o $@ $< -lgsl -lgslcblas
 endif
 
-fastq-multx: fastq-multx.cpp fastq-lib.cpp sparsehash
-	$(CC) $(CXXFLAGS) fastq-multx.cpp fastq-lib.cpp -o $@
-
 fastq-stats: fastq-stats.cpp fastq-lib.cpp gcModel.cpp sparsehash
-	$(CC) $(CXXFLAGS) fastq-lib.cpp gcModel.cpp -o $@ $<
+	$(CC) $(CFLAGS) fastq-lib.cpp gcModel.cpp -o $@ $<
 
 bam-filter:  bam-filter.cpp 
 	$(CC) $(CFLAGS) fastq-lib.cpp -o $@  $< -lbamtools 
