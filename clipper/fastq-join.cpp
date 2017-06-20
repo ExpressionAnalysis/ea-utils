@@ -388,9 +388,17 @@ int main (int argc, char **argv) {
 
 
 	double dev = sqrt((((double)joincnt)*tlensq-pow((double)tlen,2)) / ((double)joincnt*((double)joincnt-1)) );
+	double avg = (double) tlen / (double) joincnt;
+	if(joincnt == 0) { 
+		dev = 0; 
+		avg = 0;
+		} 
+	if(joincnt == 1) { 
+		dev = 0; 
+		} 
 	printf("Total reads: %d\n", nrec);
 	printf("Total joined: %d\n", joincnt);
-	printf("Average join len: %.2f\n", (double) tlen / (double) joincnt);
+	printf("Average join len: %.2f\n", avg);
 	printf("Stdev join len: %.2f\n", dev);
     printf("Version: %s\n", VERSION);
 
