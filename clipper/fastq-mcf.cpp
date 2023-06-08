@@ -525,12 +525,13 @@ int main (int argc, char **argv) {
 					}
 				}
 
-				if ((ns=fin[i].getline(&s, &na)) <=0) {
+				if ((ns=fin[i].getline(&s, &na)) < 0) {
 					// reached EOF
 					if (debug) fprintf(stderr, "Dropping out of sampling loop\n");
 					break;
 				}
-
+                                if (ns == 0) continue;
+                                
 				nq=fin[i].getline(&q, &naq);
 				nq=fin[i].getline(&q, &naq);		// qual is 2 lines down
 
