@@ -529,11 +529,11 @@ int main (int argc, char **argv) {
 					// reached EOF
 					if (debug) fprintf(stderr, "Dropping out of sampling loop\n");
 					break;
-				}
-                                if (ns == 0) continue;
-                                
+				}                                
 				nq=fin[i].getline(&q, &naq);
 				nq=fin[i].getline(&q, &naq);		// qual is 2 lines down
+
+                                if (ns == 0) continue;
 
 				// skip poor quals/lots of N's when doing sampling
 				if (st.st_size > (sampcnt * 500) && (skipped < sampcnt) && poorqual(i, ns, s, q)) {
