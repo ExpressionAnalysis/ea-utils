@@ -533,7 +533,9 @@ int main (int argc, char **argv) {
 				nq=fin[i].getline(&q, &naq);
 				nq=fin[i].getline(&q, &naq);		// qual is 2 lines down
 
-                                if (ns == 0) continue;
+				--ns;                                   // don't count newline for read len
+
+                                if (ns <= 0) continue;
 
 				// skip poor quals/lots of N's when doing sampling
 				if (st.st_size > (sampcnt * 500) && (skipped < sampcnt) && poorqual(i, ns, s, q)) {
@@ -553,7 +555,6 @@ int main (int argc, char **argv) {
 						}
 					}
 				}
-				--ns;                                   // don't count newline for read len
 				++nr;
 				avgns[i] += ns;
 				if (ns > maxns) maxns = ns;
