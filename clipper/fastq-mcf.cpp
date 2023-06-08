@@ -632,7 +632,7 @@ int main (int argc, char **argv) {
         int skipped = 0;
 		while ((nd=fin[i].getline(&d, &nad)) > 0) {
 			if (*d == '@')  {
-				if ((ns=fin[i].getline(&s, &na)) <=0) 
+				if ((ns=fin[i].getline(&s, &na)) < 0) 
 					break;
 				nq=fin[i].getline(&q, &naq);
 				nq=fin[i].getline(&q, &naq);		// qual is 2 lines down
@@ -640,7 +640,7 @@ int main (int argc, char **argv) {
 				--nq; --ns;				// don't count newline for read len
 
 				// skip poor quals/lots of N's when doing sampling (otherwise you'll miss some)
-                if (ns == 0) {  // github issue 46, 53
+                if (ns <= 0) {  // github issue 46, 53
                     ++skipped;
                     continue;
                 }
