@@ -293,13 +293,11 @@ int main (int argc, char **argv) {
 	
 			stat(in[i], &st);
 
-			while ((ns=getline(&s, &na, fin[i])) > 0) {
+			while ((ns=getline(&s, &na, fin[i])) >= 0) {
 				if (*s != '@')  {
 					fprintf(stderr,"Invalid fastq file: %s.\n", in[i]);
 					exit(1);
 				}
-                // ignore zero-length reads
-                if (ns == 0) continue;
 
                 if (bcinheader) {
                     // read in 3 more lines (seq, comment, qual) and ignore them
@@ -310,13 +308,14 @@ int main (int argc, char **argv) {
                     nq=ns;
                }  else {
                     // read in 3 more lines (seq, comment, qual)
-                    if ((ns=getline(&s, &na, fin[i])) <=0)
+                    if ((ns=getline(&s, &na, fin[i])) < 0)
                         break;
 
                     ignore=getline(&q, &ignore_st, fin[i]);
                     nq=getline(&q, &ignore_st, fin[i]);
-
-    				s[--ns]='\0'; q[--nq]='\0';
+                    // ignore zero-length reads
+                    if (ns == 0) continue;
+                    s[--ns]='\0'; q[--nq]='\0';
                 }
 
 // skip if quality is below average
