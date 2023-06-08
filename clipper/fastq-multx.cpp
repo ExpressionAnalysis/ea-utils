@@ -535,7 +535,7 @@ int main (int argc, char **argv) {
 
 // small sample to get lengths
 		double tots=0, totsq=0;
-		while ((ns=getline(&s, &na, gin)) > 0) {
+		while ((ns=getline(&s, &na, gin)) >= 0) {
 			if (*s != '@')  {
 				fprintf(stderr,"Invalid fastq file: %s.\n", in[0]);
 				exit(1);
@@ -549,12 +549,13 @@ int main (int argc, char **argv) {
                     getbcfromheader(s, &ns);
                     printf("bc is %s\n", s);
             } else {
-                if ((ns=getline(&s, &na, gin)) <=0)
+                if ((ns=getline(&s, &na, gin)) < 0)
                     break;
                 ignore=getline(&q, &ignore_st, gin);
                 ignore=getline(&q, &ignore_st, gin);
             }
-
+            
+            if (ns <= 0) continue; 
 			--ns;
 			tots+=ns;
 			totsq+=ns*ns;
