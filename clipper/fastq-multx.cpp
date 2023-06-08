@@ -298,6 +298,8 @@ int main (int argc, char **argv) {
 					fprintf(stderr,"Invalid fastq file: %s.\n", in[i]);
 					exit(1);
 				}
+                // ignore zero-length reads
+                if (ns == 0) continue;
 
                 if (bcinheader) {
                     // read in 3 more lines (seq, comment, qual) and ignore them
