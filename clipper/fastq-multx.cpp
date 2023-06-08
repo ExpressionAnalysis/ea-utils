@@ -293,7 +293,7 @@ int main (int argc, char **argv) {
 	
 			stat(in[i], &st);
 
-			while ((ns=getline(&s, &na, fin[i])) > 0) {
+			while ((ns=getline(&s, &na, fin[i])) >= 0) {
 				if (*s != '@')  {
 					fprintf(stderr,"Invalid fastq file: %s.\n", in[i]);
 					exit(1);
@@ -308,13 +308,14 @@ int main (int argc, char **argv) {
                     nq=ns;
                }  else {
                     // read in 3 more lines (seq, comment, qual)
-                    if ((ns=getline(&s, &na, fin[i])) <=0)
+                    if ((ns=getline(&s, &na, fin[i])) < 0)
                         break;
 
                     ignore=getline(&q, &ignore_st, fin[i]);
                     nq=getline(&q, &ignore_st, fin[i]);
-
-    				s[--ns]='\0'; q[--nq]='\0';
+                    // ignore zero-length reads
+                    if (ns == 0) continue;
+                    s[--ns]='\0'; q[--nq]='\0';
                 }
 
 // skip if quality is below average
@@ -534,7 +535,7 @@ int main (int argc, char **argv) {
 
 // small sample to get lengths
 		double tots=0, totsq=0;
-		while ((ns=getline(&s, &na, gin)) > 0) {
+		while ((ns=getline(&s, &na, gin)) >= 0) {
 			if (*s != '@')  {
 				fprintf(stderr,"Invalid fastq file: %s.\n", in[0]);
 				exit(1);
@@ -548,12 +549,13 @@ int main (int argc, char **argv) {
                     getbcfromheader(s, &ns);
                     printf("bc is %s\n", s);
             } else {
-                if ((ns=getline(&s, &na, gin)) <=0)
+                if ((ns=getline(&s, &na, gin)) < 0)
                     break;
                 ignore=getline(&q, &ignore_st, gin);
                 ignore=getline(&q, &ignore_st, gin);
             }
-
+            
+            if (ns <= 0) continue; 
 			--ns;
 			tots+=ns;
 			totsq+=ns*ns;
